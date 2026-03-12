@@ -22,19 +22,22 @@ multiple screens and audio outputs — a friendlier alternative to restim-style 
 ## Requirements
 
 ### Python packages
-```
+
+```bash
 pip install -r requirements.txt
 ```
 
 ### libmpv (required by python-mpv)
 
 **Windows:**
-1. Download the latest mpv Windows build from https://mpv.io/installation/
+
+1. Download the latest mpv Windows build from [mpv.io/installation](https://mpv.io/installation/)
 2. Extract `mpv-2.dll` (or `libmpv-2.dll`) and place it:
    - Next to `main.py`, OR
    - Anywhere on your system `PATH`
 
 **macOS:**
+
 ```bash
 brew install mpv
 ```
@@ -64,13 +67,50 @@ python main.py
 
 ## Roadmap
 
-- [ ] Funscript sync — load `.funscript` files alongside video, drive haptic output
+### Phase 1 — Sync foundation (current)
+
+- [x] Up to 3 synchronized video/audio slots
+- [x] Per-slot monitor and audio device assignment
+- [x] Unified seek bar, transport controls
 - [ ] Per-slot volume control
 - [ ] Loop mode
 - [ ] Keyboard shortcuts (Space = play/pause, Left/Right = skip)
-- [ ] Session save/restore (remember last file paths and device assignments)
-- [ ] Drift correction — periodic re-sync to keep players aligned over long content
+- [ ] Session save/restore (file paths + device assignments persist between runs)
+- [ ] Drift correction — periodic re-sync for long content
+
+### Phase 2 — Funscript playback
+
+- [ ] Load a `.funscript` file alongside each video slot
+- [ ] Parse funscript actions and fire them in sync with video position
+- [ ] Route haptic signals to the correct serial/USB port per slot
+- [ ] Seek sync carries funscript position too — scrub video, haptic follows
+
+### Phase 3 — Haptic features
+
+- [ ] Connect to haptic devices (serial/Bluetooth/USB) per slot
+- [ ] Real-time funscript → device command translation
+- [ ] Per-device intensity/range calibration
+- [ ] Funscripts authored and refined in **FunscriptForge**, played here
+
+### Phase 4 — Polish
+
 - [ ] PyInstaller packaging (Windows .exe, macOS .app)
+- [ ] Auto-detect connected haptic devices
+- [ ] Multi-funscript layering (e.g. primary + accent track)
+
+---
+
+## Product ecosystem
+
+```text
+FunscriptForge                    eHaptic Studio Player
+──────────────────                ─────────────────────────────
+Analyze funscript structure  →    Load video + funscript per slot
+Transform & refine phrases   →    Sync video + haptic output
+Export polished .funscript   →    Route to correct devices & ports
+```
+
+FunscriptForge is the editing studio. eHaptic Studio Player is the performance engine.
 
 ---
 
