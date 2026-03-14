@@ -1,43 +1,133 @@
-# eHaptic Studio Player
+# SyncPlayer.app
 
-Synchronized multi-screen video and audio player for Windows and macOS.
-Built with Python, PySide6, and libmpv.
+**Synchronized multi-screen playback with device routing.**
 
-The long-term goal is a user-friendly way to play synchronized funscripts across
-multiple screens and audio outputs — a friendlier alternative to restim-style setups.
+One seek bar. Every screen. Every device. All in sync.
+
+Play a video on your 4K monitor, companion view on your phone, estim audio to your device, haptics to whatever you have — all from the same timeline. Mark a favorite moment with one tap. Loop it. Share it. No mouse required once you're watching.
 
 ---
 
-## Features (v0.1 prototype)
+## The Problem It Solves
 
-- Up to 3 synchronized video/audio slots
-- Each slot assigned to a specific monitor
-- Each slot routed to a specific audio output device
-- Single seek bar drives all players simultaneously — sub-frame sync
-- Skip controls: ±5s, ±10s, ±30s
-- Dark theme
+VLC plays video. restim plays estim. Your haptic device has its own app. None of them talk to each other. Syncing them is a manual nightmare and full-screen doesn't survive it.
+
+SyncPlayer.app is the hub. It plays everything. It routes everything. It stays in sync when you seek, skip, or loop.
+
+---
+
+## What It Does
+
+```
+Video           → any monitor, AI upscaled to match display resolution
+Estim audio     → dedicated audio port (restim embedded, two instances)
+Haptics         → serial / USB / audio-channel routing
+Phone           → companion view + touch remote (seek, skip, favorite, loop)
+```
+
+All driven by the same pack. All synced to the same timestamp.
+
+---
+
+## The Pack
+
+Everything for one scene lives in one folder:
+
+```
+my-scene/
+  my-scene.mp4
+  my-scene.funscript
+  my-scene.alpha.funscript
+  my-scene.beta.funscript
+  my-scene.pulse_frequency.funscript
+  my-scene.alpha-prostate.funscript
+  my-scene.beta-prostate.funscript
+  my-scene.estim.mp3                  <- pre-rendered estim audio (optional)
+  my-scene.favorites.json             <- your marked moments
+```
+
+Drop the folder. Everything loads. Press play.
+
+---
+
+## Timestamps - A First-Class Feature
+
+While playing, tap once to mark a favorite. Start and end. No stopping. No menus.
+
+```json
+{
+  "favorites": [
+    { "label": "opening", "start": 42.1, "end": 67.4 },
+    { "label": "peak",    "start": 183.0, "end": 210.5 }
+  ]
+}
+```
+
+- **Loop a favorite** - tap it. All devices loop that section.
+- **Build a playlist** - chain favorites across multiple scenes.
+- **Share timestamps** - .favorites.json travels with the pack.
+- **Feed back to Forge** - favorites become phrase suggestions in FunScriptForge.
+
+---
+
+## Multi-Screen Setup
+
+Each output is optimized for its display:
+
+```
+4K monitor      - main view, upscaled
+Ultrawide       - panoramic / immersive
+Phone           - 1080p companion + touch remote
+VR headset      - stereoscopic 3D (coming)
+```
+
+---
+
+## Estim Routing
+
+Two restim instances. Same timeline. Different audio ports.
+
+- **Instance 1**: alpha / beta / pulse_frequency pack -> audio port A
+- **Instance 2**: prostate pack -> audio port B
+
+User maps which pack goes to which port. restim handles the audio generation including 17 built-in movement patterns, dual vibration oscillators, A/B test mode, map-to-edge transform, and much more.
+
+Powered by diglet48/restim: https://github.com/diglet48/restim
+
+---
+
+## The Ecosystem
+
+```
+FunScriptForge Explorer  ->  FunScriptForge  ->  funscript-tools  ->  SyncPlayer.app
+   originate                  edit/shape          estim character       play everything
+```
+
+Funscripts are the connective tissue. Every tool reads and writes them.
+
+---
+
+## Tech Stack
+
+- **mpv** (https://mpv.io) - frame-accurate, cross-platform media engine
+- **python-mpv** (https://github.com/jaseg/python-mpv) - Python bindings to libmpv
+- **PySide6** (https://wiki.qt.io/Qt_for_Python) - Qt6 UI framework
+- **diglet48/restim** (https://github.com/diglet48/restim) - estim audio generation engine
 
 ---
 
 ## Requirements
 
-### Python packages
-
+**Python packages:**
 ```bash
 pip install -r requirements.txt
 ```
 
-### libmpv (required by python-mpv)
+**libmpv:**
 
-**Windows:**
+Windows - download from https://mpv.io/installation/, place mpv-2.dll next to main.py.
 
-1. Download the latest mpv Windows build from [mpv.io/installation](https://mpv.io/installation/)
-2. Extract `mpv-2.dll` (or `libmpv-2.dll`) and place it:
-   - Next to `main.py`, OR
-   - Anywhere on your system `PATH`
-
-**macOS:**
-
+macOS:
 ```bash
 brew install mpv
 ```
@@ -52,66 +142,33 @@ python main.py
 
 ---
 
-## Usage
+## Current State (v0.1 prototype)
 
-1. For each slot you want active, check **Enable this slot**
-2. Click **Browse…** to select a video or audio file
-3. Choose which **Monitor** the player window should appear on
-4. Choose which **Audio output** device to use
-5. Click **Launch Players** — fullscreen windows open on the assigned monitors
-6. Use **▶ Play**, **⏹ Stop**, skip buttons, or the seek bar to control all players together
-7. Press **Escape** in any player window to close it
-8. Click **Close Players** to tear everything down
+Working today:
+- Up to 3 synchronized video/audio slots
+- Per-slot monitor and audio device assignment
+- Unified seek bar - sub-frame sync
+- Transport controls: play, pause, stop, skip
 
----
-
-## Roadmap
-
-### Phase 1 — Sync foundation (current)
-
-- [x] Up to 3 synchronized video/audio slots
-- [x] Per-slot monitor and audio device assignment
-- [x] Unified seek bar, transport controls
-- [ ] Per-slot volume control
-- [ ] Loop mode
-- [ ] Keyboard shortcuts (Space = play/pause, Left/Right = skip)
-- [ ] Session save/restore (file paths + device assignments persist between runs)
-- [ ] Drift correction — periodic re-sync for long content
-
-### Phase 2 — Funscript playback
-
-- [ ] Load a `.funscript` file alongside each video slot
-- [ ] Parse funscript actions and fire them in sync with video position
-- [ ] Route haptic signals to the correct serial/USB port per slot
-- [ ] Seek sync carries funscript position too — scrub video, haptic follows
-
-### Phase 3 — Haptic features
-
-- [ ] Connect to haptic devices (serial/Bluetooth/USB) per slot
-- [ ] Real-time funscript → device command translation
-- [ ] Per-device intensity/range calibration
-- [ ] Funscripts authored and refined in **FunscriptForge**, played here
-
-### Phase 4 — Polish
-
-- [ ] PyInstaller packaging (Windows .exe, macOS .app)
-- [ ] Auto-detect connected haptic devices
-- [ ] Multi-funscript layering (e.g. primary + accent track)
+Coming next:
+- Pack loading (drop a folder, everything loads)
+- restim integration (two instances, port routing)
+- Phone remote
+- Timestamps / favorites
+- AI upscaling per output
 
 ---
 
-## Product ecosystem
+## Credits
 
-```text
-FunscriptForge                    eHaptic Studio Player
-──────────────────                ─────────────────────────────
-Analyze funscript structure  →    Load video + funscript per slot
-Transform & refine phrases   →    Sync video + haptic output
-Export polished .funscript   →    Route to correct devices & ports
-```
+SyncPlayer.app builds on the work of:
 
-FunscriptForge is the editing studio. eHaptic Studio Player is the performance engine.
+- **diglet48** (https://github.com/diglet48) - restim (https://github.com/diglet48/restim): years of estim signal processing, electrode math, pulse algorithms, 17 movement patterns, sensor integration. An extraordinary body of work.
+- **edger477** (https://github.com/edger477) - funscript-tools: the 1D->2D funscript conversion pipeline
+- **mpv project** (https://mpv.io) - the media engine under everything
+- **Qt / PySide6** (https://wiki.qt.io/Qt_for_Python) - the UI framework
 
 ---
 
-*© 2026 [Liquid Releasing](https://github.com/liquid-releasing). Licensed under the MIT License.*
+(c) 2026 Liquid Releasing (https://github.com/liquid-releasing). MIT License.
+SyncPlayer.app is a trademark of Liquid Releasing.
