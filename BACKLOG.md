@@ -60,3 +60,11 @@ Items are roughly grouped by phase but not strictly ordered.
 - [ ] Timeline editor — trim/loop regions within a session
 - [ ] Playlist mode — queue multiple sessions and play them sequentially
 - [ ] SaaS / cloud session sharing (load session from URL)
+
+### Develop architecture for haptics
+
+- The **renderer architecture** (JSON → WAV, JSON → bHaptics) 
+- The **player architecture** (timeline scheduler) to go into syncplayer 
+- The **device abstraction layer**  
+- The **multi‑device playback loop**  to go in syncplayer
+- add to the considerations, architecture, loop playback features
