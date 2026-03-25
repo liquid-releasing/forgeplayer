@@ -7,12 +7,24 @@ Items are roughly grouped by phase but not strictly ordered.
 
 ## Phase 1 — Sync Foundation (in progress)
 
+- [ ] rename eHaptic Studio Player to ForgePlayer
+- [ ] rename syncplayer in this project to ForgePlayer (syncplayer project is the video wall insdustrial version)
 - [ ] Loop mode (loop a single file or all slots)
 - [ ] Keyboard shortcuts in ControlWindow (Space = play/pause, Left/Right = skip ±5s)
 - [ ] Drift correction — periodic re-sync for long content (detect clock drift, nudge lagging players)
 - [ ] Show "no mpv.dll found" friendly error dialog on Windows startup
 - [ ] Per-player window title bar showing filename
 - [ ] Remember control window size/position between sessions
+
+---
+
+## Phase 1.1 - UI controller
+
+- [ ] Review spec, discuss, make changes
+- [ ] Revise architecture as needed
+- [ ] Incroporate controller for app (no keyboard)
+- [ ] support device selection
+- [ ] support full screen video with multiple files fitting into the right window
 
 ---
 
