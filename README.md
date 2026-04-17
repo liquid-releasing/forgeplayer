@@ -12,7 +12,7 @@ Play a video on your 4K monitor, companion view on your phone, estim audio to yo
 
 VLC plays video. restim plays estim. Your haptic device has its own app. None of them talk to each other. Syncing them is a manual nightmare and full-screen doesn't survive it.
 
-SyncPlayer.app is the hub. It plays everything. It routes everything. It stays in sync when you seek, skip, or loop.
+ForgePlayer.app is the hub. It plays everything. It routes everything. It stays in sync when you seek, skip, or loop.
 
 ---
 
@@ -99,7 +99,7 @@ Powered by diglet48/restim: https://github.com/diglet48/restim
 ## The Ecosystem
 
 ```
-FunScriptForge Explorer  ->  FunScriptForge  ->  funscript-tools  ->  SyncPlayer.app
+FunScriptForge Explorer  ->  FunScriptForge  ->  funscript-tools  ->  ForgePlayer.app
    originate                  edit/shape          estim character       play everything
 ```
 
@@ -161,7 +161,7 @@ Coming next:
 
 ## Credits
 
-SyncPlayer.app builds on the work of:
+ForgePlayer.app builds on the work of:
 
 - **diglet48** (https://github.com/diglet48) - restim (https://github.com/diglet48/restim): years of estim signal processing, electrode math, pulse algorithms, 17 movement patterns, sensor integration. An extraordinary body of work.
 - **edger477** (https://github.com/edger477) - funscript-tools: the 1D->2D funscript conversion pipeline
@@ -171,4 +171,4 @@ SyncPlayer.app builds on the work of:
 ---
 
 (c) 2026 Liquid Releasing (https://github.com/liquid-releasing). MIT License.
-SyncPlayer.app is a trademark of Liquid Releasing.
+ForgePlayer.app is a trademark of Liquid Releasing.
