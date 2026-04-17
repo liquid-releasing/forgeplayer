@@ -1,4 +1,4 @@
-# SyncPlayer.app
+# ForgePlayer.app
 
 **Synchronized multi-screen playback with device routing.**
 
