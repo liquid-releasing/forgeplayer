@@ -274,7 +274,7 @@ Friendly labels persist in `preferences.json` keyed by the OS-level stable devic
 │   │                                                                          │   │
 ├───┴──────────────────────────────────────────────────────────────────────────┴───┤
 │ Page 3 / 40 · showing 21-30 of 395                                               │
-│ [All]  [Recent]  [Favorites ★]  [With preset ✎]   Sort: ▾ name · date · length   │
+│ [All] [Recent] [Favorites ★] [With preset ✎] [Playlists ▶]  Sort: ▾ name · date  │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -291,12 +291,24 @@ Friendly labels persist in `preferences.json` keyed by the OS-level stable devic
 ### Interactions
 
 - **Tap card** → load video + all detected assets + preset → auto-switch to Live panel, paused at 00:00
-- **Long-press** → contextual menu (Play, Edit preset, Remove, Show in folder)
+- **Long-press** → enters multi-select mode: card gets a checkmark, bottom action bar appears with `Play now · Queue next · Add to playlist…`
 - **Vertical scroll** → smooth scroll through rows
 - **Chevron `◀` / `▶` or swipe** → jump one page forward/back (10 videos)
 - **Search** → live filter as you type
-- **Filter chips** — All / Recent / Favorites / With preset
+- **Filter chips** — All / Recent / Favorites / With preset / Playlists
 - **Sort** — name / date added / duration
+
+### Scene playlists (alpha)
+
+Ordered lists of whole scenes. Built from Library multi-select. When one finishes, the next begins automatically.
+
+- **Create** — long-press a card → `Add to playlist…` → pick existing or type a new name
+- **Browse** — tap the `Playlists ▶` filter chip; grid switches to playlist cards, each showing name + count + runtime
+- **Play** — tap a playlist card → starts the first scene in Live; transport "Next chapter" crosses into the next scene when the current one ends
+- **Edit** — long-press a playlist card → reorder / remove / rename / delete
+- **Storage** — one file per playlist at `~/.forgeplayer/playlists/<name>.json`: `{ "name": "...", "schema_version": 1, "entries": [{ "scene": "absolute/path/to/victoriaoats.mp4" }, ...] }`
+
+**Moments playlists** (timestamp ranges across scenes) are **Phase 2** — they need the favorites data model first.
 
 ### Scaling to hundreds of videos
 
@@ -387,26 +399,82 @@ If alpha encounters multi-destination config, log a warning (`multi-destination 
 
 ---
 
-## 9. Folder-load conventions
+## 9. Folder-load conventions — the "pack" model
 
-When the user loads a folder (either via 📁 Load folder in Live, or by tapping a card in Library), the app scans for files and associates them according to the configured convention.
+ForgePlayer ingests the same `{stem}.{suffix}.{ext}` pack that **FunscriptForge**, **ForgeAssembler**, and **ForgeGen** already emit. No renaming required.
 
-### Scan rules
+### Canonical pack layout
 
-| File type | Detected by | Auto-action |
+**Required:**
+
+| File | Role |
+|---|---|
+| `{stem}.mp4` / `.mkv` / `.webm` | Main video |
+| `{stem}.funscript` | Main stroke funscript |
+
+**Optional multi-resolution** — player picks the highest-resolution video in the pack; one funscript set serves all resolutions (funscripts are time-based, not pixel-based):
+
+| File | Role |
+|---|---|
+| `{stem}.1080p30.mp4` / `{stem}.4k60.mp4` / etc. | Alt resolutions of same scene |
+
+**Optional channel funscripts** (FunscriptForge / ForgeAssembler):
+
+| File | Channel |
+|---|---|
+| `{stem}.{roll\|pitch\|twist\|surge\|sway}.funscript` | Multi-axis (5-DoF) |
+| `{stem}.alpha.funscript` / `.beta.funscript` / `.pulse_frequency.funscript` | 3-phase estim |
+| `{stem}.alpha-prostate.funscript` / `.beta-prostate.funscript` | Prostate estim |
+
+**Optional pre-rendered audio** (FunscriptForge):
+
+| File | Role |
+|---|---|
+| `{stem}.estim.mp3` | Pre-rendered estim audio; overrides live synthesis |
+| `{stem}.{device}.wav` | Named device pre-render (e.g. `.legacy.wav`, `.stereostim.wav`) |
+
+**Optional player state:**
+
+| File | Role |
+|---|---|
+| `{stem}.forgeplayer.json` | Per-video preset (crop, routing, notes) |
+| `{stem}.favorites.json` | Timestamp favorites (Phase 2) |
+
+**Ignored:** `{stem}.heatmap.png`, `{stem}.forgetmpl`, editor scratch files.
+
+### Example pack
+
+```text
+victoriaoats/
+  victoriaoats.mp4                              ← 4K — picked by player
+  victoriaoats.1080p30.mp4                      ← alt resolution
+  victoriaoats.funscript                        ← main stroke
+  victoriaoats.alpha.funscript                  ← 3-phase estim
+  victoriaoats.beta.funscript
+  victoriaoats.pulse_frequency.funscript
+  victoriaoats.alpha-prostate.funscript         ← prostate
+  victoriaoats.beta-prostate.funscript
+  victoriaoats.roll.funscript                   ← multi-axis
+  victoriaoats.pitch.funscript
+  victoriaoats.estim.mp3                        ← pre-rendered estim
+  victoriaoats.legacy.wav                       ← device pre-render
+  victoriaoats.forgeplayer.json                 ← per-video preset
+  victoriaoats.heatmap.png                      ← ignored
+```
+
+### Three load modes
+
+- **Auto-match by stem** — strict; unassociated files ignored.
+- **Single-file mode** — minimal; only the video, user assigns everything else manually.
+- **Flexible (default)** — auto-associate by stem; on mismatch (e.g. Edger-style `bg_music_track3.mp3` alongside `scene.mp4`), prompt with channel dropdowns.
+
+### Upstream compatibility
+
+| Tool | Output | Fit |
 |---|---|---|
-| `*.mp4` / `*.mkv` / `*.webm` | extension | Load as main video |
-| `*.funscript` | extension + stem | Associate with video by stem match |
-| `*.main.funscript` / `*.multi_axis.funscript` / `*.prostate.funscript` / etc. | stem suffix | Route to corresponding channel |
-| `estim/` / `multi_axis/` / `prostate/` / `audio_estim/` subfolders | folder name | Pull channel funscripts from there |
-| `*.mp3` / `*.wav` / `*.flac` | extension + stem | Associate as audio overlay; if stem differs from video, prompt in Flexible mode |
-| `*.forgeplayer.json` | extension | Load as per-video preset |
-
-### Conventions
-
-- **Auto-match by stem** — strict: only files with the same basename as the video are auto-associated. Unassociated files are ignored.
-- **Single-file mode** — minimal: only load the video; everything else is manual.
-- **Flexible (default)** — auto-associate by stem where possible; for stem mismatches (like Edger-style different-stem audio files), show a lightweight prompt with "source: `bg_music_track3.mp3` — assign to?" with channel dropdowns.
+| FunscriptForge | Full pack (funscripts + channel variants + pre-rendered audio) | ✅ direct |
+| ForgeAssembler | `{stem}.mp4` + `{stem}.funscript` + multi-axis + alpha/beta + prostate | ✅ direct |
+| ForgeGen | `{stem}.funscript` only (stroke from audio beats) | ✅ as main stroke |
 
 ---
 
@@ -558,6 +626,7 @@ Deploys to `liquid-releasing.github.io/forgeplayer/` via the same `docs.yml` wor
 - ✅ Friendly audio-device labels
 - ✅ Per-destination audio delay (ms) for latency compensation (Bluetooth, HDMI pipeline) — exposed as an "Advanced" subsection in Setup → Audio routing, default 0 ms, mapped to libmpv's `audio-delay` property
 - ✅ Library with search, filters, thumbnails, virtualized grid
+- ✅ **Scene playlists** — ordered lists of whole scenes, built via Library multi-select, stored as JSON per playlist
 - ✅ Chapter markers on seek bar + chevron jump
 - ✅ Rebrand from "eHaptic Studio Player" to "ForgePlayer"
 - ✅ PyInstaller bundles for Windows / macOS / Linux
@@ -568,7 +637,11 @@ Deploys to `liquid-releasing.github.io/forgeplayer/` via the same `docs.yml` wor
 ### Explicitly OUT (deferred phases)
 
 - ❌ **Funscript → audio conversion (restim-style playback)** — Phase 2
+- ❌ **Moments playlists** (timestamp ranges across scenes) — Phase 2; needs favorites data model first
+- ❌ **Timestamp favorites** (⚑ Mark during playback, `{stem}.favorites.json`) — Phase 2; foundational for moments playlists
+- ❌ **Transport state machine** (which buttons are active during load / buffering / seeking / ended states) — Phase 2; alpha uses naive "always enabled" behavior
 - ❌ **bhaptics `.tact` integration** — Phase 3
+- ❌ **Theme system** (Forge industrial, Neon, light modes — see `ui_design/` for prior visual language work) — Phase 3; alpha is dark-only
 - ❌ **Real-time audio → haptics (live mode / bREadbeats-style)** — Phase 5
 - ❌ **Bluetooth audio** — Phase 2 (latency + presence flakiness)
 - ❌ **Fan-out routing** (one source → many devices) — Phase 2; schema supports it from alpha, impl doesn't
@@ -577,17 +650,14 @@ Deploys to `liquid-releasing.github.io/forgeplayer/` via the same `docs.yml` wor
 - ❌ **7.1 channel audio routing** — Phase 3
 - ❌ **Network / LAN multi-machine sync** — no ETA
 - ❌ **Timeline editor / loop regions** — no ETA
-- ❌ **Playlist / cue list** — no ETA
 
 ---
 
 ## 15. Open questions
 
-1. **Repo rename scope** — rename `ehaptics-studio-player/` folder locally and push as initial commit to `liquid-releasing/forgeplayer`, or keep the old name? Recommended: full rename.
-2. **Branding crops** — user picked `Copilot_20260322_105624.png` as the source; needs tightened square icon + wordmark crops (in progress, crop script landed at `branding/_crop_assets.py`).
-3. **Chevrons in Setup** — user confirmed "yes on chevrons for each section"; Setup sections are: Monitors → Audio → Library → Preferences.
-4. **Chapter jump direction** — at the first or last chapter, wrap around or hit a wall? (Suggestion: wall, with button dimmed.)
-5. **Preferences file location on macOS / Linux** — `~/.forgeplayer/preferences.json` on all three, or follow XDG Base Directory on Linux (`$XDG_CONFIG_HOME/forgeplayer/`)? Suggestion: simple dot-folder on all three for consistency with FunscriptForge / ForgeAssembler.
+1. **Chapter jump wrap** — at the first or last chapter, wrap around or hit a wall? (Suggestion: wall, with button dimmed.)
+2. **Preferences file location on macOS / Linux** — `~/.forgeplayer/preferences.json` on all three, or follow XDG Base Directory on Linux (`$XDG_CONFIG_HOME/forgeplayer/`)? Suggestion: simple dot-folder on all three for consistency with FunscriptForge / ForgeAssembler.
+3. **Scene playlist crossover** — when a scene in a playlist ends, should transport auto-advance to the next scene, or pause and require an explicit `▶` tap? (Suggestion: auto-advance, with a Preferences toggle to override.)
 
 ---
 
