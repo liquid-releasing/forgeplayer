@@ -22,7 +22,30 @@ The current user workflow is "multiple VLC windows manually sync'd" — which do
 
 ### v0.0.1-alpha scope — one-line summary
 
-**Same video on three walls, frame-perfect sync, touch-operated controller, three-destination audio (OS default + two USB dongles), folder-auto-load with JSON presets.** Funscript-to-audio conversion, Bluetooth audio, fan-out routing, and haptic-device integration are all Phase 2+.
+**Same video on one-to-three walls, frame-perfect sync, mouse-or-touch operator console, multi-destination audio (OS default + USB dongles), folder-auto-load with JSON presets.** Funscript-to-audio conversion, Bluetooth audio, fan-out routing, and haptic-device integration are all Phase 2+.
+
+### Reference configurations
+
+Two user setups shape the alpha design. Both must work well; both ship in the same binary.
+
+| Config | Setup | Role |
+|---|---|---|
+| **Baseline** (realistic user) | Laptop + 1 external monitor + 1-2 USB audio dongles. Mouse/trackpad controls the operator console; external monitor plays fullscreen. | Alpha's shipping criterion: works great here on day 1 |
+| **Flagship** (video-wall rig) | Desktop with high-end GPU (e.g. RTX 4070) driving 2-3 external walls, plus a Prechen 12.3" 1920×720 touchscreen as the operator console. Multiple USB audio dongles. | Scale-up demo / power-user configuration |
+
+The same code handles both. Wall count adapts from detected displays (QScreen enumeration); controller = whichever display is explicitly marked `controller` (or is smallest/touch-capable as a fallback). The "laptop + 1 wall" user should not feel like a second-class citizen.
+
+### v0.0.1-alpha shipping criteria
+
+ForgePlayer ships when a **baseline-config user** can:
+
+1. Load a FunscriptForge / ForgeAssembler pack folder
+2. Play it fullscreen on their external monitor
+3. Hear audio on their USB dongle
+4. Scrub the seek bar smoothly, jump chapters
+5. Have the result look and feel **noticeably better than their current VLC/WMP-wrapped workflow**
+
+Everything above that bar is the flagship config. Everything below the bar blocks shipping.
 
 ---
 
@@ -78,7 +101,16 @@ v0.0.1-alpha architecture:
 
 One decoder owns the timeline. Three render contexts pull frames from it — frame-perfect sync by construction because there's only one clock. Audio goes through a mixer that splits into the configured destinations.
 
-libmpv's render API (`mpv_render_context`) supports multiple render contexts against a single `mpv_handle`. Each context can have its own video filter chain (e.g. the ultrawide's crop filter), so the three walls can render the same video at different aspect treatments without decoder duplication.
+libmpv's render API (`mpv_render_context`) supports multiple render contexts against a single `mpv_handle`. `python-mpv` exposes `MpvRenderContext` with the full C API surface (verified 2026-04-22 via source inspection of `jaseg/python-mpv`).
+
+**Per-monitor crop is a GL-layer concern, not a libmpv concern.** The `vf` (video filter) property is decoder-scoped — setting it affects all render contexts uniformly. Our architecture:
+
+- Each playback window is a `QOpenGLWidget` with its own GL context
+- Each widget creates its own `MpvRenderContext` against the shared `mpv_handle`
+- Full-frame walls render libmpv's output directly to their framebuffer
+- **Ultrawide wall:** runs a small fragment shader that samples libmpv's output with UV coordinates computed from the active crop preset (top/middle/bottom/etc.) — producing the cropped band in-place at GPU cost negligible compared to decode
+
+This keeps the single-decoder guarantee intact (one clock, frame-perfect sync) while enabling per-monitor aspect treatments. The crop math runs once in a tiny fragment shader per affected wall, not in the libmpv pipeline.
 
 ### Robust per-monitor window placement
 
@@ -88,6 +120,40 @@ Historical pain: VLC and similar players handle multi-monitor placement poorly �
 - Qt's screen enumeration is stable and includes DPI / aspect metadata, so wall-to-monitor assignment is by unambiguous screen ID (not index, not position)
 - Render contexts inside each window let libmpv fit the video to the window's pixels — never the other way around. Aspect mismatches result in letterbox (for narrower sources) or ultrawide-crop (for 16:9 source on wide monitors), never cross-monitor spill
 - No "pick a monitor by dragging the window" flow — slots are assigned once in Setup, persisted in preferences.json, honored on every launch
+
+### Quality defaults — mpv configuration
+
+ForgePlayer ships an `mpv-defaults.conf` baked into the bundle that configures libmpv for image-quality-over-speed. Every `mpv.MPV()` instance loads it at startup. Users can override via `~/.forgeplayer/mpv-user.conf` (loaded after defaults).
+
+Baseline defaults:
+
+```
+vo=gpu-next
+hwdec=auto-safe
+scale=ewa_lanczossharp
+cscale=ewa_lanczossharp
+dscale=mitchell
+video-sync=display-resample
+interpolation=yes
+deband=yes
+dither-depth=auto
+target-colorspace-hint=yes
+```
+
+**Why these:**
+
+| Setting | Purpose |
+|---|---|
+| `vo=gpu-next` | Newer mpv video output with modern color pipeline + HDR handling |
+| `hwdec=auto-safe` | Hardware decode (NVDEC on NVIDIA, QSV on Intel, AMF on AMD, VideoToolbox on Apple) — falls back to software when unsupported |
+| `scale=ewa_lanczossharp` | Best-in-class spatial upscaler for 1080p→4K, the canonical mpv recommendation |
+| `cscale` / `dscale` | Matched chroma upscaler and a clean downscaler for 4K→1080p on smaller monitors |
+| `video-sync=display-resample` | Frame pacing locked to display refresh → eliminates judder on non-60Hz content |
+| `interpolation=yes` | Motion smoothness on 24p / 30p content |
+| `deband=yes` | Kills gradient banding on HDR and 10-bit content |
+| `target-colorspace-hint=yes` | Passes HDR10 metadata through to the monitor when Windows/macOS HDR is enabled |
+
+The quality story is documented for end users in `docs/quality.md` (GPU support matrix, HDR behavior, upscaling explanation, how to override defaults).
 
 ### Independent-slots mode (secondary, less-prominent)
 
@@ -610,31 +676,52 @@ Deploys to `liquid-releasing.github.io/forgeplayer/` via the same `docs.yml` wor
 
 ---
 
-## 14. v0.0.1-alpha — scope gates
+## 14. Alpha phasing — v0.0.1 and v0.0.2 scope gates
 
-### Explicitly IN
+Alpha ships in two stages. Each stage has its own shipping criterion. Everything in 0.0.2 is validated against a 0.0.1 user who has upgraded their rig.
 
-- ✅ Same-video-on-three-walls with single-decoder / N-render architecture
-- ✅ Independent-slots mode (secondary toggle, carries forward from v0.1 prototype)
-- ✅ Auto-detect monitors + per-monitor rendering (4K / 1080p / ultrawide)
-- ✅ Ultrawide crop with 5 vertical-anchor presets
-- ✅ Touch-optimized operator console at 1920×720 (Prechen)
+### v0.0.1-alpha — "baseline works great"
+
+**Shipping criterion:** a user with a laptop + 1 external monitor + 1 USB audio dongle can load a FunscriptForge / ForgeAssembler pack folder, play it fullscreen on their external, hear audio on their dongle, scrub the seek bar smoothly, jump chapters, and find the result **noticeably better** than their current VLC / WMP-wrapped workflow.
+
+**Explicitly IN for 0.0.1:**
+
+- ✅ Single-decoder architecture with one render context (laptop = controller, 1 external = wall)
+- ✅ `QOpenGLWidget` + `MpvRenderContext` against a shared `mpv_handle` (foundation for 0.0.2 multi-render)
+- ✅ **Quality defaults** — `mpv-defaults.conf` with gpu-next, ewa_lanczossharp, HDR pass-through, display-resample (see Section 3)
+- ✅ Auto-detect monitors; "laptop internal = controller, smallest / touch-capable / explicit assignment" resolution
+- ✅ Mouse-or-touch operator console — same code path, degrades from Prechen touch to laptop trackpad
 - ✅ Three-panel architecture (Live / Setup / Library)
 - ✅ JSON presets (global + per-video override)
-- ✅ Folder-load conventions (Auto / Single-file / Flexible, default Flexible)
-- ✅ Three-destination audio (OS default + 2 USB dongles)
-- ✅ Friendly audio-device labels
+- ✅ Folder-load conventions (Auto / Single-file / Flexible, default Flexible) — canonical `{stem}.{suffix}.funscript` pack
+- ✅ Multi-destination audio: OS default + 1 USB dongle validated (schema supports more)
+- ✅ Friendly audio-device labels, keyed by stable OS device ID
 - ✅ Per-destination audio delay (ms) for latency compensation (Bluetooth, HDMI pipeline) — exposed as an "Advanced" subsection in Setup → Audio routing, default 0 ms, mapped to libmpv's `audio-delay` property
 - ✅ Library with search, filters, thumbnails, virtualized grid
 - ✅ **Scene playlists** — ordered lists of whole scenes, built via Library multi-select, stored as JSON per playlist
 - ✅ Chapter markers on seek bar + chevron jump
 - ✅ Rebrand from "eHaptic Studio Player" to "ForgePlayer"
-- ✅ PyInstaller bundles for Windows / macOS / Linux
+- ✅ PyInstaller bundles for Windows / macOS / Linux (Ubuntu 24.04 LTS reference)
 - ✅ 3-platform CI + release automation to `forgeplayer-releases`
 - ✅ Landing site at forgeplayer.app
-- ✅ MkDocs docs
+- ✅ MkDocs docs — includes `docs/quality.md` and `docs/hdr-content.md`
 
-### Explicitly OUT (deferred phases)
+### v0.0.2-alpha — "ultrawide + scale-up"
+
+**Shipping criterion:** a 0.0.1 user who plugs in an ultrawide monitor (or a user with the full 3-wall rig) gets proper per-monitor crop, multi-wall same-video-mirrored playback with frame-perfect sync, and can plug in the Prechen touchscreen as the controller.
+
+**Explicitly IN for 0.0.2:**
+
+- ✅ Ultrawide monitor support (second external display)
+- ✅ Per-monitor crop via GL UV fragment shader — 5 vertical-anchor presets
+- ✅ 2-3 wall same-video-mirrored architecture (N=2 and N=3 render contexts on the shared `mpv_handle`)
+- ✅ Independent-slots mode (secondary toggle, carries forward from v0.1 prototype)
+- ✅ Prechen 12.3" 1920×720 touchscreen as dedicated controller (touch event plumbing)
+- ✅ Multi-destination audio validated up to 3 dongles
+- ✅ Any 0.0.1 gaps surfaced during user testing
+- ✅ Any features cut from 0.0.1 that turned out to be essential
+
+### Explicitly OUT (Phase 2+)
 
 - ❌ **Funscript → audio conversion (restim-style playback)** — Phase 2
 - ❌ **Moments playlists** (timestamp ranges across scenes) — Phase 2; needs favorites data model first
