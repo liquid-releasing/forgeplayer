@@ -8,3 +8,6 @@
 *.mp3
 *.wav
 *.m4v
+
+# Test media — user's local sample packs (Edger format, .forge subfolders, etc.)
+test_media/
