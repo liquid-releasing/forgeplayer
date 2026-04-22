@@ -1,4 +1,4 @@
-# eHaptic Studio Player — Feature Backlog
+# ForgePlayer — Feature Backlog
 
 Ideas and future features not yet scheduled for implementation.
 Items are roughly grouped by phase but not strictly ordered.
@@ -63,6 +63,22 @@ Items are roughly grouped by phase but not strictly ordered.
 - [ ] Auto-update check (point to funscriptforge-releases or dedicated release feed)
 - [ ] In-app mpv.dll download helper for Windows users
 - [ ] Theming / custom accent color
+
+---
+
+## Phase 5 — Live Audio-to-Haptic Mode
+
+- [ ] Real-time audio analysis → haptic output without a pre-authored funscript
+- [ ] WASAPI loopback capture (Windows) / BlackHole (macOS) — listen to what's playing
+- [ ] Beat detection + BPM lock from live audio stream
+- [ ] Motion generation: map beats/energy to haptic intensity curves in real time
+- [ ] Per-slot mode toggle: "Funscript" (pre-authored) vs "Live" (audio-reactive)
+- [ ] Sensitivity / intensity controls for live mode
+
+> **Reference:** [bREadbeats](https://github.com/breadfan69-2/bREadbeats) by breadfan69-2 —
+> real-time music→motion generator for Restim. Source-available (non-commercial license).
+> Study the approach for inspiration; cannot use code or models commercially.
+> Consider reaching out to the author about collaboration.
 
 ---
 
