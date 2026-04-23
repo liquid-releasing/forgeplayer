@@ -327,6 +327,25 @@ class ControlWindow(QMainWindow):
             )
             return
 
+        # Library activation always starts a fresh unsaved session. Without
+        # this, clicking a different scene while a loaded session file was
+        # still active would let Save silently overwrite the old file with
+        # the new scene's slot config. See 2026-04-23 dogfood: user loaded
+        # Magik from Library with Euphoria.4k60 session still active, hit
+        # Save, and overwrote Euphoria's session file.
+        self._session_path = ""
+        name_seed = (
+            choices.video.path if choices.video
+            else (choices.audio.path if choices.audio else entry.name)
+        )
+        new_name = (
+            os.path.splitext(os.path.basename(name_seed))[0]
+            if os.path.sep in name_seed or os.path.altsep and os.path.altsep in name_seed
+            else entry.name
+        )
+        self._session_name.setText(new_name)
+        self.setWindowTitle(f"ForgePlayer — {new_name}")
+
         # Name the session from the primary media file.
         primary = choices.video.path if choices.video else (
             choices.audio.path if choices.audio else ""
@@ -744,9 +763,11 @@ class ControlWindow(QMainWindow):
         self.setWindowTitle("ForgePlayer — Untitled Session")
 
     def _on_session_open(self) -> None:
+        DebugLog.record("session.open.dialog_open")
         path, _ = QFileDialog.getOpenFileName(
             self, "Open session", "", _SESSION_FILTER
         )
+        DebugLog.record("session.open.dialog_closed", picked=bool(path))
         if path:
             self._load_session_from(path)
 
@@ -766,14 +787,33 @@ class ControlWindow(QMainWindow):
         ))
 
     def _load_session_from(self, path: str) -> None:
+        DebugLog.record("session.load.enter", path=path)
         try:
             session = Session.load(path)
         except Exception as exc:
+            DebugLog.record("session.load.failed", path=path, error=repr(exc))
+            QMessageBox.warning(
+                self, "Could not open session",
+                f"Failed to read {path}:\n\n{exc}"
+            )
             return
+        DebugLog.record(
+            "session.load.parsed",
+            path=path,
+            name=session.name,
+            slots=sum(1 for s in session.slots if s.video_path or s.audio_path),
+        )
         self._session_path = path
         self._apply_session(session)
-        Session.add_recent(path)
+        DebugLog.record("session.load.slots_applied", path=path)
+        # add_recent writes to ~/.forgeplayer/recent_sessions.json — wrap
+        # so a disk hiccup doesn't block the UI after a successful load.
+        try:
+            Session.add_recent(path)
+        except Exception as exc:
+            DebugLog.record("session.add_recent.failed", error=repr(exc))
         self.setWindowTitle(f"ForgePlayer — {session.name}")
+        DebugLog.record("session.load.exit", path=path)
 
     def _default_session_save_path(self) -> str:
         """Pre-fill the Save dialog with `<scene folder>/<session name>.forgeplayer-session`.
