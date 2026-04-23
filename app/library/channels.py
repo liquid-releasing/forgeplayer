@@ -54,17 +54,41 @@ class DeviceGeneration(str, Enum):
 #      .alpha-prostate, .beta-prostate, .volume-prostate  (prostate side-chain)
 
 
-# Channels that signal stereostim (2-channel estim)
+# Canonical channel sets, aligned with restim's recognized filenames
+# (see docs/architecture/restim-channels.md and memory
+# reference_restim_canonical_channels.md for the authoritative list).
+
+# Channels that signal stereostim (2-channel position-driven estim)
 STEREOSTIM_CHANNELS = frozenset({"alpha", "beta"})
 
 # Channels that are specifically FOC-stim parameters (indicate the newer
-# full FOC-stim parameter set is present)
+# full FOC-stim parameter set is present — includes 3-phase gamma position
+# and all four pulse parameters restim knows).
 FOC_STIM_CHANNELS = frozenset({
-    "pulse_frequency", "pulse_rise_time", "pulse_width",
+    "gamma",
+    "pulse_frequency", "pulse_rise_time", "pulse_width", "pulse_interval_random",
     "volume", "frequency",
 })
 
-# Multi-axis (SR6 / VR alignment)
+# 4-phase electrode intensity channels (FOCSTIM_FOUR_PHASE hardware).
+# Orthogonal to STEREOSTIM/FOC_STIM — either the scripter authored
+# explicit 4-phase files (e1..e4) OR 3-phase gets derived to 4-phase
+# inside restim via abc_to_e1234().
+FOUR_PHASE_ELECTRODE_CHANNELS = frozenset({"e1", "e2", "e3", "e4"})
+
+# Vibration motor channels (Lovense-style dual-motor devices).
+VIBRATION_1_CHANNELS = frozenset({
+    "vib1_frequency", "vib1_strength",
+    "vib1_left_right_bias", "vib1_up_down_bias", "vib1_random",
+})
+VIBRATION_2_CHANNELS = frozenset({
+    "vib2_frequency", "vib2_strength",
+    "vib2_left_right_bias", "vib2_up_down_bias", "vib2_random",
+})
+VIBRATION_CHANNELS = VIBRATION_1_CHANNELS | VIBRATION_2_CHANNELS
+
+# Multi-axis spatial channels (SR6-class mechanical hardware / VR alignment).
+# NOT consumed by restim — handled by separate downstream tooling.
 MULTI_AXIS_CHANNELS = frozenset({"roll", "pitch", "twist", "surge", "sway"})
 
 # Sub-channel modifiers — appended to channel names to indicate routing
@@ -94,13 +118,30 @@ _MODIFIER_TO_GENERATION: dict[str, "DeviceGeneration"] = {
 # Regex to extract (base_stem, channel_core, subchannel) from a filename stem.
 # channel_core is the recognized channel name; subchannel is an optional
 # routing or generation modifier.
+#
+# Channel list is aligned with restim's canonical names — see the
+# architecture doc at docs/architecture/restim-channels.md. Multi-axis
+# (roll/pitch/...) are NOT restim-consumed but appear here because they're
+# real filenames in the ecosystem for SR6-class hardware.
 _CHANNEL_PATTERN = re.compile(
     r"""
     ^(?P<base>.+?)                                 # base stem (non-greedy)
     \.(?P<channel_core>
-        pulse_frequency | pulse_rise_time | pulse_width
+        # Vibration motors (restim) — longest patterns first
+        vib1_frequency | vib1_strength | vib1_left_right_bias
+      | vib1_up_down_bias | vib1_random
+      | vib2_frequency | vib2_strength | vib2_left_right_bias
+      | vib2_up_down_bias | vib2_random
+        # Pulse parameters (restim)
+      | pulse_frequency | pulse_rise_time | pulse_width
+      | pulse_interval_random
+        # Frequency / volume (restim)
       | frequency | volume
-      | alpha | beta
+        # Position (restim 3-phase)
+      | alpha | beta | gamma
+        # 4-phase electrode intensity (restim)
+      | e1 | e2 | e3 | e4
+        # Multi-axis spatial (not restim — other tools)
       | roll | pitch | twist | surge | sway
     )
     (?:-(?P<subchannel>prostate|stereostim|foc-stim|2b))?  # optional modifier
@@ -194,7 +235,16 @@ def classify_funscript_channel(filename: str) -> ChannelInfo:
         gens.add(DeviceGeneration.STEREOSTIM)
         gens.add(DeviceGeneration.FOC_STIM)  # FOC-stim also uses alpha+beta
     if core in FOC_STIM_CHANNELS:
+        # Gamma / pulse_* / frequency / volume are FOC-stim parameters
         gens.add(DeviceGeneration.FOC_STIM)
+    if core in FOUR_PHASE_ELECTRODE_CHANNELS:
+        # e1..e4 go to 4-phase FOC-stim hardware
+        gens.add(DeviceGeneration.FOC_STIM)
+    if core in VIBRATION_CHANNELS:
+        # vib1/2_* — vibration motor (Lovense etc.); doesn't map to the
+        # estim generations, no DeviceGeneration added. Still classified
+        # so the scanner can surface vibration-channel badges later.
+        pass
     if core in MULTI_AXIS_CHANNELS:
         gens.add(DeviceGeneration.MULTI_AXIS)
 
