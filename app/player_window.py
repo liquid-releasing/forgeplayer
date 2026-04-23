@@ -6,10 +6,12 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSlider,
 )
-from PySide6.QtCore import Qt, QRect, QTimer
+from PySide6.QtCore import Qt, QRect, QTimer, Signal
 from PySide6.QtGui import QScreen
 
+from app.debug_log import DebugLog
 from app.sync_engine import SyncEngine
+from app.widgets import ClickableSlider
 
 _CTRL_HEIGHT = 48
 _POLL_MS = 200
@@ -40,15 +42,22 @@ class PlayerWindow(QWidget):
     control bar stays outside the mpv render surface and is always interactive.
     """
 
+    close_all_requested = Signal()
+
     def __init__(self, slot_index: int, engine: SyncEngine) -> None:
         super().__init__()
         self.slot_index = slot_index
         self._engine = engine
         self._seek_dragging = False
+        # Set by ControlWindow._close_players before calling close() so the
+        # user's closeEvent path doesn't re-enter the group-teardown signal.
+        self._teardown_in_progress = False
 
         self.setWindowTitle(f"ForgePlayer {slot_index + 1}")
         self.setStyleSheet("background-color: black;")
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        # Normal framed window — user gets drag/resize/close chrome in
+        # windowed mode. Fullscreen mode hides the chrome via showFullScreen().
+        self.setWindowFlags(Qt.WindowType.Window)
         self.setMinimumSize(320, 180 + _CTRL_HEIGHT)
 
         root = QVBoxLayout(self)
@@ -112,7 +121,7 @@ class PlayerWindow(QWidget):
         h.addWidget(self._time_lbl)
 
         # Seek bar
-        self._seek = QSlider(Qt.Orientation.Horizontal)
+        self._seek = ClickableSlider(Qt.Orientation.Horizontal)
         self._seek.setRange(0, 10000)
         self._seek.sliderPressed.connect(self._on_seek_press)
         self._seek.sliderReleased.connect(self._on_seek_release)
@@ -165,17 +174,55 @@ class PlayerWindow(QWidget):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
-            self.close()
+            DebugLog.record("key.escape", slot=self.slot_index)
+            # Signal ControlWindow to tear down all players together. Closing
+            # just this window leaves the engine polling a dead mpv handle,
+            # which freezes the remaining player windows.
+            self.close_all_requested.emit()
+        elif event.key() == Qt.Key.Key_F11:
+            DebugLog.record("key.f11", slot=self.slot_index)
+            self._toggle_fullscreen()
         elif event.key() == Qt.Key.Key_Space:
+            DebugLog.record("key.space", slot=self.slot_index)
             self._on_play_pause()
         else:
             super().keyPressEvent(event)
 
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """User clicked the window's X — route through the group teardown so
+        the engine stops polling the dead mpv handle, same as ESC."""
+        if not self._teardown_in_progress:
+            DebugLog.record("player.user_close", slot=self.slot_index)
+            event.ignore()
+            self.close_all_requested.emit()
+            return
+        DebugLog.record("player.teardown_close", slot=self.slot_index)
+        super().closeEvent(event)
+
+    def _toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
     # ── Placement ─────────────────────────────────────────────────────────────
 
-    def place_on_screen(self, screen: QScreen, fullscreen: bool = True) -> None:
-        """Move this window to fill *screen*."""
+    def place_on_screen(self, screen: QScreen, fullscreen: bool = False) -> None:
+        """Place this window on *screen*.
+
+        fullscreen=True kicks into kiosk mode (used for the 3-wall rig
+        configuration). fullscreen=False — the v0.0.1-alpha default — places
+        a sensibly-sized, frame-decorated window centered on the target
+        monitor so a user with 2 screens can still see their desktop.
+        """
         geo: QRect = screen.geometry()
-        self.setGeometry(geo)
         if fullscreen:
+            self.setGeometry(geo)
             self.showFullScreen()
+        else:
+            target_w = min(1280, int(geo.width() * 0.9))
+            target_h = min(720 + _CTRL_HEIGHT, int(geo.height() * 0.9))
+            x = geo.x() + (geo.width() - target_w) // 2
+            y = geo.y() + (geo.height() - target_h) // 2
+            self.setGeometry(x, y, target_w, target_h)
+            self.showNormal()

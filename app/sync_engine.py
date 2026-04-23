@@ -43,6 +43,31 @@ class SyncEngine:
             self._players[slot] = p
             return p
 
+    def init_player_audio_only(self, slot: int, audio_device: str = "") -> mpv.MPV:
+        """Create a headless mpv instance with no window.
+
+        Used for audio-only slots (the user loaded an audio override but no
+        video). `force_window=no` stops mpv from opening its own stub window
+        for audio files. Participates in sync just like video slots —
+        seek_all, pause_all, etc. all apply — but doesn't take over a monitor.
+        """
+        with self._lock:
+            if self._players[slot]:
+                self._players[slot].terminate()  # type: ignore[union-attr]
+            kwargs: dict = {
+                "force_window": "no",
+                "keep_open": True,
+                "pause": True,
+                "input_default_bindings": False,
+                "input_vo_keyboard": False,
+                "osc": False,
+            }
+            if audio_device:
+                kwargs["audio_device"] = audio_device
+            p = mpv.MPV(**kwargs)
+            self._players[slot] = p
+            return p
+
     def load_file(self, slot: int, path: str) -> None:
         """Load *path* into *slot* (paused at start)."""
         p = self._players[slot]

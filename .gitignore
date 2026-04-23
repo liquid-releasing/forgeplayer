@@ -31,3 +31,8 @@ dist/
 
 # Test media — user's local sample packs (Edger format, .forge subfolders, etc.)
 test_media/
+
+# libmpv — vendored next to main.py for python-mpv (too large to commit)
+libmpv-2.dll
+mpv-1.dll
+mpv-2.dll

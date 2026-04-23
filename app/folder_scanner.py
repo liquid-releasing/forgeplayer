@@ -87,12 +87,37 @@ def auto_assign(
 
     Matching strategy
     -----------------
+    Step 1 — ask the library scanner whether *folder* is a single scene with
+    variants (Magik-style pack folders with many upscales / aspect variants
+    of the same content). If so, collapse to a single slot using the
+    scene's default video + default audio. This stops Scan Folder from
+    spreading three different *versions of the same scene* across three
+    slots.
+
+    Step 2 (fallback) — aspect-ratio matching over independent files:
     * Each video is scored against every screen by aspect-ratio similarity.
     * A greedy pass assigns each screen the best unassigned video.
     * Audio files are paired by matching filename stem (case-insensitive).
     * If there are more videos than screens, remaining videos fill remaining
       slot positions using the last screen index.
     """
+    # Step 1: try the library scanner's scene detection.
+    try:
+        from app.library.scanner import scan_scene_folder
+        entry = scan_scene_folder(folder)
+    except Exception:
+        entry = None
+    if entry is not None and len(entry.videos) >= 2:
+        # Multiple videos in the same folder → treat as variants of one
+        # scene. Use only the default video + default audio in slot 0.
+        v = entry.default_video
+        a = entry.default_audio
+        return [{
+            "video_path": v.path if v else "",
+            "audio_path": a.path if a else "",
+            "monitor_index": 0,
+        }]
+
     media = scan_folder(folder)
     videos = [m for m in media if m.is_video]
     audio_map: dict[str, str] = {

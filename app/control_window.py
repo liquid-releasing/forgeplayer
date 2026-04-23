@@ -21,6 +21,8 @@ from app.folder_scanner import auto_assign
 from app.library_panel import LibraryPanel
 from app.library.catalog import SceneCatalogEntry
 from app.select_picker import SelectPicker, SelectionChoices
+from app.debug_log import DebugLog
+from app.widgets import ClickableSlider
 
 _SLOT_LABELS = ["Slot 1", "Slot 2", "Slot 3"]
 _POLL_MS = 100
@@ -90,6 +92,11 @@ class ControlWindow(QMainWindow):
 
         vbox.addWidget(self._tabs, 1)
 
+        # Default to Library on startup — returning users with a scanned
+        # root want to land on their scenes, first-run users get a welcome
+        # empty-state inside the Library panel pointing them at Scan Folder.
+        self._tabs.setCurrentWidget(self._library_panel)
+
     def _build_live_tab(self) -> QWidget:
         """The existing prototype's slot/seek/transport UI, wrapped as a tab."""
         tab = QWidget()
@@ -111,7 +118,7 @@ class ControlWindow(QMainWindow):
         seek_row = QHBoxLayout()
         self._time_label = QLabel("0:00")
         self._time_label.setFixedWidth(52)
-        self._seek_bar = QSlider(Qt.Orientation.Horizontal)
+        self._seek_bar = ClickableSlider(Qt.Orientation.Horizontal)
         self._seek_bar.setRange(0, 10000)
         self._seek_bar.sliderPressed.connect(self._on_seek_press)
         self._seek_bar.sliderReleased.connect(self._on_seek_release)
@@ -170,6 +177,17 @@ class ControlWindow(QMainWindow):
         # ── Launch / Close buttons ──
         action_row = QHBoxLayout()
         action_row.addStretch()
+
+        self._fullscreen_toggle = QCheckBox("Fullscreen")
+        self._fullscreen_toggle.setToolTip(
+            "When on, player windows take over their whole monitor (kiosk mode).\n"
+            "When off (default), windowed players let you keep your desktop visible.\n"
+            "Press F11 inside a player to toggle fullscreen at any time."
+        )
+        self._fullscreen_toggle.setStyleSheet("color: #9ba3c4;")
+        action_row.addWidget(self._fullscreen_toggle)
+
+        action_row.addSpacing(12)
 
         btn_close_players = QPushButton("Close Players")
         btn_close_players.setFixedHeight(40)
@@ -282,28 +300,28 @@ class ControlWindow(QMainWindow):
         btn_new = QPushButton("New")
         btn_new.setFixedHeight(30)
         btn_new.setToolTip("New empty session")
-        btn_new.clicked.connect(self._on_session_new)
+        btn_new.clicked.connect(self._wrap_click("session.new", self._on_session_new))
         h.addWidget(btn_new)
 
         btn_open = QPushButton("Open…")
         btn_open.setFixedHeight(30)
         btn_open.setToolTip("Open a session file")
-        btn_open.clicked.connect(self._on_session_open)
+        btn_open.clicked.connect(self._wrap_click("session.open", self._on_session_open))
         h.addWidget(btn_open)
 
         self._btn_recent = QPushButton("Recent ▾")
         self._btn_recent.setFixedHeight(30)
-        self._btn_recent.clicked.connect(self._on_recent_menu)
+        self._btn_recent.clicked.connect(self._wrap_click("session.recent", self._on_recent_menu))
         h.addWidget(self._btn_recent)
 
         btn_save = QPushButton("Save")
         btn_save.setFixedHeight(30)
-        btn_save.clicked.connect(self._on_session_save)
+        btn_save.clicked.connect(self._wrap_click("session.save", self._on_session_save))
         h.addWidget(btn_save)
 
         btn_save_as = QPushButton("Save As…")
         btn_save_as.setFixedHeight(30)
-        btn_save_as.clicked.connect(self._on_session_save_as)
+        btn_save_as.clicked.connect(self._wrap_click("session.save_as", self._on_session_save_as))
         h.addWidget(btn_save_as)
 
         h.addSpacing(16)
@@ -324,8 +342,37 @@ class ControlWindow(QMainWindow):
         btn_scan.setStyleSheet(
             "background: #2d4a8a; color: white; font-weight: bold; border-radius: 4px;"
         )
-        btn_scan.clicked.connect(self._on_scan_folder)
+        btn_scan.clicked.connect(
+            self._wrap_click("scan_folder", self._on_scan_folder)
+        )
         h.addWidget(btn_scan)
+
+        # ── Debug cluster ────────────────────────────────────────────────
+        h.addSpacing(12)
+
+        self._debug_toggle = QCheckBox("Debug")
+        self._debug_toggle.setToolTip(
+            "Record clicks, key events, and player lifecycle to an event log.\n"
+            "Use Mark to flag a moment, then Export to write the log to\n"
+            "~/.forgeplayer/debug-<timestamp>.json for bug reports."
+        )
+        self._debug_toggle.setStyleSheet("color: #9ba3c4;")
+        self._debug_toggle.toggled.connect(self._on_debug_toggled)
+        h.addWidget(self._debug_toggle)
+
+        self._btn_mark = QPushButton("⚑ Mark")
+        self._btn_mark.setFixedHeight(30)
+        self._btn_mark.setToolTip("Insert a marker in the debug event log")
+        self._btn_mark.clicked.connect(self._on_debug_mark)
+        h.addWidget(self._btn_mark)
+
+        self._btn_debug_export = QPushButton("Export…")
+        self._btn_debug_export.setFixedHeight(30)
+        self._btn_debug_export.setToolTip(
+            "Write the captured debug events to ~/.forgeplayer/debug-<ts>.json"
+        )
+        self._btn_debug_export.clicked.connect(self._on_debug_export)
+        h.addWidget(self._btn_debug_export)
 
         return bar
 
@@ -333,11 +380,6 @@ class ControlWindow(QMainWindow):
         box = QGroupBox(_SLOT_LABELS[index])
         layout = QVBoxLayout(box)
         layout.setSpacing(5)
-
-        # Enable toggle
-        enabled = QCheckBox("Enable this slot")
-        enabled.setChecked(index == 0)
-        layout.addWidget(enabled)
 
         # ── Video file ──
         layout.addWidget(QLabel("Video:"))
@@ -347,9 +389,15 @@ class ControlWindow(QMainWindow):
         video_label.setStyleSheet("color: #9ba3c4; font-size: 11px;")
         layout.addWidget(video_label)
 
+        video_row = QHBoxLayout()
         btn_video = QPushButton("Browse Video…")
         btn_video.setFixedHeight(28)
-        layout.addWidget(btn_video)
+        video_row.addWidget(btn_video)
+        btn_clear_video = QPushButton("✕")
+        btn_clear_video.setFixedSize(28, 28)
+        btn_clear_video.setToolTip("Clear video (also disables the slot if audio is also empty)")
+        video_row.addWidget(btn_clear_video)
+        layout.addLayout(video_row)
 
         # ── Audio file ──
         layout.addWidget(QLabel("Audio override:"))
@@ -405,7 +453,6 @@ class ControlWindow(QMainWindow):
         layout.addLayout(vol_row)
 
         slot_data: dict = {
-            "enabled":        enabled,
             "video_label":    video_label,
             "video_path":     "",
             "audio_label":    audio_label,
@@ -417,6 +464,7 @@ class ControlWindow(QMainWindow):
         }
 
         btn_video.clicked.connect(lambda _, d=slot_data: self._on_browse_video(d))
+        btn_clear_video.clicked.connect(lambda _, d=slot_data: self._on_clear_video(d))
         btn_audio.clicked.connect(lambda _, d=slot_data: self._on_browse_audio(d))
         btn_clear_audio.clicked.connect(lambda _, d=slot_data: self._on_clear_audio(d))
         volume_slider.valueChanged.connect(
@@ -442,7 +490,25 @@ class ControlWindow(QMainWindow):
             data["video_path"] = path
             data["video_label"].setText(os.path.basename(path))
             data["video_label"].setToolTip(path)
-            data["enabled"].setChecked(True)
+            self._refresh_monitor_state(data)
+            self._maybe_autofill_session_name(path)
+
+    def _on_clear_video(self, data: dict) -> None:
+        data["video_path"] = ""
+        data["video_label"].setText("No file selected")
+        data["video_label"].setToolTip("")
+        self._refresh_monitor_state(data)
+
+    def _maybe_autofill_session_name(self, media_path: str) -> None:
+        """Set the Session name from the picked media file if the user
+        hasn't already customized it."""
+        current = self._session_name.text().strip()
+        if current and current != "Untitled Session":
+            return
+        stem = os.path.splitext(os.path.basename(media_path))[0]
+        if stem:
+            self._session_name.setText(stem)
+            self.setWindowTitle(f"ForgePlayer — {stem}")
 
     def _on_browse_audio(self, data: dict) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select audio file", "", _AUDIO_FILTER)
@@ -450,17 +516,75 @@ class ControlWindow(QMainWindow):
             data["audio_path"] = path
             data["audio_label"].setText(os.path.basename(path))
             data["audio_label"].setToolTip(path)
+            self._refresh_monitor_state(data)
+            if not data["video_path"]:
+                self._maybe_autofill_session_name(path)
 
     def _on_clear_audio(self, data: dict) -> None:
         data["audio_path"] = ""
         data["audio_label"].setText("(uses video audio)")
         data["audio_label"].setToolTip("")
+        self._refresh_monitor_state(data)
+
+    def _refresh_monitor_state(self, data: dict) -> None:
+        """Dim the monitor dropdown for audio-only slots — there's no video
+        surface to route, so picking a monitor is meaningless."""
+        has_video = bool(data["video_path"])
+        combo: QComboBox = data["monitor_combo"]
+        combo.setEnabled(has_video)
+        if has_video:
+            combo.setToolTip("")
+        else:
+            combo.setToolTip(
+                "Audio-only slot — no monitor is used. "
+                "Load a video to enable monitor selection."
+            )
 
     def _on_volume_changed(self, slot: int, value: int, lbl: QLabel) -> None:
         lbl.setText(str(value))
         self._engine.set_volume(slot, value)
 
     # ── Scan folder ────────────────────────────────────────────────────────────
+
+    # ── Debug instrumentation ─────────────────────────────────────────────────
+
+    def _wrap_click(self, name: str, fn):
+        """Wrap a button handler so clicks land in DebugLog before firing."""
+        def wrapped(*args, **kwargs):
+            DebugLog.record("click", target=name)
+            return fn(*args, **kwargs)
+        return wrapped
+
+    def _on_debug_toggled(self, checked: bool) -> None:
+        DebugLog.set_enabled(bool(checked))
+        DebugLog.record("debug.toggled", enabled=bool(checked))
+        self._debug_toggle.setStyleSheet(
+            "color: #ff6b30; font-weight: bold;" if checked else "color: #9ba3c4;"
+        )
+        if checked and DebugLog.stream_path():
+            self._debug_toggle.setToolTip(
+                f"Debug events are also streaming live to:\n{DebugLog.stream_path()}"
+            )
+
+    def _on_debug_mark(self) -> None:
+        DebugLog.mark(note=f"user-marked (events so far: {DebugLog.event_count()})")
+        self._btn_mark.setText(f"⚑ Mark ({DebugLog.event_count()})")
+        QTimer.singleShot(1200, lambda: self._btn_mark.setText("⚑ Mark"))
+
+    def _on_debug_export(self) -> None:
+        if DebugLog.event_count() == 0:
+            QMessageBox.information(
+                self, "Debug log",
+                "No events captured. Toggle Debug on, reproduce the issue, then Export."
+            )
+            return
+        path = DebugLog.export()
+        QMessageBox.information(
+            self, "Debug log exported",
+            f"Wrote {DebugLog.event_count()} events to:\n{path}"
+        )
+
+    # ── Folder scan ──────────────────────────────────────────────────────────
 
     def _on_scan_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select media folder")
@@ -489,7 +613,7 @@ class ControlWindow(QMainWindow):
                     combo.setCurrentIndex(idx)
                     break
 
-            data["enabled"].setChecked(bool(vp or ap))
+            self._refresh_monitor_state(data)
 
     # ── Session ────────────────────────────────────────────────────────────────
 
@@ -497,8 +621,11 @@ class ControlWindow(QMainWindow):
         slots: list[SlotConfig] = []
         for i in range(3):
             d = self._slot_data(i)
+            # Enabled state is now derived from whether the slot has media.
+            # Kept on SlotConfig for backward-compat with older session files.
+            has_media = bool(d["video_path"] or d["audio_path"])
             slots.append(SlotConfig(
-                enabled=d["enabled"].isChecked(),
+                enabled=has_media,
                 video_path=d["video_path"],
                 audio_path=d["audio_path"],
                 monitor_index=d["monitor_combo"].currentData() or 0,
@@ -511,7 +638,8 @@ class ControlWindow(QMainWindow):
         self._session_name.setText(session.name)
         for i, cfg in enumerate(session.slots[:3]):
             d = self._slot_data(i)
-            d["enabled"].setChecked(cfg.enabled)
+            # No explicit enabled flag in UI — cfg.enabled is derived from
+            # paths at save time; loading just trusts the paths we set below.
 
             d["video_path"] = cfg.video_path
             d["video_label"].setText(
@@ -538,6 +666,7 @@ class ControlWindow(QMainWindow):
                     break
 
             d["volume_slider"].setValue(cfg.volume)
+            self._refresh_monitor_state(d)
 
     def _on_session_new(self) -> None:
         self._apply_session(Session())
@@ -577,16 +706,20 @@ class ControlWindow(QMainWindow):
         self.setWindowTitle(f"ForgePlayer — {session.name}")
 
     def _on_session_save(self) -> None:
+        DebugLog.record("session.save.enter", has_path=bool(self._session_path))
         if self._session_path:
             self._current_session().save(self._session_path)
             Session.add_recent(self._session_path)
+            DebugLog.record("session.save.exit", path=self._session_path)
         else:
             self._on_session_save_as()
 
     def _on_session_save_as(self) -> None:
+        DebugLog.record("session.save_as.dialog_open")
         path, _ = QFileDialog.getSaveFileName(
             self, "Save session as", "", _SESSION_FILTER
         )
+        DebugLog.record("session.save_as.dialog_closed", picked=bool(path))
         if path:
             if not path.endswith(".forgeplayer-session"):
                 path += ".forgeplayer-session"
@@ -600,11 +733,22 @@ class ControlWindow(QMainWindow):
     # ── Launch / close ─────────────────────────────────────────────────────────
 
     def _close_players(self) -> None:
+        DebugLog.record(
+            "players.close_all",
+            active=sum(1 for w in self._player_windows if w),
+        )
         self._timer.stop()
         self._engine.stop_all()
-        for i, w in enumerate(self._player_windows):
+        # Terminate every engine slot — including audio-only slots that
+        # don't have a PlayerWindow — so no mpv instances leak.
+        for i in range(3):
+            w = self._player_windows[i]
             if w:
-                self._engine.terminate_player(i)
+                # Mark the window so its closeEvent doesn't re-enter our
+                # close-all signal path — this close is the teardown itself.
+                w._teardown_in_progress = True
+            self._engine.terminate_player(i)
+            if w:
                 w.close()
                 self._player_windows[i] = None
         self._btn_play.setText("▶  Play")
@@ -613,16 +757,28 @@ class ControlWindow(QMainWindow):
         self._dur_label.setText("0:00")
 
     def _on_launch(self) -> None:
+        DebugLog.record("players.launch_request")
         self._close_players()
 
         launched = False
         for i in range(3):
             data = self._slot_data(i)
-            if not data["enabled"].isChecked():
-                continue
             video_path: str = data["video_path"]
             audio_path: str = data["audio_path"]
+            # Slot is "enabled" iff it has media. No separate checkbox anymore.
             if not (video_path or audio_path):
+                continue
+
+            audio_device: str = data["audio_combo"].currentData() or ""
+
+            # Audio-only: no PlayerWindow, no monitor. Headless mpv still
+            # participates in sync (seek/pause/play apply via _active list).
+            if audio_path and not video_path:
+                DebugLog.record("players.launch_slot", slot=i, mode="audio_only")
+                self._engine.init_player_audio_only(i, audio_device)
+                self._engine.load_file(i, audio_path)
+                self._engine.set_volume(i, data["volume_slider"].value())
+                launched = True
                 continue
 
             screen_idx: int = data["monitor_combo"].currentData()
@@ -631,10 +787,21 @@ class ControlWindow(QMainWindow):
                 if screen_idx < len(self._screens)
                 else self._screens[0]
             )
-            audio_device: str = data["audio_combo"].currentData() or ""
+
+            DebugLog.record(
+                "players.launch_slot",
+                slot=i,
+                mode="video",
+                has_audio_override=bool(audio_path),
+                fullscreen=self._fullscreen_toggle.isChecked(),
+            )
 
             pw = PlayerWindow(i, self._engine)
-            pw.place_on_screen(screen, fullscreen=True)
+            pw.close_all_requested.connect(self._close_players)
+            pw.place_on_screen(
+                screen,
+                fullscreen=self._fullscreen_toggle.isChecked(),
+            )
             pw.show()
             pw.raise_()
             self._player_windows[i] = pw
@@ -661,12 +828,16 @@ class ControlWindow(QMainWindow):
     # ── Transport ──────────────────────────────────────────────────────────────
 
     def _on_play_pause(self) -> None:
+        active_count = len(self._engine._active)
         if not self._engine.has_active_players():
+            DebugLog.record("transport.play_pause", result="no_active_players")
             return
         if self._engine.is_paused():
+            DebugLog.record("transport.play", active=active_count)
             self._engine.play_all()
             self._btn_play.setText("⏸  Pause")
         else:
+            DebugLog.record("transport.pause", active=active_count)
             self._engine.pause_all()
             self._btn_play.setText("▶  Play")
 

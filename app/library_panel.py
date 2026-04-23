@@ -32,8 +32,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListView, QPushButton, QStyledItemDelegate, QStyleOptionViewItem,
-    QToolButton, QVBoxLayout, QWidget,
+    QListView, QPushButton, QStackedWidget, QStyle, QStyledItemDelegate,
+    QStyleOptionViewItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from app.library import (
@@ -201,13 +201,11 @@ class LibraryCardDelegate(QStyledItemDelegate):
 
         rect = option.rect.adjusted(4, 4, -4, -4)  # outer gap
 
-        # Card background + border
-        is_selected = bool(option.state & QStyleOptionViewItem.State_Selected) \
-            if hasattr(QStyleOptionViewItem, "State_Selected") \
-            else bool(option.state & QAbstractItemView.State_Selected) \
-            if hasattr(QAbstractItemView, "State_Selected") \
-            else False
-        is_hover = bool(option.state & 0x00000001)  # Qt::State_MouseOver
+        # Card background + border. PySide6 exposes QStyle.StateFlag as an
+        # IntFlag enum — bitwise & works between two flags, but not between a
+        # flag and a raw int, so reference the named flags directly.
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        is_hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
 
         bg = _SURFACE_HOVER if (is_selected or is_hover) else _SURFACE
         border = _ACCENT if is_selected else _BORDER
@@ -350,10 +348,22 @@ class LibraryPanel(QWidget):
         rescan_btn.clicked.connect(self._rescan)
         top.addWidget(rescan_btn)
 
+        search_label = QLabel("🔍")
+        search_label.setStyleSheet("color: #9ba3c4; font-size: 14px;")
+        top.addWidget(search_label)
+
         self._search = QLineEdit()
-        self._search.setPlaceholderText("Search scenes…")
-        self._search.setMinimumWidth(200)
+        self._search.setPlaceholderText("Filter scenes by name…")
+        self._search.setToolTip(
+            "Type part of a scene name to narrow the card list below"
+        )
+        self._search.setMinimumWidth(240)
         self._search.setMinimumHeight(36)
+        self._search.setStyleSheet(
+            "QLineEdit { background: #1a1d27; border: 1px solid #2d3148; "
+            "border-radius: 4px; padding: 4px 8px; color: #e0e0e0; } "
+            "QLineEdit:focus { border-color: #ff6b30; }"
+        )
         self._search.textChanged.connect(self._model.set_search)
         top.addWidget(self._search)
 
@@ -402,7 +412,6 @@ class LibraryPanel(QWidget):
         self._view.setMouseTracking(True)
         self._view.doubleClicked.connect(self._on_activated)
         self._view.activated.connect(self._on_activated)  # Enter key
-        layout.addWidget(self._view, 1)
 
         # Dark scrollbar / list background
         self._view.setStyleSheet(
@@ -410,8 +419,67 @@ class LibraryPanel(QWidget):
             "border-radius: 6px; }"
         )
 
-        # Refresh count whenever model resets
+        # Stack: welcome empty-state ↔ scene grid. Shown on first-run / after
+        # user clears the library. One action only — no thinking required.
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._build_welcome())  # index 0
+        self._stack.addWidget(self._view)             # index 1
+        layout.addWidget(self._stack, 1)
+
+        # Refresh count + empty-state whenever model resets
         self._model.modelReset.connect(self._update_count)
+        self._model.modelReset.connect(self._update_empty_state)
+        self._update_empty_state()
+
+    def _build_welcome(self) -> QWidget:
+        """First-run empty state — one big CTA, nothing else."""
+        w = QWidget()
+        w.setStyleSheet("background: #0e1117;")
+        v = QVBoxLayout(w)
+        v.setContentsMargins(40, 40, 40, 40)
+        v.addStretch()
+
+        title = QLabel("Welcome to ForgePlayer")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tf = QFont(title.font())
+        tf.setPointSize(22)
+        tf.setBold(True)
+        title.setFont(tf)
+        title.setStyleSheet("color: #e0e0e0;")
+        v.addWidget(title)
+
+        v.addSpacing(8)
+
+        sub = QLabel("Point me at your media folder and I'll list your scenes.")
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub.setStyleSheet("color: #9ba3c4; font-size: 14px;")
+        v.addWidget(sub)
+
+        v.addSpacing(32)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        big_scan = QPushButton("⬡  Scan a folder")
+        big_scan.setMinimumHeight(56)
+        big_scan.setMinimumWidth(240)
+        big_scan.setStyleSheet(
+            "QPushButton { background: #ff6b30; color: white; font-size: 16px; "
+            "font-weight: bold; border-radius: 8px; padding: 0 20px; } "
+            "QPushButton:hover { background: #ff8c5a; }"
+        )
+        big_scan.clicked.connect(self._pick_root)
+        btn_row.addWidget(big_scan)
+        btn_row.addStretch()
+        v.addLayout(btn_row)
+
+        v.addStretch()
+        return w
+
+    def _update_empty_state(self) -> None:
+        """Swap between welcome and scene grid based on whether we have any
+        scenes to show (not just filtered — total)."""
+        has_scenes = len(self._model._all) > 0
+        self._stack.setCurrentIndex(1 if has_scenes else 0)
 
     # ── Event handlers ──
 
