@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QSlider, QComboBox, QFileDialog,
     QGroupBox, QCheckBox, QSizePolicy, QLineEdit, QSpacerItem,
-    QMenu, QToolBar, QFrame,
+    QMenu, QToolBar, QFrame, QTabWidget, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QScreen, QAction
@@ -18,6 +18,8 @@ from app.player_window import PlayerWindow
 from app.sync_engine import SyncEngine
 from app.session import Session, SlotConfig
 from app.folder_scanner import auto_assign
+from app.library_panel import LibraryPanel
+from app.library.catalog import SceneCatalogEntry
 
 _SLOT_LABELS = ["Slot 1", "Slot 2", "Slot 3"]
 _POLL_MS = 100
@@ -70,17 +72,29 @@ class ControlWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         vbox = QVBoxLayout(root)
-        vbox.setSpacing(10)
+        vbox.setSpacing(8)
         vbox.setContentsMargins(14, 10, 14, 14)
 
-        # ── Session toolbar ──
+        # ── Session toolbar (common across tabs) ──
         vbox.addWidget(self._build_session_bar())
 
-        # ── Divider ──
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        vbox.addWidget(line)
+        # ── Tab container (Live / Setup / Library) ──
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._build_live_tab(), "Live")
+        self._tabs.addTab(self._build_setup_tab(), "Setup")
+
+        self._library_panel = LibraryPanel()
+        self._library_panel.scene_activated.connect(self._on_scene_activated)
+        self._tabs.addTab(self._library_panel, "Library")
+
+        vbox.addWidget(self._tabs, 1)
+
+    def _build_live_tab(self) -> QWidget:
+        """The existing prototype's slot/seek/transport UI, wrapped as a tab."""
+        tab = QWidget()
+        vbox = QVBoxLayout(tab)
+        vbox.setSpacing(10)
+        vbox.setContentsMargins(6, 6, 6, 6)
 
         # ── Slot panels ──
         slots_row = QHBoxLayout()
@@ -172,6 +186,57 @@ class ControlWindow(QMainWindow):
 
         action_row.addStretch()
         vbox.addLayout(action_row)
+
+        return tab
+
+    def _build_setup_tab(self) -> QWidget:
+        """Placeholder — Setup panel (monitors / audio / library / preferences)
+        is Phase 2 of the UI slice. Right now it's a stub explaining what
+        will live here."""
+        tab = QWidget()
+        v = QVBoxLayout(tab)
+        v.setContentsMargins(40, 40, 40, 40)
+
+        title = QLabel("Setup")
+        f = title.font(); f.setPointSize(18); f.setBold(True); title.setFont(f)
+        v.addWidget(title)
+
+        body = QLabel(
+            "This tab will hold Monitors, Audio routing, Library roots, and "
+            "Preferences sections — each navigable via chevrons.\n\n"
+            "Alpha status: stub. Use the Library tab to scan scenes, and the "
+            "Live tab for playback (prototype)."
+        )
+        body.setStyleSheet("color: #9ba3c4;")
+        body.setWordWrap(True)
+        v.addWidget(body)
+        v.addStretch()
+
+        return tab
+
+    def _on_scene_activated(self, entry: SceneCatalogEntry) -> None:
+        """Called when the user picks a scene in the Library panel.
+
+        Alpha behavior: show a dialog summarizing what would load. When the
+        select-picker + pin-persistence + playback integration slices land,
+        this will instead route through the picker (if ambiguous) then hand
+        the chosen files to SyncEngine."""
+        lines = [
+            f"Scene: {entry.name}",
+            f"Folder: {entry.folder_path}",
+            "",
+            f"Default video: {entry.default_video.filename if entry.default_video else '(none)'}",
+            f"Default audio: {entry.default_audio.filename if entry.default_audio else '(none)'}",
+        ]
+        if entry.default_funscript_set:
+            fset = entry.default_funscript_set
+            channels = list(fset.channels) if fset.channels else ["(main only)"]
+            lines.append(f"Funscript set: {fset.base_stem}")
+            lines.append(f"  channels: {', '.join(sorted(channels))}")
+        if entry.is_ambiguous:
+            lines.append("")
+            lines.append("⚠ This scene is ambiguous — select picker will appear here once built.")
+        QMessageBox.information(self, entry.name, "\n".join(lines))
 
     def _build_session_bar(self) -> QWidget:
         bar = QWidget()
