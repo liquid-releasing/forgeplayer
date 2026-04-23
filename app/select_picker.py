@@ -276,7 +276,10 @@ class SelectPicker(QDialog):
         return box
 
     def _build_audio_group(self) -> QWidget:
-        box = _group_box("Audio")
+        # "Stim audio" — the picked track routes to the haptic device (the
+        # USB dongle in a typical baseline setup), NOT a scene-audio override.
+        # See project_forgeplayer_multichannel_audio.md for the routing model.
+        box = _group_box("Stim audio")
         layout = box.layout()
 
         self._audio_group = QButtonGroup(self)

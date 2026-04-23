@@ -289,6 +289,14 @@ class SceneCatalogEntry:
 
     @property
     def is_playable(self) -> bool:
-        """True when there's at least one video AND at least one funscript set
-        (may have just the main `.funscript` for mechanical devices)."""
-        return bool(self.videos) and bool(self.funscript_sets)
+        """True when the folder has playable media — a video or an audio file.
+
+        Funscript sets are not required: a folder with an estim-audio mp3
+        (pre-rendered) is playable even if no `.funscript` is present.
+
+        Archives (`.funscript.zip`) do NOT count. Zipped funscripts are
+        inert from ForgePlayer's perspective — the user is expected to
+        unzip them before adding to the library. ForgePlayer is a player,
+        not an unzip utility.
+        """
+        return bool(self.videos) or bool(self.audio_tracks)

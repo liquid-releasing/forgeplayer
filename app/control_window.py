@@ -236,17 +236,15 @@ class ControlWindow(QMainWindow):
     def _on_scene_activated(self, entry: SceneCatalogEntry) -> None:
         """Called when the user picks a scene in the Library panel.
 
-        Behavior:
-        - If the scene is ambiguous (see SceneCatalogEntry.is_ambiguous),
-          show the SelectPicker modal. User's choices drive the load.
-        - If unambiguous, use the scanner's defaults directly.
-        - In either case, for now we just show a summary dialog of what
-          WOULD load (playback integration is a later slice)."""
-
+        If ambiguous, ask the user via SelectPicker; otherwise use scanner
+        defaults. Then route the resulting video/audio into Live slots,
+        switch to the Live tab, and launch the players (paused — user
+        still hits Play for the two-step workflow)."""
         if entry.is_ambiguous:
             picker = SelectPicker(entry, parent=self)
             if picker.exec() != SelectPicker.Accepted:
-                return  # user cancelled
+                DebugLog.record("library.activate.cancelled", scene=entry.name)
+                return
             choices = picker.choices()
         else:
             choices = SelectionChoices(
@@ -256,40 +254,112 @@ class ControlWindow(QMainWindow):
                 subtitle=None,
                 save_as_preset=False,
             )
+        self._apply_scene_choices(entry, choices)
 
-        self._load_choices_stub(entry, choices)
-
-    def _load_choices_stub(
+    def _apply_scene_choices(
         self,
         entry: SceneCatalogEntry,
         choices: SelectionChoices,
     ) -> None:
-        """Summary dialog until playback integration slice lands.
+        """Populate Live slots from a scene + the user's picker choices,
+        then switch to Live and launch.
 
-        When single-decoder playback is done this becomes: hand video +
-        audio + funscript-set to SyncEngine, seed Live panel, auto-switch
-        to Live tab."""
-        lines = [
-            f"Scene: {entry.name}",
-            f"Folder: {entry.folder_path}",
-            "",
-            f"Video: {choices.video.filename if choices.video else '(none)'}",
-            f"Audio: {choices.audio.filename if choices.audio else '(none)'}",
-        ]
-        if choices.funscript_set:
-            fset = choices.funscript_set
-            channels = list(fset.channels) if fset.channels else ["(main only)"]
-            lines.append(f"Funscript set: {fset.base_stem}")
-            lines.append(f"  channels: {', '.join(sorted(channels))}")
-        if choices.subtitle:
-            lines.append(f"Subtitle: {choices.subtitle.language.upper()}")
-        if choices.save_as_preset:
-            lines.append("")
-            lines.append("→ Save & Play selected — pin persistence is in the next slice.")
+        Routing model (user-confirmed 2026-04-23):
+
+        - **Video** → Slot 1. Slot 1's audio output (user-configured, defaults
+          to Realtek/system speakers) carries the video's embedded scene
+          audio. No audio override on Slot 1 — the mp4's own audio IS the
+          scene audio, routed by Slot 1's device setting.
+        - **Picked audio file** → Slot 2 as audio-only. The user's mental
+          model: picked audio = the haptic/estim track. Slot 2's audio
+          output (user-configured, defaults to their USB dongle) carries
+          that track to the estim device.
+        - **Audio-only scene** (no video) → picked audio goes to Slot 1
+          audio-only. Still routes via Slot 1's configured output.
+        - Slot 3 is always cleared.
+
+        Device roles (which physical device is "Scene audio" vs "Haptic 1")
+        live in the Setup tab in v0.0.2 — for v0.0.1, the user sets each
+        slot's audio-output dropdown once, and library clicks just fill in
+        media around that setup.
+        """
+        DebugLog.record(
+            "library.activate",
+            scene=entry.name,
+            has_video=bool(choices.video),
+            has_audio=bool(choices.audio),
+            save_as_preset=choices.save_as_preset,
+        )
+
+        slot1 = self._slot_data(0)
+        slot2 = self._slot_data(1)
+        slot3 = self._slot_data(2)
+
+        # Slot 3 always clears — library clicks are one- or two-slot loads.
+        self._set_slot_media(slot3, video_path="", audio_path="")
+
+        # Video (if any) → Slot 1, embedded scene audio via Slot 1's device.
+        if choices.video:
+            self._set_slot_media(
+                slot1,
+                video_path=choices.video.path,
+                audio_path="",
+            )
         else:
-            lines.append("")
-            lines.append("→ Play once — not persisted.")
-        QMessageBox.information(self, entry.name, "\n".join(lines))
+            self._set_slot_media(slot1, video_path="", audio_path="")
+
+        # Picked audio → Slot 2 audio-only, heading to the user's haptic
+        # device (Slot 2's audio output — typically the USB dongle). This is
+        # true whether or not there's a video: Slot 2 is the "stim" slot.
+        if choices.audio:
+            self._set_slot_media(
+                slot2,
+                video_path="",
+                audio_path=choices.audio.path,
+            )
+        else:
+            self._set_slot_media(slot2, video_path="", audio_path="")
+
+        if not (choices.video or choices.audio):
+            QMessageBox.information(
+                self, "Nothing to play",
+                f"Scene '{entry.name}' has no video or audio file to play."
+            )
+            return
+
+        # Name the session from the primary media file.
+        primary = choices.video.path if choices.video else (
+            choices.audio.path if choices.audio else ""
+        )
+        if primary:
+            self._maybe_autofill_session_name(primary)
+
+        # Switch to Live tab and launch (paused — user still hits Play).
+        self._tabs.setCurrentIndex(0)
+        self._on_launch()
+
+    def _set_slot_media(
+        self,
+        data: dict,
+        *,
+        video_path: str | None = None,
+        audio_path: str | None = None,
+    ) -> None:
+        """Set video/audio paths on a slot's data dict + refresh labels.
+        `None` means 'leave unchanged'; empty string means 'clear'."""
+        if video_path is not None:
+            data["video_path"] = video_path
+            data["video_label"].setText(
+                os.path.basename(video_path) if video_path else "No file selected"
+            )
+            data["video_label"].setToolTip(video_path)
+        if audio_path is not None:
+            data["audio_path"] = audio_path
+            data["audio_label"].setText(
+                os.path.basename(audio_path) if audio_path else "(uses video audio)"
+            )
+            data["audio_label"].setToolTip(audio_path)
+        self._refresh_monitor_state(data)
 
     def _build_session_bar(self) -> QWidget:
         bar = QWidget()
@@ -705,6 +775,31 @@ class ControlWindow(QMainWindow):
         Session.add_recent(path)
         self.setWindowTitle(f"ForgePlayer — {session.name}")
 
+    def _default_session_save_path(self) -> str:
+        """Pre-fill the Save dialog with `<scene folder>/<session name>.forgeplayer-session`.
+
+        Priority for folder: the loaded session's folder → Slot 1's video
+        folder → Slot 1's audio folder → empty (dialog uses last-used dir).
+        Filename: the current session name, sanitized for Windows reserved
+        characters.
+        """
+        folder = ""
+        if self._session_path:
+            folder = os.path.dirname(self._session_path)
+        if not folder:
+            for slot_idx in range(3):
+                d = self._slot_data(slot_idx)
+                p = d.get("video_path", "") or d.get("audio_path", "")
+                if p:
+                    folder = os.path.dirname(p)
+                    break
+        name = (self._session_name.text() or "Untitled Session").strip()
+        # Strip Windows reserved characters so the dialog accepts the suggestion
+        for ch in r'<>:"/\|?*':
+            name = name.replace(ch, "_")
+        filename = f"{name}.forgeplayer-session"
+        return os.path.join(folder, filename) if folder else filename
+
     def _on_session_save(self) -> None:
         DebugLog.record("session.save.enter", has_path=bool(self._session_path))
         if self._session_path:
@@ -717,7 +812,8 @@ class ControlWindow(QMainWindow):
     def _on_session_save_as(self) -> None:
         DebugLog.record("session.save_as.dialog_open")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save session as", "", _SESSION_FILTER
+            self, "Save session as", self._default_session_save_path(),
+            _SESSION_FILTER,
         )
         DebugLog.record("session.save_as.dialog_closed", picked=bool(path))
         if path:

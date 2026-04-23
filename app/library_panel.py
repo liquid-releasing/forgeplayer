@@ -410,8 +410,12 @@ class LibraryPanel(QWidget):
         self._view.setSpacing(0)
         self._view.setSelectionMode(QAbstractItemView.SingleSelection)
         self._view.setMouseTracking(True)
-        self._view.doubleClicked.connect(self._on_activated)
-        self._view.activated.connect(self._on_activated)  # Enter key
+        # `activated` covers both double-click and Enter-key activation
+        # across platforms — don't also connect `doubleClicked` or the
+        # handler fires twice per double-click (opens the picker modal
+        # twice, which leaves a stray picker on top of the Live tab
+        # after the first pick's teardown).
+        self._view.activated.connect(self._on_activated)
 
         # Dark scrollbar / list background
         self._view.setStyleSheet(

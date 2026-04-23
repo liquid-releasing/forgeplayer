@@ -126,12 +126,31 @@ class TestScanSceneFolder:
     def test_nonexistent_folder_returns_none(self, tmp_path):
         assert scan_scene_folder(tmp_path / "does-not-exist") is None
 
-    def test_video_without_funscript_is_not_playable(self, tmp_path):
+    def test_video_without_funscript_is_still_playable(self, tmp_path):
+        # is_playable relaxed 2026-04-23: any playable media (video or
+        # audio) is enough. Funscripts are no longer required.
         scene_dir = _make_scene(tmp_path, "just_video", ["clip.mp4"])
+        entry = scan_scene_folder(scene_dir)
+        assert entry is not None
+        assert entry.is_playable
+
+    def test_funscript_without_video_or_audio_is_not_playable(self, tmp_path):
+        # Funscript alone isn't directly playable by mpv, so the scene
+        # needs media (video or audio) to qualify.
+        scene_dir = _make_scene(tmp_path, "just_script", ["clip.funscript"])
         assert scan_scene_folder(scene_dir) is None
 
-    def test_funscript_without_video_is_not_playable(self, tmp_path):
-        scene_dir = _make_scene(tmp_path, "just_script", ["clip.funscript"])
+    def test_audio_only_scene_is_playable(self, tmp_path):
+        # Twisted Tales-style: pre-rendered haptic mp3 with no video.
+        scene_dir = _make_scene(tmp_path, "audio_only", ["estim.mp3"])
+        entry = scan_scene_folder(scene_dir)
+        assert entry is not None
+        assert entry.is_playable
+        assert len(entry.audio_tracks) == 1
+
+    def test_zipped_funscript_alone_is_not_playable(self, tmp_path):
+        # User unzips themselves. ForgePlayer doesn't auto-extract.
+        scene_dir = _make_scene(tmp_path, "zipped_only", ["clip.funscript.zip"])
         assert scan_scene_folder(scene_dir) is None
 
     def test_simple_mechanical_scene(self, simple_mechanical_scene):
