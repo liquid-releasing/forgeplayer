@@ -59,28 +59,32 @@ _MAX_FILES_PER_SCENE = 10_000
 
 # ── Filename-tag extraction (no ffprobe) ──────────────────────────────────────
 
+# Filename-tag lookarounds use (?<![a-z]) / (?![a-z]) rather than \b because
+# \b treats `_` as a word character — so `scene_iris3.mp4` would not match
+# `\biris\d*\b`. Real-world filenames (Topaz outputs, etc.) use `_` heavily
+# as separator, and we need to catch those.
 _RESOLUTION_PATTERNS = [
-    (re.compile(r"(?i)\b(4k60|4k30|4k)\b"), "4k"),
-    (re.compile(r"(?i)\b(1440p|2k)\b"),     "1440p"),
-    (re.compile(r"(?i)\b(1080p|fhd|hd)\b"), "1080p"),
-    (re.compile(r"(?i)\b(720p)\b"),         "720p"),
-    (re.compile(r"(?i)\b(480p)\b"),         "480p"),
+    (re.compile(r"(?i)(?<![a-z])(4k60|4k30|4k)(?![a-z])"),  "4k"),
+    (re.compile(r"(?i)(?<![a-z])(1440p|2k)(?![a-z])"),      "1440p"),
+    (re.compile(r"(?i)(?<![a-z])(1080p|fhd|hd)(?![a-z])"),  "1080p"),
+    (re.compile(r"(?i)(?<![a-z])(720p)(?![a-z])"),          "720p"),
+    (re.compile(r"(?i)(?<![a-z])(480p)(?![a-z])"),          "480p"),
 ]
 # Resolution preference ranks live in catalog.py (shared with VideoVariant.preference_tier)
 
 _ASPECT_PATTERNS = [
-    (re.compile(r"(?i)\bultrawide\b"),  "ultrawide"),
-    (re.compile(r"(?i)\bcropped\b"),    "cropped"),
-    (re.compile(r"(?i)\bcrop\b"),       "cropped"),
+    (re.compile(r"(?i)(?<![a-z])ultrawide(?![a-z])"),  "ultrawide"),
+    (re.compile(r"(?i)(?<![a-z])cropped(?![a-z])"),    "cropped"),
+    (re.compile(r"(?i)(?<![a-z])crop(?![a-z])"),       "cropped"),
 ]
 
 _UPSCALER_PATTERNS = [
-    (re.compile(r"(?i)\biris\d*\b"),    "iris"),
-    (re.compile(r"(?i)\bchf\d*\b"),     "chf"),
-    (re.compile(r"(?i)\btopaz\b"),      "topaz"),
-    (re.compile(r"(?i)\brhea\b"),       "rhea"),
-    (re.compile(r"(?i)\bproteus\b"),    "proteus"),
-    (re.compile(r"(?i)\bnyx\d*\b"),     "nyx"),
+    (re.compile(r"(?i)(?<![a-z])iris\d*(?![a-z])"),    "iris"),
+    (re.compile(r"(?i)(?<![a-z])chf\d*(?![a-z])"),     "chf"),
+    (re.compile(r"(?i)(?<![a-z])topaz(?![a-z])"),      "topaz"),
+    (re.compile(r"(?i)(?<![a-z])rhea(?![a-z])"),       "rhea"),
+    (re.compile(r"(?i)(?<![a-z])proteus(?![a-z])"),    "proteus"),
+    (re.compile(r"(?i)(?<![a-z])nyx\d*(?![a-z])"),     "nyx"),
 ]
 
 

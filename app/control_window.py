@@ -20,6 +20,7 @@ from app.session import Session, SlotConfig
 from app.folder_scanner import auto_assign
 from app.library_panel import LibraryPanel
 from app.library.catalog import SceneCatalogEntry
+from app.select_picker import SelectPicker, SelectionChoices
 
 _SLOT_LABELS = ["Slot 1", "Slot 2", "Slot 3"]
 _POLL_MS = 100
@@ -217,25 +218,59 @@ class ControlWindow(QMainWindow):
     def _on_scene_activated(self, entry: SceneCatalogEntry) -> None:
         """Called when the user picks a scene in the Library panel.
 
-        Alpha behavior: show a dialog summarizing what would load. When the
-        select-picker + pin-persistence + playback integration slices land,
-        this will instead route through the picker (if ambiguous) then hand
-        the chosen files to SyncEngine."""
+        Behavior:
+        - If the scene is ambiguous (see SceneCatalogEntry.is_ambiguous),
+          show the SelectPicker modal. User's choices drive the load.
+        - If unambiguous, use the scanner's defaults directly.
+        - In either case, for now we just show a summary dialog of what
+          WOULD load (playback integration is a later slice)."""
+
+        if entry.is_ambiguous:
+            picker = SelectPicker(entry, parent=self)
+            if picker.exec() != SelectPicker.Accepted:
+                return  # user cancelled
+            choices = picker.choices()
+        else:
+            choices = SelectionChoices(
+                video=entry.default_video,
+                audio=entry.default_audio,
+                funscript_set=entry.default_funscript_set,
+                subtitle=None,
+                save_as_preset=False,
+            )
+
+        self._load_choices_stub(entry, choices)
+
+    def _load_choices_stub(
+        self,
+        entry: SceneCatalogEntry,
+        choices: SelectionChoices,
+    ) -> None:
+        """Summary dialog until playback integration slice lands.
+
+        When single-decoder playback is done this becomes: hand video +
+        audio + funscript-set to SyncEngine, seed Live panel, auto-switch
+        to Live tab."""
         lines = [
             f"Scene: {entry.name}",
             f"Folder: {entry.folder_path}",
             "",
-            f"Default video: {entry.default_video.filename if entry.default_video else '(none)'}",
-            f"Default audio: {entry.default_audio.filename if entry.default_audio else '(none)'}",
+            f"Video: {choices.video.filename if choices.video else '(none)'}",
+            f"Audio: {choices.audio.filename if choices.audio else '(none)'}",
         ]
-        if entry.default_funscript_set:
-            fset = entry.default_funscript_set
+        if choices.funscript_set:
+            fset = choices.funscript_set
             channels = list(fset.channels) if fset.channels else ["(main only)"]
             lines.append(f"Funscript set: {fset.base_stem}")
             lines.append(f"  channels: {', '.join(sorted(channels))}")
-        if entry.is_ambiguous:
+        if choices.subtitle:
+            lines.append(f"Subtitle: {choices.subtitle.language.upper()}")
+        if choices.save_as_preset:
             lines.append("")
-            lines.append("⚠ This scene is ambiguous — select picker will appear here once built.")
+            lines.append("→ Save & Play selected — pin persistence is in the next slice.")
+        else:
+            lines.append("")
+            lines.append("→ Play once — not persisted.")
         QMessageBox.information(self, entry.name, "\n".join(lines))
 
     def _build_session_bar(self) -> QWidget:

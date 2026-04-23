@@ -212,48 +212,80 @@ class SceneCatalogEntry:
     def has_prostate(self) -> bool:
         return any(fset.has_prostate for fset in self.funscript_sets)
 
+    # ── Per-group "needs user choice" flags ──────────────────────────────────
+    #
+    # These drive the select picker. The rule is: ask the user only when the
+    # scene contains genuinely different content that the player can't
+    # disambiguate from device/wall configuration alone. Mere size differences
+    # (resolution tags) are wall-automatic and don't warrant a picker.
+
+    @property
+    def needs_funscript_set_choice(self) -> bool:
+        """True when the scene has multiple distinct edit-variants of the
+        funscript (Magik-style) and the user must pick one."""
+        return len(self.funscript_sets) > 1
+
+    @property
+    def needs_generation_variant_choice(self) -> bool:
+        """True when at least one funscript set contains generation-modifier
+        suffixed channels (-stereostim, -2b, -foc-stim). The user must pick
+        which encoding to route to their device."""
+        return any(fset.has_generation_variants for fset in self.funscript_sets)
+
+    @property
+    def needs_audio_choice(self) -> bool:
+        """True when there are 2+ audio files — the player can't pick one
+        automatically without user input (mismatched stems, alt contributors,
+        hard/soft variants, etc.)."""
+        return len(self.audio_tracks) > 1
+
+    @property
+    def needs_video_choice(self) -> bool:
+        """True when the scene has videos with substantively different
+        renderings — specifically when upscaler states differ (original vs
+        Topaz-upscaled) or multiple different upscalers are applied.
+
+        Resolution-only differences (4K vs 1080p of the same original) do
+        NOT trigger this — the wall config picks by resolution.
+
+        Aspect variants (ultrawide-cropped) are wall-type choices, not user
+        choices — don't trigger either.
+        """
+        if len(self.videos) < 2:
+            return False
+        # Distinguish by the (is_upscaled) dimension of preference_tier
+        # — index [1] of the tuple. Aspect variants (index [0]) and
+        # resolution rank (index [2]) don't trigger picker.
+        upscale_states = {v.preference_tier[1] for v in self.videos}
+        if len(upscale_states) > 1:
+            return True
+        # All same upscale state — check if there are multiple distinct
+        # upscalers applied (iris vs chf vs rhea). Treat each upscaler tag
+        # as distinct content.
+        upscaler_tags_per_video = [
+            v.tags & {"iris", "chf", "topaz", "rhea", "proteus", "nyx"}
+            for v in self.videos
+        ]
+        distinct_upscaler_sets = {frozenset(t) for t in upscaler_tags_per_video if t}
+        return len(distinct_upscaler_sets) > 1
+
+    @property
+    def needs_subtitle_choice(self) -> bool:
+        """True when there are 2+ subtitle tracks (multiple languages).
+        Picker lets user pick language or None."""
+        return len(self.subtitles) > 1
+
     @property
     def is_ambiguous(self) -> bool:
-        """True when the select picker must be shown at tap time.
-
-        A scene is ambiguous if ANY of:
-        - more than one video with the SAME preference tier (i.e. the default
-          isn't clearly best — see scanner ordering for tiers)
-        - more than one audio track without an obvious primary (i.e. more
-          than one stem-matched, or zero stem-matched with multiple mismatched)
-        - more than one funscript set (edit-variants, like Magik)
-        """
-        if len(self.funscript_sets) > 1:
-            return True
-
-        # A set with generation-modifier-suffixed channels (-stereostim, -2b,
-        # -foc-stim) signals the scripter explicitly authored per-generation
-        # variants. The user may need to pick which encoding to use at select
-        # time, even when there's only one set by base-stem.
-        if any(fset.has_generation_variants for fset in self.funscript_sets):
-            return True
-
-        if len(self.audio_tracks) > 1:
-            # If there's exactly one stem-matched + N mismatched, the
-            # stem-matched is the obvious default; not ambiguous.
-            stem_matched = sum(1 for a in self.audio_tracks if a.stem_matches_main_video)
-            if stem_matched != 1:
-                return True
-
-        if len(self.videos) > 1:
-            # Ambiguous only when 2+ videos share the BEST preference tier
-            # (same aspect-variant / upscale / resolution bucket). A 4K
-            # original plus its Topaz-upscaled twin have clearly different
-            # tiers → not ambiguous. But two 4K originals (from different
-            # sources / encodes) genuinely tie → ambiguous.
-            best_tier = self.videos[0].preference_tier
-            tied_at_best = sum(
-                1 for v in self.videos if v.preference_tier == best_tier
-            )
-            if tied_at_best > 1:
-                return True
-
-        return False
+        """True when the select picker must be shown at tap time — union of
+        all per-group 'needs choice' flags."""
+        return (
+            self.needs_funscript_set_choice
+            or self.needs_generation_variant_choice
+            or self.needs_audio_choice
+            or self.needs_video_choice
+            or self.needs_subtitle_choice
+        )
 
     @property
     def is_playable(self) -> bool:

@@ -187,8 +187,16 @@ class TestScanSceneFolder:
         # Archive detected
         assert any(p.endswith(".zip") for p in entry.archives)
 
-        # NOT ambiguous — single funscript set, exactly one stem-matched audio
-        assert entry.is_ambiguous is False
+        # Ambiguous because 2 audio tracks — user must pick which to route
+        # (alpha rule: 2+ audio files → always needs_audio_choice; smart
+        # auto-match by stem is not enough signal on its own)
+        assert entry.is_ambiguous is True
+        assert entry.needs_audio_choice is True
+        # Video has 2 variants but only resolution differs → no video picker
+        assert entry.needs_video_choice is False
+        # One funscript set, no generation variants → no funscript picker
+        assert entry.needs_funscript_set_choice is False
+        assert entry.needs_generation_variant_choice is False
 
     def test_magik_edit_variants_are_ambiguous(self, magik_scene):
         entry = scan_scene_folder(magik_scene)
@@ -414,3 +422,117 @@ class TestScanLibraryRoot:
 
     def test_nonexistent_root_returns_empty(self, tmp_path):
         assert scan_library_root(tmp_path / "missing") == []
+
+
+class TestPerGroupAmbiguityFlags:
+    """The select picker asks group-by-group; each group has its own
+    needs_*_choice flag. Tests verify these flags fire only when the choice
+    is genuinely user-dependent (not resolvable from device / wall config)."""
+
+    def test_resolution_only_video_variants_do_not_need_choice(self, tmp_path):
+        """Multiple videos of the same original at different resolutions
+        → no picker; player picks by wall resolution."""
+        scene_dir = _make_scene(tmp_path, "ResOnly", [
+            "scene.mp4",          # plain
+            "scene.1080p30.mp4",  # explicit 1080p
+            "scene.4k60.mp4",     # 4K
+            "scene.funscript",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry is not None
+        assert entry.needs_video_choice is False
+
+    def test_upscaler_variants_need_choice(self, tmp_path):
+        """Original + Topaz-upscaled → substantively different renderings,
+        needs picker."""
+        scene_dir = _make_scene(tmp_path, "Upscaled", [
+            "scene.mp4",              # plain original
+            "scene_iris3.mp4",        # iris upscale
+            "scene.funscript",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry is not None
+        assert entry.needs_video_choice is True
+
+    def test_multiple_different_upscalers_need_choice(self, tmp_path):
+        """Iris vs CHF vs Rhea — all upscaled but different algorithms."""
+        scene_dir = _make_scene(tmp_path, "MultiUpscale", [
+            "scene_iris3.mp4",
+            "scene_chf3.mp4",
+            "scene_rhea.mp4",
+            "scene.funscript",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry is not None
+        assert entry.needs_video_choice is True
+
+    def test_aspect_variants_alone_do_not_need_choice(self, tmp_path):
+        """Plain + cropped → wall aspect picks automatically."""
+        scene_dir = _make_scene(tmp_path, "Aspects", [
+            "scene.mp4",
+            "scene-cropped-4k.mp4",
+            "scene-ultrawide.mp4",
+            "scene.funscript",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry is not None
+        assert entry.needs_video_choice is False
+
+    def test_single_audio_no_picker(self, tmp_path):
+        scene_dir = _make_scene(tmp_path, "OneAudio", [
+            "scene.mp4", "scene.funscript", "scene.mp3",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry.needs_audio_choice is False
+
+    def test_multiple_audio_needs_choice(self, tmp_path):
+        """Any 2+ audio files → needs picker (alt contributors, hard/soft,
+        estim-vs-beats variants all happen in the wild)."""
+        scene_dir = _make_scene(tmp_path, "MultiAudio", [
+            "scene.mp4", "scene.funscript",
+            "scene.mp3",
+            "scene-beats.mp3",
+            "scene-estim-audio.mp3",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry.needs_audio_choice is True
+
+    def test_single_funscript_set_no_picker(self, tmp_path):
+        scene_dir = _make_scene(tmp_path, "OneSet", [
+            "scene.mp4", "scene.funscript",
+            "scene.alpha.funscript", "scene.beta.funscript",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry.needs_funscript_set_choice is False
+
+    def test_multiple_funscript_sets_needs_choice(self, tmp_path):
+        """Magik-style: two base stems in one folder → edit variants."""
+        scene_dir = _make_scene(tmp_path, "EditVariants", [
+            "scene.mp4",
+            "scene.funscript", "scene.alpha.funscript",
+            "scene [edit].funscript", "scene [edit].alpha.funscript",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry.needs_funscript_set_choice is True
+
+    def test_no_subtitles_no_picker(self, tmp_path):
+        scene_dir = _make_scene(tmp_path, "NoSubs", [
+            "scene.mp4", "scene.funscript",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry.needs_subtitle_choice is False
+
+    def test_one_subtitle_no_picker(self, tmp_path):
+        scene_dir = _make_scene(tmp_path, "OneSub", [
+            "scene.mp4", "scene.funscript", "scene.en.srt",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry.needs_subtitle_choice is False
+
+    def test_multiple_subtitles_needs_choice(self, tmp_path):
+        scene_dir = _make_scene(tmp_path, "MultiSubs", [
+            "scene.mp4", "scene.funscript",
+            "scene.en.srt", "scene.es.srt", "scene.fr.srt",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry.needs_subtitle_choice is True
