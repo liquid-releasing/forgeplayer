@@ -166,12 +166,41 @@ class SyncEngine:
     # ── Device discovery ──────────────────────────────────────────────────────
 
     @staticmethod
-    def list_audio_devices() -> list[dict]:
-        """Return mpv's audio device list as [{name, description}, ...]."""
+    def list_audio_devices(include_hdmi: bool = False) -> list[dict]:
+        """Return mpv's audio device list as [{name, description}, ...].
+
+        HDMI/DisplayPort display-audio devices (e.g. a monitor's built-in
+        audio driver, which often has no speakers) are filtered out by
+        default — they appear in Windows' device list but confuse the
+        Scene/Haptic role picker. Pass ``include_hdmi=True`` to see the
+        full raw list.
+        """
         try:
             tmp = mpv.MPV()
             devices = list(tmp.audio_device_list)
             tmp.terminate()
-            return devices
         except Exception:
             return []
+        if include_hdmi:
+            return devices
+        return [d for d in devices if not _is_display_audio(d)]
+
+
+def _is_display_audio(device: dict) -> bool:
+    """Heuristically identify HDMI/DisplayPort 'phantom' audio devices.
+
+    mpv's WASAPI backend exposes device descriptions like
+    'Odyssey G95NC (HD Audio Driver for Display Audio)' and names like
+    'wasapi/{...DisplayPort...}'. The monitor itself has no speakers in
+    most setups, so these devices aren't useful for Scene/Haptic routing.
+    """
+    desc = (device.get("description", "") or "").lower()
+    name = (device.get("name", "") or "").lower()
+    haystack = desc + " " + name
+    needles = (
+        "display audio",
+        "displayport",
+        "hdmi",
+        "dp audio",
+    )
+    return any(n in haystack for n in needles)

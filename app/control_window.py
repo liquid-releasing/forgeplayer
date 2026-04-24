@@ -23,6 +23,7 @@ from app.library.catalog import SceneCatalogEntry
 from app.select_picker import SelectPicker, SelectionChoices
 from app.debug_log import DebugLog
 from app.widgets import ClickableSlider
+from app.preferences import Preferences
 
 _SLOT_LABELS = ["Slot 1", "Slot 2", "Slot 3"]
 _POLL_MS = 100
@@ -56,12 +57,16 @@ class ControlWindow(QMainWindow):
         self._seek_dragging = False
         self._session_path: str = ""
 
-        # Discover screens and audio devices
+        # Discover screens and audio devices (HDMI phantom devices filtered
+        # out — they confuse the Scene/Haptic role picker).
         self._screens: list[QScreen] = self.screen().virtualSiblings()
         raw_devices = SyncEngine.list_audio_devices()
         self._audio_devices: list[tuple[str, str]] = [
             (d["name"], d.get("description", d["name"])) for d in raw_devices
         ]
+
+        # Load persisted device-role preferences (Scene / Haptic 1 / Haptic 2).
+        self._prefs = Preferences.load()
 
         self._build_ui()
 
@@ -209,29 +214,116 @@ class ControlWindow(QMainWindow):
         return tab
 
     def _build_setup_tab(self) -> QWidget:
-        """Placeholder — Setup panel (monitors / audio / library / preferences)
-        is Phase 2 of the UI slice. Right now it's a stub explaining what
-        will live here."""
+        """Setup — device-role configuration. Set this up once; Library
+        clicks then auto-route Slot 1 to Scene Audio and Slot 2 to Haptic 1.
+
+        The v0.0.2 redesign will layer monitors, library roots, and preferences
+        sections under chevrons. For v0.0.1 alpha, audio device roles are the
+        minimum viable Setup — they close the "why did my haptic go to the
+        wrong device?" loop from library clicks.
+        """
         tab = QWidget()
-        v = QVBoxLayout(tab)
-        v.setContentsMargins(40, 40, 40, 40)
+        root = QVBoxLayout(tab)
+        root.setContentsMargins(40, 32, 40, 32)
+        root.setSpacing(16)
 
         title = QLabel("Setup")
-        f = title.font(); f.setPointSize(18); f.setBold(True); title.setFont(f)
-        v.addWidget(title)
+        tf = title.font(); tf.setPointSize(18); tf.setBold(True); title.setFont(tf)
+        root.addWidget(title)
 
-        body = QLabel(
-            "This tab will hold Monitors, Audio routing, Library roots, and "
-            "Preferences sections — each navigable via chevrons.\n\n"
-            "Alpha status: stub. Use the Library tab to scan scenes, and the "
-            "Live tab for playback (prototype)."
+        subtitle = QLabel(
+            "Pick which physical audio device handles each role. Library clicks "
+            "use these to route automatically — you only set this once."
         )
-        body.setStyleSheet("color: #9ba3c4;")
-        body.setWordWrap(True)
-        v.addWidget(body)
-        v.addStretch()
+        subtitle.setStyleSheet("color: #9ba3c4;")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
 
+        # Device-role group
+        role_box = QGroupBox("Audio device roles")
+        rl = QVBoxLayout(role_box)
+        rl.setSpacing(10)
+
+        self._setup_scene_combo = self._build_role_combo(
+            saved_value=self._prefs.scene_audio_device,
+        )
+        self._setup_haptic1_combo = self._build_role_combo(
+            saved_value=self._prefs.haptic1_audio_device,
+        )
+        self._setup_haptic2_combo = self._build_role_combo(
+            saved_value=self._prefs.haptic2_audio_device,
+        )
+
+        self._setup_scene_combo.currentIndexChanged.connect(self._on_setup_changed)
+        self._setup_haptic1_combo.currentIndexChanged.connect(self._on_setup_changed)
+        self._setup_haptic2_combo.currentIndexChanged.connect(self._on_setup_changed)
+
+        rl.addLayout(self._labeled_row(
+            "Scene audio", self._setup_scene_combo,
+            "Video's embedded sound — typically your speakers or headphones.",
+        ))
+        rl.addLayout(self._labeled_row(
+            "Haptic 1 (main stim)", self._setup_haptic1_combo,
+            "Primary estim output — typically your USB audio dongle.",
+        ))
+        rl.addLayout(self._labeled_row(
+            "Haptic 2 (prostate)", self._setup_haptic2_combo,
+            "Optional second estim output for prostate channels. Leave unset if unused.",
+        ))
+
+        root.addWidget(role_box)
+
+        # Save-status line
+        self._setup_status = QLabel("")
+        self._setup_status.setStyleSheet("color: #9ba3c4; font-size: 11px;")
+        root.addWidget(self._setup_status)
+
+        root.addStretch()
         return tab
+
+    def _build_role_combo(self, *, saved_value: str) -> QComboBox:
+        combo = QComboBox()
+        combo.setMinimumHeight(32)
+        combo.addItem("— not set —", "")
+        for name, desc in self._audio_devices:
+            combo.addItem(desc, name)
+        # Restore previous selection if the device is still available.
+        for idx in range(combo.count()):
+            if combo.itemData(idx) == saved_value:
+                combo.setCurrentIndex(idx)
+                break
+        return combo
+
+    @staticmethod
+    def _labeled_row(
+        label_text: str, widget: QWidget, help_text: str = "",
+    ) -> QVBoxLayout:
+        row = QVBoxLayout()
+        row.setSpacing(2)
+        label = QLabel(label_text)
+        lf = label.font(); lf.setBold(True); label.setFont(lf)
+        row.addWidget(label)
+        row.addWidget(widget)
+        if help_text:
+            helper = QLabel(help_text)
+            helper.setStyleSheet("color: #6b7280; font-size: 11px;")
+            helper.setWordWrap(True)
+            row.addWidget(helper)
+        return row
+
+    def _on_setup_changed(self) -> None:
+        self._prefs.scene_audio_device = self._setup_scene_combo.currentData() or ""
+        self._prefs.haptic1_audio_device = self._setup_haptic1_combo.currentData() or ""
+        self._prefs.haptic2_audio_device = self._setup_haptic2_combo.currentData() or ""
+        self._prefs.save()
+        DebugLog.record(
+            "setup.prefs_saved",
+            scene=bool(self._prefs.scene_audio_device),
+            haptic1=bool(self._prefs.haptic1_audio_device),
+            haptic2=bool(self._prefs.haptic2_audio_device),
+        )
+        self._setup_status.setText(f"Saved to {Preferences.path()}")
+        QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
 
     def _on_scene_activated(self, entry: SceneCatalogEntry) -> None:
         """Called when the user picks a scene in the Library panel.
@@ -327,6 +419,11 @@ class ControlWindow(QMainWindow):
             )
             return
 
+        # Apply Setup's device roles to the slots. Scene audio → Slot 1,
+        # Haptic 1 → Slot 2. Users who haven't configured Setup yet keep
+        # whatever device the slot's combo is currently showing.
+        self._apply_setup_roles_to_slots()
+
         # Library activation always starts a fresh unsaved session. Without
         # this, clicking a different scene while a loaded session file was
         # still active would let Save silently overwrite the old file with
@@ -356,6 +453,25 @@ class ControlWindow(QMainWindow):
         # Switch to Live tab and launch (paused — user still hits Play).
         self._tabs.setCurrentIndex(0)
         self._on_launch()
+
+    def _apply_setup_roles_to_slots(self) -> None:
+        """Set Slot 1 and Slot 2's audio-output combos from Setup's roles.
+        No-op for a role that isn't configured yet — the slot keeps whatever
+        was there, so a partial Setup (only Haptic 1 configured, for example)
+        still helps without clobbering the Scene slot."""
+        role_to_slot = (
+            (self._prefs.scene_audio_device, 0),
+            (self._prefs.haptic1_audio_device, 1),
+        )
+        for device_id, slot_idx in role_to_slot:
+            if not device_id:
+                continue
+            data = self._slot_data(slot_idx)
+            combo: QComboBox = data["audio_combo"]
+            for idx in range(combo.count()):
+                if combo.itemData(idx) == device_id:
+                    combo.setCurrentIndex(idx)
+                    break
 
     def _set_slot_media(
         self,
@@ -522,7 +638,8 @@ class ControlWindow(QMainWindow):
         # ── Audio device ──
         layout.addWidget(QLabel("Audio output:"))
         audio_combo = QComboBox()
-        audio_combo.addItem("System default", "")
+        # Drop "System default" — forces explicit device pick so haptic
+        # output never silently lands on the wrong device.
         for name, desc in self._audio_devices:
             audio_combo.addItem(desc, name)
         layout.addWidget(audio_combo)
