@@ -2,22 +2,32 @@
 """Funscript file loader + 1D→2D radial conversion.
 
 The Stim slot in v0.0.2 plays funscripts via the vendored restim stim_math
-synthesis engine. Two input paths feed the same `ThreePhaseAlgorithm`:
+synthesis engine. Two input paths feed into the same channel carrier:
 
-  - **Native stereostim**: scene folder has `{stem}.alpha.funscript` +
-    `{stem}.beta.funscript`. We load both and feed alpha/beta arrays
-    directly — no conversion.
+  - **Native stereostim / FOC-content**: scene folder has
+    `{stem}.alpha.funscript` + `{stem}.beta.funscript` (and optionally
+    `frequency`, `pulse_frequency`, `pulse_width`, `pulse_rise_time`,
+    `volume`). Loaded directly — no conversion.
 
   - **Legacy 2b / mechanical**: scene folder has only `{stem}.funscript`
     (1-D position). We run a radial-half-circle conversion (per restim's
     `funscript_1d_to_2d.py`) to synthesize alpha + beta sample arrays.
+    Optional parameter channels load the same way as the native path if
+    present alongside the 1D file.
 
-Both paths produce a `StimChannels` record holding dense `(t, alpha, beta)`
-arrays that the synth driver feeds into restim's `WriteProtectedAxis`.
+Both paths produce a `StimChannels` record carrying dense alpha/beta
+sample arrays plus optional parameter channels in their sparse action
+form. The synth driver ([app/stim_synth.py](app/stim_synth.py)) decides
+between continuous and pulse-based synthesis based on which parameter
+channels are present and rescales values from funscript-space 0..1 to
+each parameter's native axis range.
 
-Position values throughout are normalized to floats in the natural funscript
-range (0.0 .. 1.0 maps to the 0..100 integer `pos` field on disk). Times
-are seconds.
+See `docs/architecture/stim-synthesis.md` for the full device-support
+matrix and the channel consumption table.
+
+Position values throughout are normalized to floats in the natural
+funscript range (0.0 .. 1.0 maps to the 0..100 integer `pos` field on
+disk). Times are seconds.
 
 The radial conversion is a port of `restim/funscript_1d_to_2d.py` at the
 pinned commit (see `app/vendor/restim_stim_math/VERSION`). The math is
@@ -50,16 +60,44 @@ class FunscriptActions:
 
 @dataclass(frozen=True)
 class StimChannels:
-    """Dense alpha + beta arrays ready for the threephase synthesis engine.
+    """Channel set ready for one stim synth instance.
 
-    Both arrays share the same `t` time base. `source` records which path
-    produced them so the synth driver / debug log can tell legacy 2b
-    apart from native stereostim.
+    `t` + `alpha` + `beta` are the required dense arrays that carry
+    position data (from either the native stereostim path or radial
+    1D→2D conversion). All other channels are optional; a `None` field
+    means "use the synth's per-parameter default constant."
+
+    Parameter channels stay in sparse `FunscriptActions` form and are
+    rescaled + turned into precomputed axes by the synth driver — each
+    channel has its own native axis range (see
+    `docs/architecture/stim-synthesis.md`).
     """
+    # Required dense arrays (shared time axis)
     t: np.ndarray
     alpha: np.ndarray
     beta: np.ndarray
     source: Literal["radial_1d", "native_stereostim"]
+
+    # Optional parameter channels (raw action form)
+    volume: FunscriptActions | None = None
+    carrier_frequency: FunscriptActions | None = None
+    pulse_frequency: FunscriptActions | None = None
+    pulse_width: FunscriptActions | None = None
+    pulse_rise_time: FunscriptActions | None = None
+
+    @property
+    def has_pulse_params(self) -> bool:
+        """True when any `pulse_*` channel is present.
+
+        The synth driver uses this to dispatch between the continuous
+        waveform algorithm (no pulse shaping) and the pulse-based
+        algorithm (shaped discrete pulses driven by pulse_frequency /
+        pulse_width / pulse_rise_time).
+        """
+        return any(
+            p is not None
+            for p in (self.pulse_frequency, self.pulse_width, self.pulse_rise_time)
+        )
 
 
 def load_funscript(path: str | Path) -> FunscriptActions:
@@ -139,24 +177,40 @@ def radial_1d_to_2d(
     )
 
 
-def load_stim_channels(funscript_set: FunscriptSet) -> StimChannels:
-    """Load alpha+beta from a FunscriptSet, picking the right path.
+def load_stim_channels(
+    funscript_set: FunscriptSet,
+    *,
+    prostate: bool = False,
+) -> StimChannels | None:
+    """Build a `StimChannels` for the main or prostate stim synth.
 
-    Picks native stereostim if both `alpha.funscript` and `beta.funscript`
-    are present; else falls back to radial 1-D→2-D from the main funscript.
+    When `prostate=False` (default), loads the scene's main-stim channels
+    — the `-prostate`-less channel names, falling back to radial 1D→2D
+    from the main `.funscript` if explicit alpha+beta aren't present.
 
-    Raises `ValueError` if the set has neither path — caller should have
-    already filtered via `FunscriptSet.supported_generations`.
+    When `prostate=True`, loads `alpha-prostate` / `beta-prostate` /
+    `volume-prostate`. Returns **None** (no synth needed) when those
+    aren't present — the main `.funscript` is NOT used as a 1D fallback
+    for the prostate pair, it's scripted for the primary electrode pair.
 
-    Subchannel-modified channels (`alpha-stereostim`, `alpha-prostate`)
-    are not consumed here. The select picker collapses the user's chosen
-    generation variant down to plain `alpha` / `beta` channel names before
-    we reach this loader (per docs/architecture/restim-channels.md).
-    Prostate is a separate slot and goes through this same loader against
-    a FunscriptSet whose channels were filtered to the prostate variants.
+    Carrier + pulse-shape channels (`frequency`, `pulse_frequency`,
+    `pulse_width`, `pulse_rise_time`) are scene-wide — both main and
+    prostate synths read them from the same plain-named funscripts. Only
+    alpha/beta/volume diverge via the `-prostate` suffix. This matches
+    what FunscriptForge emits (Euphoria ships `volume-prostate` but no
+    `pulse_frequency-prostate`).
+
+    Raises `ValueError` for the main path when the set has no playable
+    position source — caller should have already filtered via
+    `FunscriptSet.supported_generations`.
     """
-    alpha_path = funscript_set.channels.get("alpha")
-    beta_path = funscript_set.channels.get("beta")
+    alpha_name = "alpha-prostate" if prostate else "alpha"
+    beta_name = "beta-prostate" if prostate else "beta"
+    volume_name = "volume-prostate" if prostate else "volume"
+
+    alpha_path = funscript_set.channels.get(alpha_name)
+    beta_path = funscript_set.channels.get(beta_name)
+
     if alpha_path and beta_path:
         a = load_funscript(alpha_path)
         b = load_funscript(beta_path)
@@ -168,21 +222,42 @@ def load_stim_channels(funscript_set: FunscriptSet) -> StimChannels:
         t = np.unique(np.concatenate([a.t, b.t]))
         alpha_dense = np.interp(t, a.t, a.p)
         beta_dense = np.interp(t, b.t, b.p)
-        return StimChannels(
-            t=t, alpha=alpha_dense, beta=beta_dense,
-            source="native_stereostim",
-        )
-
-    if funscript_set.main_path:
+        source: Literal["radial_1d", "native_stereostim"] = "native_stereostim"
+    elif prostate:
+        return None
+    elif funscript_set.main_path:
         actions = load_funscript(funscript_set.main_path)
         if actions.t.size < 2:
             raise ValueError(
                 f"Main funscript has fewer than 2 actions, can't synthesize: "
                 f"{funscript_set.main_path}"
             )
-        return radial_1d_to_2d(actions)
+        radial = radial_1d_to_2d(actions)
+        t = radial.t
+        alpha_dense = radial.alpha
+        beta_dense = radial.beta
+        source = "radial_1d"
+    else:
+        raise ValueError(
+            f"FunscriptSet has no playable channels (need alpha+beta or main): "
+            f"{funscript_set.base_stem}"
+        )
 
-    raise ValueError(
-        f"FunscriptSet has no playable channels (need alpha+beta or main): "
-        f"{funscript_set.base_stem}"
+    def _opt(name: str) -> FunscriptActions | None:
+        path = funscript_set.channels.get(name)
+        if not path:
+            return None
+        actions = load_funscript(path)
+        return actions if actions.t.size > 0 else None
+
+    return StimChannels(
+        t=t,
+        alpha=alpha_dense,
+        beta=beta_dense,
+        source=source,
+        volume=_opt(volume_name),
+        carrier_frequency=_opt("frequency"),
+        pulse_frequency=_opt("pulse_frequency"),
+        pulse_width=_opt("pulse_width"),
+        pulse_rise_time=_opt("pulse_rise_time"),
     )

@@ -101,14 +101,33 @@ def _rewrite_imports(path: Path, at_top_level: bool) -> None:
         new = re.sub(
             r"^from stim_math\.", "from ..", new, flags=re.M,
         )
-        # import stim_math.X -> from .. import X  (X = top-level module)
+        # import stim_math.X -> from .. import X as _X_module
+        #
+        # We alias to `_X_module` instead of leaving it bare because some
+        # upstream files reuse the module name as a method parameter —
+        # e.g. `add_next_pulse_to_audio_buffer(self, samplerate, pulse: PulseInfo)`
+        # in pulse_based.py. A bare `from .. import pulse` gets shadowed
+        # by the parameter inside the function, turning `pulse.create_pause(...)`
+        # into an AttributeError on PulseInfo. Aliased imports side-step that
+        # collision regardless of what parameter names exist in the file.
+        aliased: list[str] = []
+
+        def _alias_import(match: "re.Match[str]") -> str:
+            name = match.group(1)
+            aliased.append(name)
+            return f"from .. import {name} as _{name}_module"
+
         new = re.sub(
             r"^import stim_math\.(\w+)\s*$",
-            r"from .. import \1", new, flags=re.M,
+            _alias_import, new, flags=re.M,
         )
-        # After the above, the body may still reference `stim_math.X.Y`;
-        # strip the `stim_math.` prefix so `stim_math.pulse.foo()` becomes
-        # `pulse.foo()`.
+        # Rewrite body references `stim_math.X.` → `_X_module.` for the
+        # names we aliased above.
+        for name in aliased:
+            new = re.sub(rf"\bstim_math\.{name}\b", f"_{name}_module", new)
+        # Any remaining `stim_math.` prefix comes from `from stim_math.X import Y`
+        # rewrites above (where `Y` is already imported bare and no module
+        # reference remains in the body) — strip as a safety net.
         new = re.sub(r"\bstim_math\.", "", new)
 
     if new != text:

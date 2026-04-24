@@ -254,3 +254,201 @@ class TestLoadStimChannels:
 
         with pytest.raises(ValueError, match="empty"):
             load_stim_channels(fs)
+
+
+# ── Parameter channels (volume / carrier / pulse_*) ──────────────────────────
+
+class TestLoadStimChannelsWithParameters:
+    def test_loads_volume_channel(self, tmp_path: Path):
+        alpha = tmp_path / "scene.alpha.funscript"
+        beta = tmp_path / "scene.beta.funscript"
+        volume = tmp_path / "scene.volume.funscript"
+        _write_funscript(alpha, [(0, 0), (1000, 100)])
+        _write_funscript(beta, [(0, 50), (1000, 50)])
+        _write_funscript(volume, [(0, 80), (1000, 60)])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=None,
+            channels={"alpha": str(alpha), "beta": str(beta), "volume": str(volume)},
+        )
+
+        ch = load_stim_channels(fs)
+
+        assert ch.volume is not None
+        np.testing.assert_array_almost_equal(ch.volume.p, [0.8, 0.6])
+
+    def test_loads_full_pulse_based_channel_set(self, tmp_path: Path):
+        """Replicate the Euphoria pack shape — alpha/beta + all param channels."""
+        names = [
+            "alpha", "beta", "frequency", "volume",
+            "pulse_frequency", "pulse_width", "pulse_rise_time",
+        ]
+        channels = {}
+        for name in names:
+            p = tmp_path / f"scene.{name}.funscript"
+            _write_funscript(p, [(0, 50), (1000, 50)])
+            channels[name] = str(p)
+
+        fs = FunscriptSet(base_stem="scene", main_path=None, channels=channels)
+        ch = load_stim_channels(fs)
+
+        assert ch.carrier_frequency is not None
+        assert ch.volume is not None
+        assert ch.pulse_frequency is not None
+        assert ch.pulse_width is not None
+        assert ch.pulse_rise_time is not None
+        assert ch.has_pulse_params is True
+
+    def test_alpha_beta_only_has_no_pulse_params(self, tmp_path: Path):
+        alpha = tmp_path / "scene.alpha.funscript"
+        beta = tmp_path / "scene.beta.funscript"
+        _write_funscript(alpha, [(0, 0), (1000, 100)])
+        _write_funscript(beta, [(0, 50), (1000, 50)])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=None,
+            channels={"alpha": str(alpha), "beta": str(beta)},
+        )
+
+        ch = load_stim_channels(fs)
+
+        assert ch.has_pulse_params is False
+        assert ch.volume is None
+        assert ch.carrier_frequency is None
+
+    def test_empty_param_file_treated_as_absent(self, tmp_path: Path):
+        """An empty volume funscript should NOT override the default constant.
+
+        FunscriptForge sometimes ships zero-action .funscript files for
+        channels the scripter didn't actually author — those shouldn't
+        silence the synth.
+        """
+        alpha = tmp_path / "scene.alpha.funscript"
+        beta = tmp_path / "scene.beta.funscript"
+        volume = tmp_path / "scene.volume.funscript"
+        _write_funscript(alpha, [(0, 0), (1000, 100)])
+        _write_funscript(beta, [(0, 50), (1000, 50)])
+        _write_funscript(volume, [])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=None,
+            channels={"alpha": str(alpha), "beta": str(beta), "volume": str(volume)},
+        )
+
+        ch = load_stim_channels(fs)
+
+        assert ch.volume is None
+
+    def test_pulse_frequency_alone_flags_pulse_based(self, tmp_path: Path):
+        alpha = tmp_path / "scene.alpha.funscript"
+        beta = tmp_path / "scene.beta.funscript"
+        pf = tmp_path / "scene.pulse_frequency.funscript"
+        _write_funscript(alpha, [(0, 0), (1000, 100)])
+        _write_funscript(beta, [(0, 50), (1000, 50)])
+        _write_funscript(pf, [(0, 30), (1000, 40)])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=None,
+            channels={
+                "alpha": str(alpha), "beta": str(beta),
+                "pulse_frequency": str(pf),
+            },
+        )
+
+        ch = load_stim_channels(fs)
+
+        assert ch.has_pulse_params is True
+
+
+# ── Prostate channel loading ─────────────────────────────────────────────────
+
+class TestLoadStimChannelsProstate:
+    def test_prostate_loads_prostate_variants(self, tmp_path: Path):
+        ap = tmp_path / "scene.alpha-prostate.funscript"
+        bp = tmp_path / "scene.beta-prostate.funscript"
+        vp = tmp_path / "scene.volume-prostate.funscript"
+        _write_funscript(ap, [(0, 0), (1000, 100)])
+        _write_funscript(bp, [(0, 50), (1000, 50)])
+        _write_funscript(vp, [(0, 70), (1000, 70)])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=None,
+            channels={
+                "alpha-prostate": str(ap),
+                "beta-prostate": str(bp),
+                "volume-prostate": str(vp),
+            },
+        )
+
+        ch = load_stim_channels(fs, prostate=True)
+
+        assert ch is not None
+        assert ch.source == "native_stereostim"
+        np.testing.assert_array_almost_equal(ch.volume.p, [0.7, 0.7])
+
+    def test_prostate_shares_pulse_params_with_main(self, tmp_path: Path):
+        """Pulse shape channels are not prostate-suffixed in FunscriptForge
+        packs — the prostate synth should read the same plain files the
+        main synth reads.
+        """
+        ap = tmp_path / "scene.alpha-prostate.funscript"
+        bp = tmp_path / "scene.beta-prostate.funscript"
+        pf = tmp_path / "scene.pulse_frequency.funscript"
+        pw = tmp_path / "scene.pulse_width.funscript"
+        _write_funscript(ap, [(0, 0), (1000, 100)])
+        _write_funscript(bp, [(0, 50), (1000, 50)])
+        _write_funscript(pf, [(0, 30), (1000, 40)])
+        _write_funscript(pw, [(0, 50), (1000, 50)])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=None,
+            channels={
+                "alpha-prostate": str(ap),
+                "beta-prostate": str(bp),
+                "pulse_frequency": str(pf),
+                "pulse_width": str(pw),
+            },
+        )
+
+        ch = load_stim_channels(fs, prostate=True)
+
+        assert ch is not None
+        assert ch.pulse_frequency is not None
+        assert ch.pulse_width is not None
+
+    def test_prostate_returns_none_when_no_prostate_channels(self, tmp_path: Path):
+        """A main-only scene doesn't spawn a prostate synth."""
+        alpha = tmp_path / "scene.alpha.funscript"
+        beta = tmp_path / "scene.beta.funscript"
+        _write_funscript(alpha, [(0, 0), (1000, 100)])
+        _write_funscript(beta, [(0, 50), (1000, 50)])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=None,
+            channels={"alpha": str(alpha), "beta": str(beta)},
+        )
+
+        assert load_stim_channels(fs, prostate=True) is None
+
+    def test_prostate_has_no_1d_fallback(self, tmp_path: Path):
+        """Even with a main .funscript, prostate=True returns None if
+        there's no alpha-prostate/beta-prostate — the main 1D is for the
+        primary pair, not the prostate pair.
+        """
+        main = tmp_path / "scene.funscript"
+        _write_funscript(main, [(0, 0), (1000, 100)])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=str(main),
+            channels={},
+        )
+
+        assert load_stim_channels(fs, prostate=True) is None

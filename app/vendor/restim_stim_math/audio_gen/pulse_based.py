@@ -2,10 +2,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .. import pulse
+from .. import pulse as _pulse_module
 from .. import threephase
 from .base_classes import AudioGenerationAlgorithm
-from .. import threephase
 from .various import ThreePhasePosition, VibrationAlgorithm
 from .params import ThreephasePulsebasedAlgorithmParams, ThreephaseCalibrationParams, SafetyParams, ThreephaseABTestAlgorithmParams
 from ..axis import AbstractMediaSync
@@ -58,7 +57,7 @@ class ThreePhasePulseBasedAlgorithmBase(AudioGenerationAlgorithm):
         return L, R
 
     def add_next_pulse_to_audio_buffer(self, samplerate, pulse: PulseInfo):
-        pulse_envelope = pulse.create_pulse_with_ramp_time(
+        pulse_envelope = _pulse_module.create_pulse_with_ramp_time(
             pulse.pulse_length_in_samples(samplerate),
             pulse.pulse_width_in_carrier_cycles,
             pulse.rise_time_in_carrier_cycles)
@@ -67,7 +66,7 @@ class ThreePhasePulseBasedAlgorithmBase(AudioGenerationAlgorithm):
             # TODO: make more efficient
             pulse_envelope *= 0
 
-        pause = pulse.create_pause(pulse.pause_length_in_samples(samplerate))
+        pause = _pulse_module.create_pause(pulse.pause_length_in_samples(samplerate))
 
         theta = pulse.start_angle + np.linspace(0, 2 * np.pi * pulse.pulse_width_in_carrier_cycles,
                                                 len(pulse_envelope)) * pulse.polarity
