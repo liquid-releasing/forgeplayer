@@ -21,6 +21,7 @@ from app.folder_scanner import auto_assign
 from app.library_panel import LibraryPanel
 from app.library.catalog import SceneCatalogEntry
 from app.select_picker import SelectPicker, SelectionChoices
+from app.library.pins import has_pin, load_pin, resolve_pin, save_pin
 from app.debug_log import DebugLog
 from app.widgets import ClickableSlider
 from app.preferences import Preferences
@@ -104,6 +105,9 @@ class ControlWindow(QMainWindow):
 
         self._library_panel = LibraryPanel()
         self._library_panel.scene_activated.connect(self._on_scene_activated)
+        self._library_panel.scene_change_picks_requested.connect(
+            lambda entry: self._on_scene_activated(entry, force_picker=True)
+        )
         self._tabs.addTab(self._library_panel, "Library")
 
         vbox.addWidget(self._tabs, 1)
@@ -518,27 +522,86 @@ class ControlWindow(QMainWindow):
         self._setup_status.setText(f"Saved to {Preferences.path()}")
         QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
 
-    def _on_scene_activated(self, entry: SceneCatalogEntry) -> None:
+    def _on_scene_activated(
+        self, entry: SceneCatalogEntry, *, force_picker: bool = False,
+    ) -> None:
         """Called when the user picks a scene in the Library panel.
 
-        If ambiguous, ask the user via SelectPicker; otherwise use scanner
-        defaults. Then route the resulting video/audio into Live slots,
-        switch to the Live tab, and launch the players (paused — user
-        still hits Play for the two-step workflow)."""
-        if entry.is_ambiguous:
-            picker = SelectPicker(entry, parent=self)
-            if picker.exec() != SelectPicker.Accepted:
-                DebugLog.record("library.activate.cancelled", scene=entry.name)
-                return
-            choices = picker.choices()
-        else:
-            choices = SelectionChoices(
-                video=entry.default_video,
-                audio=entry.default_audio,
-                funscript_set=entry.default_funscript_set,
-                subtitle=None,
-                save_as_preset=False,
+        Pin-persistence flow (v0.0.1):
+
+        - If a pin file exists for the scene and all referenced files still
+          exist, skip the picker and replay the user's remembered choices.
+        - Otherwise (first play, stale pin, or explicit "change picks"),
+          show the picker pre-filled with defaults or the existing pin,
+          then persist the new choices on accept.
+        """
+        choices: SelectionChoices | None = None
+
+        pin = load_pin(entry) if not force_picker else None
+        preselect: SelectionChoices | None = None
+
+        if pin is not None:
+            resolved = resolve_pin(entry, pin)
+            if not resolved.is_stale:
+                choices = SelectionChoices(
+                    video=resolved.video,
+                    audio=resolved.audio,
+                    funscript_set=resolved.funscript_set,
+                    subtitle=resolved.subtitle,
+                )
+                DebugLog.record("library.activate.pin_replayed", scene=entry.name)
+            else:
+                # Pin exists but some referenced file is gone — re-pick,
+                # pre-selecting whatever the pin still matches.
+                preselect = SelectionChoices(
+                    video=resolved.video,
+                    audio=resolved.audio,
+                    funscript_set=resolved.funscript_set,
+                    subtitle=resolved.subtitle,
+                )
+                DebugLog.record(
+                    "library.activate.pin_stale",
+                    scene=entry.name,
+                    stale=resolved.stale_fields,
+                )
+
+        if choices is None:
+            # Need user input — via picker if ambiguous or in change mode,
+            # else scanner defaults.
+            if entry.is_ambiguous or force_picker:
+                picker = SelectPicker(
+                    entry,
+                    parent=self,
+                    preselect=preselect,
+                    change_mode=force_picker,
+                )
+                if picker.exec() != SelectPicker.Accepted:
+                    DebugLog.record("library.activate.cancelled", scene=entry.name)
+                    return
+                choices = picker.choices()
+            else:
+                choices = SelectionChoices(
+                    video=entry.default_video,
+                    audio=entry.default_audio,
+                    funscript_set=entry.default_funscript_set,
+                    subtitle=None,
+                )
+
+        # Persist the picks — auto-save on every successful activation.
+        try:
+            save_pin(
+                entry,
+                video=choices.video,
+                audio=choices.audio,
+                funscript_set=choices.funscript_set,
+                subtitle=choices.subtitle,
             )
+            DebugLog.record("library.pin_saved", scene=entry.name)
+        except Exception as exc:
+            DebugLog.record(
+                "library.pin_save_failed", scene=entry.name, error=repr(exc)
+            )
+
         self._apply_scene_choices(entry, choices)
 
     def _apply_scene_choices(

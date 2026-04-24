@@ -44,15 +44,16 @@ class SelectionChoices:
     Any field set to None means the user didn't pick (or there was nothing
     to pick). The caller should fall back to the scene's `default_*` for
     that slot when None.
+
+    Persistence is always-on since 2026-04-24 (pin persistence design in
+    ``memory/project_forgeplayer_pin_persistence.md``): the caller always
+    writes a pin file after the picker accepts. The old ``save_as_preset``
+    flag was removed — there's no "play once" mode.
     """
     video: VideoVariant | None = None
     audio: AudioVariant | None = None
     funscript_set: FunscriptSet | None = None
     subtitle: SubtitleTrack | None = None
-    save_as_preset: bool = False
-    """When True, the caller should persist these choices to
-    `{scene.folder_path}/{base_stem}.forgeplayer.json` and the global
-    catalog. When False, play only for this session."""
 
 
 # ── Theme (matches library_panel palette) ────────────────────────────────────
@@ -75,10 +76,24 @@ class SelectPicker(QDialog):
                 write_pin_json(...)
     """
 
-    def __init__(self, entry: SceneCatalogEntry, parent=None) -> None:
+    def __init__(
+        self,
+        entry: SceneCatalogEntry,
+        parent=None,
+        *,
+        preselect: SelectionChoices | None = None,
+        change_mode: bool = False,
+    ) -> None:
+        """*preselect*: pre-check the radios matching the fields of this
+        existing SelectionChoices (used by "Change picks" to show the
+        user's current pins as the starting state).
+
+        *change_mode*: swap the title to "Change picks" for clarity when
+        the picker is re-opened from a pinned scene.
+        """
         super().__init__(parent)
         self._entry = entry
-        self._save = False
+        self._preselect = preselect
 
         # Track radio-group state so choices() can read them after accept
         self._video_group: QButtonGroup | None = None
@@ -92,7 +107,10 @@ class SelectPicker(QDialog):
         self._funscript_map: dict[int, FunscriptSet] = {}
         self._subtitle_map: dict[int, SubtitleTrack | None] = {}
 
-        self.setWindowTitle(f"Pick options — {entry.name}")
+        if change_mode:
+            self.setWindowTitle(f"Change picks — {entry.name}")
+        else:
+            self.setWindowTitle(f"Pick options — {entry.name}")
         self.setMinimumWidth(520)
         self._build_ui()
 
@@ -101,7 +119,7 @@ class SelectPicker(QDialog):
     def choices(self) -> SelectionChoices:
         """Read the current radio state into a SelectionChoices dataclass.
         Call after `exec()` returns Accepted."""
-        out = SelectionChoices(save_as_preset=self._save)
+        out = SelectionChoices()
 
         if self._video_group is not None and self._video_group.checkedId() >= 0:
             out.video = self._video_map.get(self._video_group.checkedId())
@@ -197,21 +215,18 @@ class SelectPicker(QDialog):
         btn_cancel.clicked.connect(self.reject)
         footer_layout.addWidget(btn_cancel)
 
-        btn_play_once = QPushButton("Play once")
-        btn_play_once.setMinimumWidth(120)
-        btn_play_once.setMinimumHeight(36)
-        btn_play_once.clicked.connect(self._on_play_once)
-        footer_layout.addWidget(btn_play_once)
-
-        btn_save = QPushButton("Save && Play")
-        btn_save.setMinimumWidth(130)
-        btn_save.setMinimumHeight(36)
-        btn_save.setStyleSheet(
+        # Single Play button — picks are auto-saved on accept. The old
+        # Play once / Save & Play split was replaced 2026-04-24 per the
+        # pin-persistence redesign (no user choice to make).
+        btn_play = QPushButton("Play")
+        btn_play.setMinimumWidth(130)
+        btn_play.setMinimumHeight(36)
+        btn_play.setStyleSheet(
             f"background: {_ACCENT}; color: white; font-weight: bold; "
             f"border-radius: 4px;"
         )
-        btn_save.clicked.connect(self._on_save_and_play)
-        footer_layout.addWidget(btn_save)
+        btn_play.clicked.connect(self.accept)
+        footer_layout.addWidget(btn_play)
 
         root.addWidget(footer)
 
@@ -223,6 +238,11 @@ class SelectPicker(QDialog):
         layout = box.layout()
 
         self._funscript_group = QButtonGroup(self)
+        preselect_stem = (
+            self._preselect.funscript_set.base_stem
+            if self._preselect and self._preselect.funscript_set
+            else None
+        )
         for i, fset in enumerate(self._entry.funscript_sets):
             label = fset.base_stem
             detail_bits: list[str] = []
@@ -237,7 +257,9 @@ class SelectPicker(QDialog):
 
             rb = QRadioButton(label)
             rb.setMinimumHeight(28)
-            if i == 0:
+            if preselect_stem is not None:
+                rb.setChecked(fset.base_stem == preselect_stem)
+            elif i == 0:
                 rb.setChecked(True)
             self._funscript_group.addButton(rb, i)
             self._funscript_map[i] = fset
@@ -250,6 +272,11 @@ class SelectPicker(QDialog):
         layout = box.layout()
 
         self._video_group = QButtonGroup(self)
+        preselect_path = (
+            self._preselect.video.path
+            if self._preselect and self._preselect.video
+            else None
+        )
         for i, v in enumerate(self._entry.videos):
             label = v.filename
             detail_bits: list[str] = []
@@ -267,7 +294,9 @@ class SelectPicker(QDialog):
 
             rb = QRadioButton(label)
             rb.setMinimumHeight(28)
-            if i == 0:
+            if preselect_path is not None:
+                rb.setChecked(v.path == preselect_path)
+            elif i == 0:
                 rb.setChecked(True)
             self._video_group.addButton(rb, i)
             self._video_map[i] = v
@@ -283,6 +312,11 @@ class SelectPicker(QDialog):
         layout = box.layout()
 
         self._audio_group = QButtonGroup(self)
+        preselect_path = (
+            self._preselect.audio.path
+            if self._preselect and self._preselect.audio
+            else None
+        )
         for i, a in enumerate(self._entry.audio_tracks):
             label = a.filename
             if a.stem_matches_main_video:
@@ -294,7 +328,9 @@ class SelectPicker(QDialog):
 
             rb = QRadioButton(label)
             rb.setMinimumHeight(28)
-            if i == 0:
+            if preselect_path is not None:
+                rb.setChecked(a.path == preselect_path)
+            elif i == 0:
                 rb.setChecked(True)
             self._audio_group.addButton(rb, i)
             self._audio_map[i] = a
@@ -307,12 +343,17 @@ class SelectPicker(QDialog):
         layout = box.layout()
 
         self._subtitle_group = QButtonGroup(self)
+        preselect_path = (
+            self._preselect.subtitle.path
+            if self._preselect and self._preselect.subtitle
+            else None
+        )
 
-        # None option first, default-selected (see docs/architecture pass —
-        # user opts in explicitly; autogenerated captions often noisy)
+        # None option first, default-selected unless the preselect specifies
+        # a subtitle (see docs/architecture — user opts in explicitly).
         rb_none = QRadioButton("None")
         rb_none.setMinimumHeight(28)
-        rb_none.setChecked(True)
+        rb_none.setChecked(preselect_path is None)
         self._subtitle_group.addButton(rb_none, 0)
         self._subtitle_map[0] = None
         layout.addWidget(rb_none)
@@ -322,21 +363,14 @@ class SelectPicker(QDialog):
             label += f"  ({Path(sub.path).name})"
             rb = QRadioButton(label)
             rb.setMinimumHeight(28)
+            if preselect_path is not None:
+                rb.setChecked(sub.path == preselect_path)
             self._subtitle_group.addButton(rb, i)
             self._subtitle_map[i] = sub
             layout.addWidget(rb)
 
         return box
 
-    # ── Button handlers ──
-
-    def _on_play_once(self) -> None:
-        self._save = False
-        self.accept()
-
-    def _on_save_and_play(self) -> None:
-        self._save = True
-        self.accept()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

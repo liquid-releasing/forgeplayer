@@ -32,7 +32,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListView, QPushButton, QStackedWidget, QStyle, QStyledItemDelegate,
+    QListView, QMenu, QPushButton, QStackedWidget, QStyle, QStyledItemDelegate,
     QStyleOptionViewItem, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -41,6 +41,7 @@ from app.library import (
     scan_library_root,
 )
 from app.library.channels import GENERATION_BADGES, DeviceGeneration
+from app.library.pins import has_pin
 
 
 # ── Theme (matches app dark palette from main.py) ─────────────────────────────
@@ -276,11 +277,19 @@ class LibraryCardDelegate(QStyledItemDelegate):
             painter.drawText(badge_x, line2_y + small_fm.ascent(), badge)
             badge_x += w + 8
 
-        # Ambiguity indicator (if applicable) — top-right corner of card
-        if entry.is_ambiguous:
+        # Top-right corner tags: "pick" (ambiguous, no pin yet) or "📌"
+        # (pinned — user's choices are saved and replayed on next click).
+        scene_has_pin = has_pin(entry)
+        painter.setFont(small_font)
+        if scene_has_pin:
+            painter.setPen(QPen(_ACCENT))
+            tag = "📌"
+        elif entry.is_ambiguous:
             painter.setPen(QPen(_AMBIGUOUS))
-            painter.setFont(small_font)
             tag = "pick"
+        else:
+            tag = ""
+        if tag:
             tw = small_fm.horizontalAdvance(tag)
             tag_x = rect.right() - _PAD - tw
             tag_y = rect.y() + _PAD + small_fm.ascent()
@@ -299,8 +308,9 @@ class LibraryPanel(QWidget):
     the caller's concern (phase 2 of the UI slice).
     """
 
-    scene_activated = Signal(object)   # SceneCatalogEntry
-    root_changed    = Signal(str)      # absolute path
+    scene_activated                = Signal(object)   # SceneCatalogEntry
+    scene_change_picks_requested   = Signal(object)   # SceneCatalogEntry
+    root_changed                   = Signal(str)      # absolute path
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -416,6 +426,8 @@ class LibraryPanel(QWidget):
         # twice, which leaves a stray picker on top of the Live tab
         # after the first pick's teardown).
         self._view.activated.connect(self._on_activated)
+        self._view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._view.customContextMenuRequested.connect(self._on_context_menu)
 
         # Dark scrollbar / list background
         self._view.setStyleSheet(
@@ -514,3 +526,19 @@ class LibraryPanel(QWidget):
         entry = self._model.entry_at(index)
         if entry is not None:
             self.scene_activated.emit(entry)
+
+    def _on_context_menu(self, pos) -> None:
+        index = self._view.indexAt(pos)
+        entry = self._model.entry_at(index)
+        if entry is None:
+            return
+        menu = QMenu(self)
+        change_action = menu.addAction("↻ Change picks…")
+        if not has_pin(entry):
+            change_action.setEnabled(False)
+            change_action.setToolTip(
+                "No saved picks yet — the picker opens on first play."
+            )
+        chosen = menu.exec(self._view.viewport().mapToGlobal(pos))
+        if chosen is change_action:
+            self.scene_change_picks_requested.emit(entry)
