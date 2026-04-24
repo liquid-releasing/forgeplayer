@@ -1062,15 +1062,10 @@ class ControlWindow(QMainWindow):
 
         layout.addWidget(haptic1_block)
 
-        # ── + Add second channel (phase-2 placeholder) ──────────────────
-        btn_add_haptic2 = QPushButton("+ Add second channel")
-        btn_add_haptic2.setEnabled(False)
-        btn_add_haptic2.setToolTip(
-            "Coming in a later v0.0.2 PR — adds a second estim output "
-            "for the prostate subchannel or dual-channel setups."
-        )
-        btn_add_haptic2.setFixedHeight(28)
-        layout.addWidget(btn_add_haptic2)
+        # '+ Add second channel' expander is wired up in a later PR
+        # (project_forgeplayer_v002_slot_cards.md item 3). Kept out of the
+        # UI until it actually does something, so users don't click an
+        # inert button.
 
         layout.addStretch(1)
 
