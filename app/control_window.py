@@ -401,10 +401,13 @@ class ControlWindow(QMainWindow):
             self._move_to_screen(self._screens[idx])
 
     def _move_to_screen(self, screen: QScreen) -> None:
-        """Reposition this window so it's centered on *screen*."""
-        geo = screen.geometry()
-        w = min(self.width(), geo.width() - 40)
-        h = min(self.height(), geo.height() - 80)
+        """Reposition this window so it's centered on *screen*. Uses
+        availableGeometry so the taskbar / work-area exclusions are
+        respected — prevents Qt's 'Unable to set geometry' warnings
+        when the requested size barely overflows the screen."""
+        geo = screen.availableGeometry()
+        w = min(self.width(), geo.width())
+        h = min(self.height(), geo.height())
         self.setGeometry(
             geo.x() + (geo.width() - w) // 2,
             geo.y() + (geo.height() - h) // 2,
