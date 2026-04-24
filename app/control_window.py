@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QSlider, QComboBox, QFileDialog,
     QGroupBox, QCheckBox, QSizePolicy, QLineEdit, QSpacerItem,
-    QMenu, QToolBar, QFrame, QTabWidget, QMessageBox,
+    QMenu, QToolBar, QFrame, QTabWidget, QMessageBox, QScrollArea,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QScreen, QAction
@@ -24,6 +24,7 @@ from app.select_picker import SelectPicker, SelectionChoices
 from app.debug_log import DebugLog
 from app.widgets import ClickableSlider
 from app.preferences import Preferences
+from app.audio_test import play_tone_on_device
 
 _SLOT_LABELS = ["Slot 1", "Slot 2", "Slot 3"]
 _POLL_MS = 100
@@ -69,6 +70,16 @@ class ControlWindow(QMainWindow):
         self._prefs = Preferences.load()
 
         self._build_ui()
+
+        # Apply the saved control-panel-screen preference after the first
+        # event loop spin so the screen geometry is reliable. Zero-delay
+        # singleShot enqueues it after show() naturally resolves.
+        QTimer.singleShot(0, self._apply_startup_screen_preference)
+
+    def _apply_startup_screen_preference(self) -> None:
+        idx = self._prefs.control_panel_screen
+        if 0 <= idx < len(self._screens):
+            self._move_to_screen(self._screens[idx])
 
         self._timer = QTimer(self)
         self._timer.setInterval(_POLL_MS)
@@ -217,13 +228,18 @@ class ControlWindow(QMainWindow):
         """Setup — device-role configuration. Set this up once; Library
         clicks then auto-route Slot 1 to Scene Audio and Slot 2 to Haptic 1.
 
-        The v0.0.2 redesign will layer monitors, library roots, and preferences
-        sections under chevrons. For v0.0.1 alpha, audio device roles are the
-        minimum viable Setup — they close the "why did my haptic go to the
-        wrong device?" loop from library clicks.
+        Wrapped in a QScrollArea so the control window keeps its compact
+        sizing even as the Monitors / Library roots / Preferences sections
+        layer in over time. The user's preferred ControlWindow size
+        shouldn't grow just because Setup has more knobs.
         """
-        tab = QWidget()
-        root = QVBoxLayout(tab)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        inner = QWidget()
+        root = QVBoxLayout(inner)
         root.setContentsMargins(40, 32, 40, 32)
         root.setSpacing(16)
 
@@ -258,20 +274,77 @@ class ControlWindow(QMainWindow):
         self._setup_haptic1_combo.currentIndexChanged.connect(self._on_setup_changed)
         self._setup_haptic2_combo.currentIndexChanged.connect(self._on_setup_changed)
 
-        rl.addLayout(self._labeled_row(
+        rl.addLayout(self._labeled_row_with_test(
             "Scene audio", self._setup_scene_combo,
             "Video's embedded sound — typically your speakers or headphones.",
         ))
-        rl.addLayout(self._labeled_row(
+        rl.addLayout(self._labeled_row_with_test(
             "Haptic 1 (main stim)", self._setup_haptic1_combo,
             "Primary estim output — typically your USB audio dongle.",
         ))
-        rl.addLayout(self._labeled_row(
+        rl.addLayout(self._labeled_row_with_test(
             "Haptic 2 (prostate)", self._setup_haptic2_combo,
             "Optional second estim output for prostate channels. Leave unset if unused.",
         ))
 
         root.addWidget(role_box)
+
+        # Monitor roles group
+        monitor_box = QGroupBox("Monitor roles")
+        ml = QVBoxLayout(monitor_box)
+        ml.setSpacing(10)
+
+        # Control panel screen picker
+        self._setup_control_screen_combo = QComboBox()
+        self._setup_control_screen_combo.setMinimumHeight(32)
+        self._setup_control_screen_combo.addItem("— auto —", -1)
+        for idx, s in enumerate(self._screens):
+            geo = s.geometry()
+            self._setup_control_screen_combo.addItem(
+                f"Screen {idx + 1}  —  {geo.width()}×{geo.height()}  ({s.name()})",
+                idx,
+            )
+        # Restore saved selection
+        for i in range(self._setup_control_screen_combo.count()):
+            if self._setup_control_screen_combo.itemData(i) == self._prefs.control_panel_screen:
+                self._setup_control_screen_combo.setCurrentIndex(i)
+                break
+        self._setup_control_screen_combo.currentIndexChanged.connect(
+            self._on_control_screen_changed
+        )
+
+        ml.addLayout(self._labeled_row(
+            "Control panel screen",
+            self._setup_control_screen_combo,
+            "Which monitor hosts this control window. Useful when you want "
+            "playback on your external screens and the controls on your laptop.",
+        ))
+
+        # Playback screens checkboxes
+        pb_label = QLabel("Playback screens")
+        pbl_font = pb_label.font(); pbl_font.setBold(True); pb_label.setFont(pbl_font)
+        ml.addWidget(pb_label)
+
+        pb_helper = QLabel(
+            "Check the monitors you use for video. Slot monitor pickers will "
+            "only offer these screens. Leave all unchecked to allow any screen."
+        )
+        pb_helper.setStyleSheet("color: #6b7280; font-size: 11px;")
+        pb_helper.setWordWrap(True)
+        ml.addWidget(pb_helper)
+
+        self._setup_playback_checkboxes: list[QCheckBox] = []
+        for idx, s in enumerate(self._screens):
+            geo = s.geometry()
+            cb = QCheckBox(
+                f"Screen {idx + 1}  —  {geo.width()}×{geo.height()}  ({s.name()})"
+            )
+            cb.setChecked(idx in self._prefs.playback_screen_indices)
+            cb.toggled.connect(self._on_playback_screens_changed)
+            ml.addWidget(cb)
+            self._setup_playback_checkboxes.append(cb)
+
+        root.addWidget(monitor_box)
 
         # Save-status line
         self._setup_status = QLabel("")
@@ -279,7 +352,44 @@ class ControlWindow(QMainWindow):
         root.addWidget(self._setup_status)
 
         root.addStretch()
-        return tab
+        scroll.setWidget(inner)
+        return scroll
+
+    def _on_control_screen_changed(self) -> None:
+        idx = self._setup_control_screen_combo.currentData()
+        idx = int(idx) if idx is not None else -1
+        self._prefs.control_panel_screen = idx
+        self._prefs.save()
+        DebugLog.record("setup.control_screen", index=idx)
+        self._setup_status.setText(f"Saved to {Preferences.path()}")
+        QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
+        # Move the window immediately if a valid screen was picked
+        if 0 <= idx < len(self._screens):
+            self._move_to_screen(self._screens[idx])
+
+    def _move_to_screen(self, screen: QScreen) -> None:
+        """Reposition this window so it's centered on *screen*."""
+        geo = screen.geometry()
+        w = min(self.width(), geo.width() - 40)
+        h = min(self.height(), geo.height() - 80)
+        self.setGeometry(
+            geo.x() + (geo.width() - w) // 2,
+            geo.y() + (geo.height() - h) // 2,
+            w,
+            h,
+        )
+
+    def _on_playback_screens_changed(self) -> None:
+        indices = [
+            i for i, cb in enumerate(self._setup_playback_checkboxes) if cb.isChecked()
+        ]
+        self._prefs.playback_screen_indices = indices
+        self._prefs.save()
+        DebugLog.record("setup.playback_screens", indices=indices)
+        self._setup_status.setText(f"Saved to {Preferences.path()}")
+        QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
+        # Refresh slot monitor combos so they reflect the new allowed set.
+        self._refresh_all_slot_monitor_combos()
 
     def _build_role_combo(self, *, saved_value: str) -> QComboBox:
         combo = QComboBox()
@@ -310,6 +420,60 @@ class ControlWindow(QMainWindow):
             helper.setWordWrap(True)
             row.addWidget(helper)
         return row
+
+    def _labeled_row_with_test(
+        self, label_text: str, combo: QComboBox, help_text: str = "",
+    ) -> QVBoxLayout:
+        """Variant of _labeled_row that includes a 'Test' button which plays
+        a short tone through the currently-selected device. Gives users an
+        immediate, audible confirmation of whether the device actually
+        outputs audio — the fastest way to diagnose 'why is my haptic silent?'
+        problems (wrong device / OS-level mute / unplugged dongle)."""
+        row = QVBoxLayout()
+        row.setSpacing(2)
+
+        label = QLabel(label_text)
+        lf = label.font(); lf.setBold(True); label.setFont(lf)
+        row.addWidget(label)
+
+        combo_row = QHBoxLayout()
+        combo_row.setSpacing(6)
+        combo_row.addWidget(combo, 1)
+        test_btn = QPushButton("🔊 Test")
+        test_btn.setFixedHeight(32)
+        test_btn.setFixedWidth(80)
+        test_btn.setToolTip(
+            "Play a half-second tone through this device.\n"
+            "Silent? Check for OS-level per-app mute or unplugged hardware."
+        )
+        test_btn.clicked.connect(
+            lambda _, c=combo: self._on_test_device(c)
+        )
+        combo_row.addWidget(test_btn)
+        row.addLayout(combo_row)
+
+        if help_text:
+            helper = QLabel(help_text)
+            helper.setStyleSheet("color: #6b7280; font-size: 11px;")
+            helper.setWordWrap(True)
+            row.addWidget(helper)
+        return row
+
+    def _on_test_device(self, combo: QComboBox) -> None:
+        device_id = combo.currentData() or ""
+        DebugLog.record(
+            "setup.test_device",
+            device=device_id or "(not set)",
+        )
+        if not device_id:
+            self._setup_status.setText("Pick a device first, then press Test.")
+            QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
+            return
+        play_tone_on_device(device_id)
+        self._setup_status.setText(
+            f"Playing tone on: {combo.currentText()}"
+        )
+        QTimer.singleShot(2000, lambda: self._setup_status.setText(""))
 
     def _on_setup_changed(self) -> None:
         self._prefs.scene_audio_device = self._setup_scene_combo.currentData() or ""
@@ -454,6 +618,43 @@ class ControlWindow(QMainWindow):
         self._tabs.setCurrentIndex(0)
         self._on_launch()
 
+    def _populate_monitor_combo(
+        self, combo: QComboBox, *, default_index: int,
+    ) -> None:
+        """Fill a slot's monitor dropdown with the screens allowed for
+        playback (per Setup's playback-screens checkboxes). Falls back to
+        all screens when Setup hasn't explicitly opted in to filtering."""
+        allowed = set(self._prefs.playback_screen_indices)
+        combo.clear()
+        first_added_index = -1
+        for j, s in enumerate(self._screens):
+            if allowed and j not in allowed:
+                continue
+            geo = s.geometry()
+            combo.addItem(
+                f"Screen {j + 1}  —  {geo.width()}×{geo.height()}  ({s.name()})",
+                j,
+            )
+            if first_added_index < 0:
+                first_added_index = j
+        # Try to match the requested default; otherwise first allowed screen.
+        want = default_index
+        if allowed and want not in allowed and first_added_index >= 0:
+            want = first_added_index
+        for idx in range(combo.count()):
+            if combo.itemData(idx) == want:
+                combo.setCurrentIndex(idx)
+                break
+
+    def _refresh_all_slot_monitor_combos(self) -> None:
+        """Re-populate each slot's monitor dropdown after Setup changes,
+        preserving the current selection when possible."""
+        for slot_idx in range(3):
+            data = self._slot_data(slot_idx)
+            combo: QComboBox = data["monitor_combo"]
+            current = combo.currentData() if combo.currentData() is not None else slot_idx
+            self._populate_monitor_combo(combo, default_index=int(current))
+
     def _apply_setup_roles_to_slots(self) -> None:
         """Set Slot 1 and Slot 2's audio-output combos from Setup's roles.
         No-op for a role that isn't configured yet — the slot keeps whatever
@@ -497,64 +698,33 @@ class ControlWindow(QMainWindow):
         self._refresh_monitor_state(data)
 
     def _build_session_bar(self) -> QWidget:
+        """Top bar: session-name label + Debug dogfood cluster.
+
+        The New/Open/Recent/Save/Save As/Scan Folder buttons were removed
+        2026-04-24: Library tab is the only way to load content now, and
+        session-file management is being superseded by auto pin persistence
+        (see project_forgeplayer_pin_persistence.md). The session-name
+        field remains as a read-only title display of the currently-loaded
+        scene.
+        """
         bar = QWidget()
         h = QHBoxLayout(bar)
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(6)
 
-        btn_new = QPushButton("New")
-        btn_new.setFixedHeight(30)
-        btn_new.setToolTip("New empty session")
-        btn_new.clicked.connect(self._wrap_click("session.new", self._on_session_new))
-        h.addWidget(btn_new)
-
-        btn_open = QPushButton("Open…")
-        btn_open.setFixedHeight(30)
-        btn_open.setToolTip("Open a session file")
-        btn_open.clicked.connect(self._wrap_click("session.open", self._on_session_open))
-        h.addWidget(btn_open)
-
-        self._btn_recent = QPushButton("Recent ▾")
-        self._btn_recent.setFixedHeight(30)
-        self._btn_recent.clicked.connect(self._wrap_click("session.recent", self._on_recent_menu))
-        h.addWidget(self._btn_recent)
-
-        btn_save = QPushButton("Save")
-        btn_save.setFixedHeight(30)
-        btn_save.clicked.connect(self._wrap_click("session.save", self._on_session_save))
-        h.addWidget(btn_save)
-
-        btn_save_as = QPushButton("Save As…")
-        btn_save_as.setFixedHeight(30)
-        btn_save_as.clicked.connect(self._wrap_click("session.save_as", self._on_session_save_as))
-        h.addWidget(btn_save_as)
-
-        h.addSpacing(16)
         h.addWidget(QLabel("Session:"))
-
         self._session_name = QLineEdit("Untitled Session")
         self._session_name.setFixedHeight(30)
-        self._session_name.setFixedWidth(200)
+        self._session_name.setFixedWidth(320)
+        self._session_name.setReadOnly(True)
+        self._session_name.setStyleSheet(
+            "QLineEdit { background: transparent; border: none; color: #e0e0e0; }"
+        )
         h.addWidget(self._session_name)
 
         h.addStretch()
 
-        btn_scan = QPushButton("⬡  Scan Folder…")
-        btn_scan.setFixedHeight(30)
-        btn_scan.setToolTip(
-            "Scan a folder for media files and auto-assign videos to slots by monitor aspect ratio"
-        )
-        btn_scan.setStyleSheet(
-            "background: #2d4a8a; color: white; font-weight: bold; border-radius: 4px;"
-        )
-        btn_scan.clicked.connect(
-            self._wrap_click("scan_folder", self._on_scan_folder)
-        )
-        h.addWidget(btn_scan)
-
-        # ── Debug cluster ────────────────────────────────────────────────
-        h.addSpacing(12)
-
+        # ── Debug cluster (dogfood only — hide for release) ─────────────
         self._debug_toggle = QCheckBox("Debug")
         self._debug_toggle.setToolTip(
             "Record clicks, key events, and player lifecycle to an event log.\n"
@@ -625,14 +795,7 @@ class ControlWindow(QMainWindow):
         # ── Monitor ──
         layout.addWidget(QLabel("Monitor:"))
         monitor_combo = QComboBox()
-        for j, s in enumerate(self._screens):
-            geo = s.geometry()
-            monitor_combo.addItem(
-                f"Screen {j + 1}  —  {geo.width()}×{geo.height()}  ({s.name()})",
-                j,
-            )
-        if index < monitor_combo.count():
-            monitor_combo.setCurrentIndex(index)
+        self._populate_monitor_combo(monitor_combo, default_index=index)
         layout.addWidget(monitor_combo)
 
         # ── Audio device ──
@@ -691,7 +854,12 @@ class ControlWindow(QMainWindow):
     # ── Browse callbacks ───────────────────────────────────────────────────────
 
     def _on_browse_video(self, data: dict) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select video file", "", _VIDEO_FILTER)
+        DebugLog.record("browse.video.dialog_open")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select video file", "", _VIDEO_FILTER,
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        DebugLog.record("browse.video.dialog_closed", picked=bool(path))
         if path:
             data["video_path"] = path
             data["video_label"].setText(os.path.basename(path))
@@ -717,7 +885,12 @@ class ControlWindow(QMainWindow):
             self.setWindowTitle(f"ForgePlayer — {stem}")
 
     def _on_browse_audio(self, data: dict) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select audio file", "", _AUDIO_FILTER)
+        DebugLog.record("browse.audio.dialog_open")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select audio file", "", _AUDIO_FILTER,
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        DebugLog.record("browse.audio.dialog_closed", picked=bool(path))
         if path:
             data["audio_path"] = path
             data["audio_label"].setText(os.path.basename(path))
@@ -793,7 +966,10 @@ class ControlWindow(QMainWindow):
     # ── Folder scan ──────────────────────────────────────────────────────────
 
     def _on_scan_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select media folder")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select media folder", "",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
         if not folder:
             return
         assignments = auto_assign(folder, self._screen_sizes())
@@ -882,7 +1058,8 @@ class ControlWindow(QMainWindow):
     def _on_session_open(self) -> None:
         DebugLog.record("session.open.dialog_open")
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open session", "", _SESSION_FILTER
+            self, "Open session", "", _SESSION_FILTER,
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         DebugLog.record("session.open.dialog_closed", picked=bool(path))
         if path:
@@ -971,6 +1148,7 @@ class ControlWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self, "Save session as", self._default_session_save_path(),
             _SESSION_FILTER,
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         DebugLog.record("session.save_as.dialog_closed", picked=bool(path))
         if path:

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import List
 
 
 _PREFS_PATH = Path.home() / ".forgeplayer" / "preferences.json"
@@ -33,6 +34,12 @@ class Preferences:
     scene_audio_device: str = ""
     haptic1_audio_device: str = ""
     haptic2_audio_device: str = ""
+    # Monitor roles. -1 = not set (ControlWindow uses Qt's default placement).
+    control_panel_screen: int = -1
+    # Which screen indices are usable for video playback. Empty list means
+    # "all screens are fair game" (the v0.0.1 default — user hasn't opted in
+    # to filtering).
+    playback_screen_indices: List[int] = field(default_factory=list)
 
     @classmethod
     def load(cls) -> "Preferences":

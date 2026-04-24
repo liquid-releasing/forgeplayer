@@ -490,6 +490,7 @@ class LibraryPanel(QWidget):
     def _pick_root(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self, "Pick library root folder", self._root or os.getcwd(),
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if folder:
             self.set_root(folder)
