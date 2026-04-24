@@ -404,19 +404,21 @@ class ControlWindow(QMainWindow):
             self._move_to_screen(self._screens[idx])
 
     def _move_to_screen(self, screen: QScreen) -> None:
-        """Reposition this window so it's centered on *screen*. Uses
-        availableGeometry so the taskbar / work-area exclusions are
-        respected — prevents Qt's 'Unable to set geometry' warnings
-        when the requested size barely overflows the screen."""
+        """Move the window to the target screen without forcing a resize.
+
+        Before show(), self.width()/height() aren't reliable, and
+        setGeometry(x, y, w, h) with a zeroed size makes Qt try to fit the
+        layout's sizeHint at the requested position — which triggers
+        'Unable to set geometry' warnings when the sizeHint slightly
+        exceeds the screen's work area. Using ``move()`` with the layout's
+        sizeHint lets the layout own the size and avoids the fight.
+        """
+        self.ensurePolished()
+        hint = self.sizeHint()
         geo = screen.availableGeometry()
-        w = min(self.width(), geo.width())
-        h = min(self.height(), geo.height())
-        self.setGeometry(
-            geo.x() + (geo.width() - w) // 2,
-            geo.y() + (geo.height() - h) // 2,
-            w,
-            h,
-        )
+        x = geo.x() + max(0, (geo.width() - hint.width())) // 2
+        y = geo.y() + max(0, (geo.height() - hint.height())) // 2
+        self.move(x, y)
 
     def _on_playback_screens_changed(self) -> None:
         indices = [
@@ -642,7 +644,6 @@ class ControlWindow(QMainWindow):
             scene=entry.name,
             has_video=bool(choices.video),
             has_audio=bool(choices.audio),
-            save_as_preset=choices.save_as_preset,
         )
 
         slot1 = self._slot_data(0)
@@ -1051,6 +1052,10 @@ class ControlWindow(QMainWindow):
             data["video_label"].setToolTip(path)
             self._refresh_monitor_state(data)
             self._maybe_autofill_session_name(path)
+            # Apply Setup's audio-device roles so the slot's audio-output
+            # reflects the configured Scene / Haptic device instead of
+            # mpv's Autoselect fallback.
+            self._apply_setup_roles_to_slots()
 
     def _on_clear_video(self, data: dict) -> None:
         data["video_path"] = ""
