@@ -643,18 +643,44 @@ class ControlWindow(QMainWindow):
         slot2 = self._slot_data(1)
         slot3 = self._slot_data(2)
 
-        # Slot 3 always clears — library clicks are one- or two-slot loads.
-        self._set_slot_media(slot3, video_path="", audio_path="")
+        # Mirror mode: 2+ checked playback screens + a video → same video
+        # shows on Slot 1's monitor AND Slot 3's monitor in sync, with
+        # Slot 3 muted (Slot 1 already carries the scene audio). One-screen
+        # users and audio-only scenes keep the simpler 2-slot layout.
+        playback_screens = self._prefs.playback_screen_indices
+        mirror_video = (
+            choices.video is not None
+            and len(playback_screens) >= 2
+        )
 
-        # Video (if any) → Slot 1, embedded scene audio via Slot 1's device.
-        if choices.video:
+        if mirror_video:
             self._set_slot_media(
                 slot1,
                 video_path=choices.video.path,
                 audio_path="",
             )
+            self._select_slot_monitor(slot1, playback_screens[0])
+            self._set_slot_media(
+                slot3,
+                video_path=choices.video.path,
+                audio_path="",
+            )
+            self._select_slot_monitor(slot3, playback_screens[1])
+            # Mute the mirror — Slot 1 already outputs scene audio.
+            slot3["volume_slider"].setValue(0)
         else:
-            self._set_slot_media(slot1, video_path="", audio_path="")
+            # Slot 3 always clears in the non-mirror case.
+            self._set_slot_media(slot3, video_path="", audio_path="")
+            if choices.video:
+                self._set_slot_media(
+                    slot1,
+                    video_path=choices.video.path,
+                    audio_path="",
+                )
+                if playback_screens:
+                    self._select_slot_monitor(slot1, playback_screens[0])
+            else:
+                self._set_slot_media(slot1, video_path="", audio_path="")
 
         # Picked audio → Slot 2 audio-only, heading to the user's haptic
         # device (Slot 2's audio output — typically the USB dongle). This is
@@ -709,6 +735,17 @@ class ControlWindow(QMainWindow):
         # Switch to Live tab and launch (paused — user still hits Play).
         self._tabs.setCurrentIndex(0)
         self._on_launch()
+
+    def _select_slot_monitor(self, slot_data: dict, screen_index: int) -> None:
+        """Pick a specific screen for a slot's monitor dropdown (used by
+        library routing / mirror mode). Silently no-ops if the screen isn't
+        in the slot's current combo — typically because Setup filtered it
+        out of the playback pool."""
+        combo: QComboBox = slot_data["monitor_combo"]
+        for idx in range(combo.count()):
+            if combo.itemData(idx) == screen_index:
+                combo.setCurrentIndex(idx)
+                return
 
     def _populate_monitor_combo(
         self, combo: QComboBox, *, default_index: int,
