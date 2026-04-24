@@ -827,11 +827,28 @@ class ControlWindow(QMainWindow):
             data["video_label"].setToolTip(video_path)
         if audio_path is not None:
             data["audio_path"] = audio_path
-            data["audio_label"].setText(
-                os.path.basename(audio_path) if audio_path else "(uses video audio)"
-            )
             data["audio_label"].setToolTip(audio_path)
+        self._refresh_audio_label(data)
         self._refresh_monitor_state(data)
+
+    @staticmethod
+    def _refresh_audio_label(data: dict) -> None:
+        """Render the Audio-override label from whichever of (override
+        audio, embedded video audio, nothing) is currently in effect.
+
+        When no override is set, we show ``(from <video filename>)`` so
+        the user sees WHICH source the slot is actually playing — more
+        informative than the old ``(uses video audio)`` placeholder.
+        """
+        audio = data.get("audio_path", "")
+        video = data.get("video_path", "")
+        if audio:
+            text = os.path.basename(audio)
+        elif video:
+            text = f"(from {os.path.basename(video)})"
+        else:
+            text = "(no audio)"
+        data["audio_label"].setText(text)
 
     def _build_session_bar(self) -> QWidget:
         """Top bar: session-name label + Debug dogfood cluster.
@@ -937,7 +954,7 @@ class ControlWindow(QMainWindow):
         ab.addWidget(self._block_heading("Audio"))
 
         ab.addWidget(self._sub_label("Audio override"))
-        audio_label = QLabel("(uses video audio)")
+        audio_label = QLabel("(no audio)")
         audio_label.setWordWrap(False)
         audio_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         audio_label.setStyleSheet("color: #9ba3c4; font-size: 11px;")
@@ -1091,8 +1108,8 @@ class ControlWindow(QMainWindow):
 
     def _on_clear_audio(self, data: dict) -> None:
         data["audio_path"] = ""
-        data["audio_label"].setText("(uses video audio)")
         data["audio_label"].setToolTip("")
+        self._refresh_audio_label(data)
         self._refresh_monitor_state(data)
 
     def _refresh_monitor_state(self, data: dict) -> None:
@@ -1174,10 +1191,8 @@ class ControlWindow(QMainWindow):
             data["video_label"].setToolTip(vp)
 
             data["audio_path"] = ap
-            data["audio_label"].setText(
-                os.path.basename(ap) if ap else "(uses video audio)"
-            )
             data["audio_label"].setToolTip(ap)
+            self._refresh_audio_label(data)
 
             combo: QComboBox = data["monitor_combo"]
             for idx in range(combo.count()):
@@ -1220,10 +1235,8 @@ class ControlWindow(QMainWindow):
             d["video_label"].setToolTip(cfg.video_path)
 
             d["audio_path"] = cfg.audio_path
-            d["audio_label"].setText(
-                os.path.basename(cfg.audio_path) if cfg.audio_path else "(uses video audio)"
-            )
             d["audio_label"].setToolTip(cfg.audio_path)
+            self._refresh_audio_label(d)
 
             combo: QComboBox = d["monitor_combo"]
             for idx in range(combo.count()):
