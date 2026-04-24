@@ -225,14 +225,34 @@ class ControlWindow(QMainWindow):
         return tab
 
     def _build_setup_tab(self) -> QWidget:
-        """Setup — device-role configuration. Set this up once; Library
-        clicks then auto-route Slot 1 to Scene Audio and Slot 2 to Haptic 1.
-
-        Wrapped in a QScrollArea so the control window keeps its compact
-        sizing even as the Monitors / Library roots / Preferences sections
-        layer in over time. The user's preferred ControlWindow size
-        shouldn't grow just because Setup has more knobs.
+        """Setup — Audio and Monitors shown side-by-side so both fit in a
+        720p viewport with no scrolling (on a typical ~1000+ px wide control
+        window). The user configures device roles once; Library clicks then
+        auto-route Slot 1 to Scene Audio and Slot 2 to Haptic 1.
         """
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(20, 16, 20, 16)
+        outer.setSpacing(10)
+
+        title = QLabel("Setup")
+        tf = title.font(); tf.setPointSize(18); tf.setBold(True); title.setFont(tf)
+        outer.addWidget(title)
+
+        # Save-status line (shared across both columns)
+        self._setup_status = QLabel("")
+        self._setup_status.setStyleSheet("color: #9ba3c4; font-size: 11px;")
+
+        columns = QHBoxLayout()
+        columns.setSpacing(16)
+        columns.addWidget(self._build_setup_audio_page(), 1)
+        columns.addWidget(self._build_setup_monitors_page(), 1)
+        outer.addLayout(columns, 1)
+
+        outer.addWidget(self._setup_status)
+        return container
+
+    def _build_setup_audio_page(self) -> QWidget:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -240,12 +260,8 @@ class ControlWindow(QMainWindow):
 
         inner = QWidget()
         root = QVBoxLayout(inner)
-        root.setContentsMargins(40, 32, 40, 32)
-        root.setSpacing(16)
-
-        title = QLabel("Setup")
-        tf = title.font(); tf.setPointSize(18); tf.setBold(True); title.setFont(tf)
-        root.addWidget(title)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
 
         subtitle = QLabel(
             "Pick which physical audio device handles each role. Library clicks "
@@ -255,7 +271,6 @@ class ControlWindow(QMainWindow):
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
-        # Device-role group
         role_box = QGroupBox("Audio device roles")
         rl = QVBoxLayout(role_box)
         rl.setSpacing(10)
@@ -288,13 +303,34 @@ class ControlWindow(QMainWindow):
         ))
 
         root.addWidget(role_box)
+        root.addStretch()
 
-        # Monitor roles group
+        scroll.setWidget(inner)
+        return scroll
+
+    def _build_setup_monitors_page(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        inner = QWidget()
+        root = QVBoxLayout(inner)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        subtitle = QLabel(
+            "Which monitors host the control panel and video playback. "
+            "Slot monitor pickers will only offer your checked playback screens."
+        )
+        subtitle.setStyleSheet("color: #9ba3c4;")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
         monitor_box = QGroupBox("Monitor roles")
         ml = QVBoxLayout(monitor_box)
         ml.setSpacing(10)
 
-        # Control panel screen picker
         self._setup_control_screen_combo = QComboBox()
         self._setup_control_screen_combo.setMinimumHeight(32)
         self._setup_control_screen_combo.addItem("— auto —", -1)
@@ -304,7 +340,6 @@ class ControlWindow(QMainWindow):
                 f"Screen {idx + 1}  —  {geo.width()}×{geo.height()}  ({s.name()})",
                 idx,
             )
-        # Restore saved selection
         for i in range(self._setup_control_screen_combo.count()):
             if self._setup_control_screen_combo.itemData(i) == self._prefs.control_panel_screen:
                 self._setup_control_screen_combo.setCurrentIndex(i)
@@ -320,7 +355,6 @@ class ControlWindow(QMainWindow):
             "playback on your external screens and the controls on your laptop.",
         ))
 
-        # Playback screens checkboxes
         pb_label = QLabel("Playback screens")
         pbl_font = pb_label.font(); pbl_font.setBold(True); pb_label.setFont(pbl_font)
         ml.addWidget(pb_label)
@@ -345,13 +379,8 @@ class ControlWindow(QMainWindow):
             self._setup_playback_checkboxes.append(cb)
 
         root.addWidget(monitor_box)
-
-        # Save-status line
-        self._setup_status = QLabel("")
-        self._setup_status.setStyleSheet("color: #9ba3c4; font-size: 11px;")
-        root.addWidget(self._setup_status)
-
         root.addStretch()
+
         scroll.setWidget(inner)
         return scroll
 
@@ -752,19 +781,31 @@ class ControlWindow(QMainWindow):
         return bar
 
     def _build_slot(self, index: int) -> QGroupBox:
+        """Slot card with two visual blocks — Video (file + monitor) and
+        Audio (override + output device + volume). Grouping reflects the
+        two concerns users actually think about ("which video on which
+        screen" vs "which audio on which device"), and leaves vertical room
+        for v0.0.2 when the Audio block grows to Haptic 1/2 rows.
+        """
         box = QGroupBox(_SLOT_LABELS[index])
         layout = QVBoxLayout(box)
-        layout.setSpacing(5)
+        layout.setSpacing(10)
 
-        # ── Video file ──
-        layout.addWidget(QLabel("Video:"))
+        # ── Video block ──────────────────────────────────────────────────
+        video_block = self._build_block_frame()
+        vb = QVBoxLayout(video_block)
+        vb.setContentsMargins(10, 8, 10, 10)
+        vb.setSpacing(4)
+        vb.addWidget(self._block_heading("Video"))
+
         video_label = QLabel("No file selected")
         video_label.setWordWrap(False)
         video_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         video_label.setStyleSheet("color: #9ba3c4; font-size: 11px;")
-        layout.addWidget(video_label)
+        vb.addWidget(video_label)
 
         video_row = QHBoxLayout()
+        video_row.setSpacing(4)
         btn_video = QPushButton("Browse Video…")
         btn_video.setFixedHeight(28)
         video_row.addWidget(btn_video)
@@ -772,17 +813,31 @@ class ControlWindow(QMainWindow):
         btn_clear_video.setFixedSize(28, 28)
         btn_clear_video.setToolTip("Clear video (also disables the slot if audio is also empty)")
         video_row.addWidget(btn_clear_video)
-        layout.addLayout(video_row)
+        vb.addLayout(video_row)
 
-        # ── Audio file ──
-        layout.addWidget(QLabel("Audio override:"))
+        vb.addWidget(self._sub_label("Monitor"))
+        monitor_combo = QComboBox()
+        self._populate_monitor_combo(monitor_combo, default_index=index)
+        vb.addWidget(monitor_combo)
+
+        layout.addWidget(video_block)
+
+        # ── Audio block ──────────────────────────────────────────────────
+        audio_block = self._build_block_frame()
+        ab = QVBoxLayout(audio_block)
+        ab.setContentsMargins(10, 8, 10, 10)
+        ab.setSpacing(4)
+        ab.addWidget(self._block_heading("Audio"))
+
+        ab.addWidget(self._sub_label("Audio override"))
         audio_label = QLabel("(uses video audio)")
         audio_label.setWordWrap(False)
         audio_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         audio_label.setStyleSheet("color: #9ba3c4; font-size: 11px;")
-        layout.addWidget(audio_label)
+        ab.addWidget(audio_label)
 
         audio_row = QHBoxLayout()
+        audio_row.setSpacing(4)
         btn_audio = QPushButton("Browse Audio…")
         btn_audio.setFixedHeight(28)
         audio_row.addWidget(btn_audio)
@@ -790,26 +845,16 @@ class ControlWindow(QMainWindow):
         btn_clear_audio.setFixedSize(28, 28)
         btn_clear_audio.setToolTip("Clear audio override")
         audio_row.addWidget(btn_clear_audio)
-        layout.addLayout(audio_row)
+        ab.addLayout(audio_row)
 
-        # ── Monitor ──
-        layout.addWidget(QLabel("Monitor:"))
-        monitor_combo = QComboBox()
-        self._populate_monitor_combo(monitor_combo, default_index=index)
-        layout.addWidget(monitor_combo)
-
-        # ── Audio device ──
-        layout.addWidget(QLabel("Audio output:"))
+        ab.addWidget(self._sub_label("Audio output"))
         audio_combo = QComboBox()
-        # Drop "System default" — forces explicit device pick so haptic
-        # output never silently lands on the wrong device.
         for name, desc in self._audio_devices:
             audio_combo.addItem(desc, name)
-        layout.addWidget(audio_combo)
+        ab.addWidget(audio_combo)
 
-        # ── Volume ──
         vol_row = QHBoxLayout()
-        vol_row.addWidget(QLabel("Volume:"))
+        vol_row.addWidget(self._sub_label("Volume"))
         volume_slider = QSlider(Qt.Orientation.Horizontal)
         volume_slider.setRange(0, 100)
         volume_slider.setValue(100)
@@ -819,7 +864,9 @@ class ControlWindow(QMainWindow):
         vol_lbl.setFixedWidth(28)
         vol_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         vol_row.addWidget(vol_lbl)
-        layout.addLayout(vol_row)
+        ab.addLayout(vol_row)
+
+        layout.addWidget(audio_block)
 
         slot_data: dict = {
             "video_label":    video_label,
@@ -842,6 +889,38 @@ class ControlWindow(QMainWindow):
 
         box._slot_data = slot_data  # type: ignore[attr-defined]
         return box
+
+    # ── Slot-card visual helpers ──────────────────────────────────────────
+
+    @staticmethod
+    def _build_block_frame() -> QFrame:
+        """Subtle-contrast container for the Video / Audio sub-blocks
+        inside a slot card."""
+        frame = QFrame()
+        frame.setStyleSheet(
+            "QFrame { background: #1a1d27; border: 1px solid #2d3148; "
+            "border-radius: 6px; }"
+        )
+        return frame
+
+    @staticmethod
+    def _block_heading(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            "color: #ff6b30; font-size: 11px; font-weight: bold; "
+            "text-transform: uppercase; letter-spacing: 1px; "
+            "background: transparent; border: none;"
+        )
+        return lbl
+
+    @staticmethod
+    def _sub_label(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            "color: #9ba3c4; font-size: 10px; "
+            "background: transparent; border: none;"
+        )
+        return lbl
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
