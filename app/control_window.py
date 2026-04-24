@@ -27,7 +27,8 @@ from app.widgets import ClickableSlider
 from app.preferences import Preferences
 from app.audio_test import play_tone_on_device
 
-_SLOT_LABELS = ["Slot 1", "Slot 2", "Slot 3"]
+_SLOT_LABELS = ["▶ Video", "⚡ Stim", "▶ Video 2"]
+_SLOT_ROLES = ["video", "stim", "mirror"]
 _POLL_MS = 100
 _MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.avi *.webm *.mp3 *.m4a *.wav *.flac *.ogg);;"
@@ -35,6 +36,15 @@ _MEDIA_FILTER = (
 )
 _VIDEO_FILTER = "Video files (*.mp4 *.mkv *.mov *.avi *.webm);;All files (*)"
 _AUDIO_FILTER = "Audio files (*.mp3 *.m4a *.wav *.flac *.ogg);;All files (*)"
+# Stim slot accepts native funscripts (v0.0.2 primary path) or pre-rendered
+# audio files (v0.0.1 fallback). The synthesis engine picks the right
+# pipeline based on file extension.
+_FUNSCRIPT_FILTER = (
+    "Haptic files (*.funscript *.mp3 *.m4a *.wav *.flac *.ogg);;"
+    "Funscripts (*.funscript);;"
+    "Audio files (*.mp3 *.m4a *.wav *.flac *.ogg);;"
+    "All files (*)"
+)
 _SESSION_FILTER = "ForgePlayer session (*.forgeplayer-session);;All files (*)"
 
 
@@ -905,12 +915,37 @@ class ControlWindow(QMainWindow):
         return bar
 
     def _build_slot(self, index: int) -> QGroupBox:
-        """Slot card with two visual blocks — Video (file + monitor) and
-        Audio (override + output device + volume). Grouping reflects the
-        two concerns users actually think about ("which video on which
-        screen" vs "which audio on which device"), and leaves vertical room
-        for v0.0.2 when the Audio block grows to Haptic 1/2 rows.
+        """Dispatch to the role-specific builder.
+
+        v0.0.2 slot cards are role-specific, not uniform:
+        - index 0 → Video slot (video file + monitor + scene audio)
+        - index 1 → Stim slot (funscript + Haptic 1 device; no video, no monitor)
+        - index 2 → Video 2 mirror slot (monitor picker only; inherits video
+          from the Video slot at launch)
+
+        Each builder returns a QGroupBox with a `_slot_data` attribute of
+        the same shape (shared keys), so downstream callers
+        (`_apply_scene_choices`, `_current_session`, `_launch_players`,
+        etc.) keep working without knowing the role. Keys that a role
+        doesn't expose in the UI are still present in the dict — they
+        point at hidden widgets so `d["audio_combo"].currentData()` never
+        raises KeyError.
         """
+        role = _SLOT_ROLES[index]
+        if role == "video":
+            return self._build_video_slot(index)
+        if role == "stim":
+            return self._build_stim_slot(index)
+        if role == "mirror":
+            return self._build_mirror_slot(index)
+        raise ValueError(f"Unknown slot role: {role!r}")
+
+    # ── Role-specific slot builders ───────────────────────────────────────
+
+    def _build_video_slot(self, index: int) -> QGroupBox:
+        """Video slot: main video + scene audio output. No picked-audio
+        override — the mp4's embedded audio IS the scene audio, routed
+        through the configured audio device."""
         box = QGroupBox(_SLOT_LABELS[index])
         layout = QVBoxLayout(box)
         layout.setSpacing(10)
@@ -922,21 +957,13 @@ class ControlWindow(QMainWindow):
         vb.setSpacing(4)
         vb.addWidget(self._block_heading("Video"))
 
-        video_label = QLabel("No file selected")
-        video_label.setWordWrap(False)
-        video_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        video_label.setStyleSheet("color: #9ba3c4; font-size: 11px;")
+        video_label = self._build_path_label("No file selected")
         vb.addWidget(video_label)
 
-        video_row = QHBoxLayout()
-        video_row.setSpacing(4)
-        btn_video = QPushButton("Browse Video…")
-        btn_video.setFixedHeight(28)
-        video_row.addWidget(btn_video)
-        btn_clear_video = QPushButton("✕")
-        btn_clear_video.setFixedSize(28, 28)
-        btn_clear_video.setToolTip("Clear video (also disables the slot if audio is also empty)")
-        video_row.addWidget(btn_clear_video)
+        video_row, btn_video, btn_clear_video = self._build_file_picker_row(
+            "Browse Video…",
+            clear_tooltip="Clear video (also disables the slot if audio is also empty)",
+        )
         vb.addLayout(video_row)
 
         vb.addWidget(self._sub_label("Monitor"))
@@ -946,53 +973,188 @@ class ControlWindow(QMainWindow):
 
         layout.addWidget(video_block)
 
-        # ── Audio block ──────────────────────────────────────────────────
-        audio_block = self._build_block_frame()
-        ab = QVBoxLayout(audio_block)
-        ab.setContentsMargins(10, 8, 10, 10)
-        ab.setSpacing(4)
-        ab.addWidget(self._block_heading("Audio"))
+        # ── Scene Audio block ───────────────────────────────────────────
+        scene_audio_block = self._build_block_frame()
+        sb = QVBoxLayout(scene_audio_block)
+        sb.setContentsMargins(10, 8, 10, 10)
+        sb.setSpacing(4)
+        sb.addWidget(self._block_heading("Scene Audio"))
 
-        ab.addWidget(self._sub_label("Audio override"))
-        audio_label = QLabel("(no audio)")
-        audio_label.setWordWrap(False)
-        audio_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        audio_label.setStyleSheet("color: #9ba3c4; font-size: 11px;")
-        ab.addWidget(audio_label)
+        sb.addWidget(self._sub_label("Device"))
+        audio_combo = self._build_audio_device_combo()
+        sb.addWidget(audio_combo)
 
-        audio_row = QHBoxLayout()
-        audio_row.setSpacing(4)
-        btn_audio = QPushButton("Browse Audio…")
-        btn_audio.setFixedHeight(28)
-        audio_row.addWidget(btn_audio)
-        btn_clear_audio = QPushButton("✕")
-        btn_clear_audio.setFixedSize(28, 28)
-        btn_clear_audio.setToolTip("Clear audio override")
-        audio_row.addWidget(btn_clear_audio)
-        ab.addLayout(audio_row)
+        vol_row, volume_slider, vol_lbl = self._build_volume_row()
+        sb.addLayout(vol_row)
 
-        ab.addWidget(self._sub_label("Audio output"))
-        audio_combo = QComboBox()
+        layout.addWidget(scene_audio_block)
+
+        # Hidden widgets that keep slot_data shape stable for downstream
+        # callers. The Video slot has no picked-audio override, so
+        # audio_label/audio_path exist as placeholders only.
+        audio_label = self._build_hidden_label(box)
+
+        slot_data = self._make_slot_data(
+            video_label=video_label,
+            audio_label=audio_label,
+            monitor_combo=monitor_combo,
+            audio_combo=audio_combo,
+            volume_slider=volume_slider,
+            vol_lbl=vol_lbl,
+        )
+
+        btn_video.clicked.connect(lambda _, d=slot_data: self._on_browse_video(d))
+        btn_clear_video.clicked.connect(lambda _, d=slot_data: self._on_clear_video(d))
+        volume_slider.valueChanged.connect(
+            lambda v, idx=index, lbl=vol_lbl: self._on_volume_changed(idx, v, lbl)
+        )
+
+        box._slot_data = slot_data  # type: ignore[attr-defined]
+        return box
+
+    def _build_stim_slot(self, index: int) -> QGroupBox:
+        """Stim slot: funscript (or pre-rendered audio fallback) + Haptic 1
+        device picker. No video, no monitor, no software volume — estim
+        intensity is set on the hardware device, and Calibrate (v0.0.2
+        item #5) is the UX for dialing it in before playback."""
+        box = QGroupBox(_SLOT_LABELS[index])
+        layout = QVBoxLayout(box)
+        layout.setSpacing(10)
+
+        # ── Funscript block (replaces the v0.0.1 "Audio override") ──────
+        funscript_block = self._build_block_frame()
+        fb = QVBoxLayout(funscript_block)
+        fb.setContentsMargins(10, 8, 10, 10)
+        fb.setSpacing(4)
+        fb.addWidget(self._block_heading("Funscript"))
+
+        audio_label = self._build_path_label("(no funscript)")
+        fb.addWidget(audio_label)
+
+        fs_row, btn_funscript, btn_clear_funscript = self._build_file_picker_row(
+            "Browse Funscript…",
+            clear_tooltip="Clear funscript / audio track",
+        )
+        fb.addLayout(fs_row)
+
+        fb.addWidget(self._sub_label(
+            "Primary: .funscript (real-time synthesis). "
+            "Fallback: pre-rendered .mp3 / .wav."
+        ))
+
+        layout.addWidget(funscript_block)
+
+        # ── Haptic 1 block (main estim channel) ─────────────────────────
+        haptic1_block = self._build_block_frame()
+        hb = QVBoxLayout(haptic1_block)
+        hb.setContentsMargins(10, 8, 10, 10)
+        hb.setSpacing(4)
+        hb.addWidget(self._block_heading("Haptic 1 (main)"))
+
+        hb.addWidget(self._sub_label("Device"))
+        audio_combo = self._build_audio_device_combo()
+        hb.addWidget(audio_combo)
+
+        hb.addWidget(self._sub_label(
+            "Intensity is set on the device itself — use Calibrate "
+            "before starting the scene."
+        ))
+
+        layout.addWidget(haptic1_block)
+
+        # ── + Add second channel (phase-2 placeholder) ──────────────────
+        btn_add_haptic2 = QPushButton("+ Add second channel")
+        btn_add_haptic2.setEnabled(False)
+        btn_add_haptic2.setToolTip(
+            "Coming in a later v0.0.2 PR — adds a second estim output "
+            "for the prostate subchannel or dual-channel setups."
+        )
+        btn_add_haptic2.setFixedHeight(28)
+        layout.addWidget(btn_add_haptic2)
+
+        layout.addStretch(1)
+
+        # Hidden widgets — Stim slot carries no video, no monitor,
+        # no software volume. Widgets exist so slot_data shape stays
+        # compatible with the Video slot.
+        video_label = self._build_hidden_label(box)
+        monitor_combo = self._build_hidden_monitor_combo(box)
+        volume_slider, vol_lbl = self._build_hidden_volume(box, default=100)
+
+        slot_data = self._make_slot_data(
+            video_label=video_label,
+            audio_label=audio_label,
+            monitor_combo=monitor_combo,
+            audio_combo=audio_combo,
+            volume_slider=volume_slider,
+            vol_lbl=vol_lbl,
+        )
+
+        btn_funscript.clicked.connect(lambda _, d=slot_data: self._on_browse_audio(d))
+        btn_clear_funscript.clicked.connect(lambda _, d=slot_data: self._on_clear_audio(d))
+
+        box._slot_data = slot_data  # type: ignore[attr-defined]
+        return box
+
+    def _build_mirror_slot(self, index: int) -> QGroupBox:
+        """Video 2 mirror slot: monitor picker only. Inherits the video +
+        scene audio from the Video slot at launch time and plays muted
+        on its own monitor. In v0.0.2 phase-2, this card gets the
+        ultrawide Layout block (Crop / Letterbox / Side-by-side)."""
+        box = QGroupBox(_SLOT_LABELS[index])
+        layout = QVBoxLayout(box)
+        layout.setSpacing(10)
+
+        # Mirror-mode explainer
+        note = QLabel("↔ Mirrors the Video slot on this monitor (muted).")
+        note.setStyleSheet("color: #9ba3c4; font-size: 11px; font-style: italic;")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        # ── Monitor block (the only real control) ───────────────────────
+        monitor_block = self._build_block_frame()
+        mb = QVBoxLayout(monitor_block)
+        mb.setContentsMargins(10, 8, 10, 10)
+        mb.setSpacing(4)
+        mb.addWidget(self._block_heading("Monitor"))
+
+        monitor_combo = QComboBox()
+        self._populate_monitor_combo(monitor_combo, default_index=index)
+        mb.addWidget(monitor_combo)
+
+        layout.addWidget(monitor_block)
+        layout.addStretch(1)
+
+        # Hidden widgets — mirror carries no file picker, no audio device,
+        # no volume (fixed-muted). Widgets exist so slot_data stays stable.
+        video_label = self._build_hidden_label(box)
+        audio_label = self._build_hidden_label(box)
+        audio_combo = QComboBox(box)
+        audio_combo.setVisible(False)
         for name, desc in self._audio_devices:
             audio_combo.addItem(desc, name)
-        ab.addWidget(audio_combo)
+        volume_slider, vol_lbl = self._build_hidden_volume(box, default=0)
 
-        vol_row = QHBoxLayout()
-        vol_row.addWidget(self._sub_label("Volume"))
-        volume_slider = QSlider(Qt.Orientation.Horizontal)
-        volume_slider.setRange(0, 100)
-        volume_slider.setValue(100)
-        volume_slider.setFixedHeight(22)
-        vol_row.addWidget(volume_slider)
-        vol_lbl = QLabel("100")
-        vol_lbl.setFixedWidth(28)
-        vol_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        vol_row.addWidget(vol_lbl)
-        ab.addLayout(vol_row)
+        slot_data = self._make_slot_data(
+            video_label=video_label,
+            audio_label=audio_label,
+            monitor_combo=monitor_combo,
+            audio_combo=audio_combo,
+            volume_slider=volume_slider,
+            vol_lbl=vol_lbl,
+        )
 
-        layout.addWidget(audio_block)
+        box._slot_data = slot_data  # type: ignore[attr-defined]
+        return box
 
-        slot_data: dict = {
+    # ── Small widget factories shared by the builders ─────────────────────
+
+    @staticmethod
+    def _make_slot_data(
+        *, video_label, audio_label, monitor_combo, audio_combo,
+        volume_slider, vol_lbl,
+    ) -> dict:
+        return {
             "video_label":    video_label,
             "video_path":     "",
             "audio_label":    audio_label,
@@ -1003,16 +1165,70 @@ class ControlWindow(QMainWindow):
             "vol_lbl":        vol_lbl,
         }
 
-        btn_video.clicked.connect(lambda _, d=slot_data: self._on_browse_video(d))
-        btn_clear_video.clicked.connect(lambda _, d=slot_data: self._on_clear_video(d))
-        btn_audio.clicked.connect(lambda _, d=slot_data: self._on_browse_audio(d))
-        btn_clear_audio.clicked.connect(lambda _, d=slot_data: self._on_clear_audio(d))
-        volume_slider.valueChanged.connect(
-            lambda v, idx=index, lbl=vol_lbl: self._on_volume_changed(idx, v, lbl)
-        )
+    @staticmethod
+    def _build_path_label(placeholder: str) -> QLabel:
+        lbl = QLabel(placeholder)
+        lbl.setWordWrap(False)
+        lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        lbl.setStyleSheet("color: #9ba3c4; font-size: 11px;")
+        return lbl
 
-        box._slot_data = slot_data  # type: ignore[attr-defined]
-        return box
+    @staticmethod
+    def _build_file_picker_row(
+        browse_label: str, clear_tooltip: str,
+    ) -> tuple[QHBoxLayout, QPushButton, QPushButton]:
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        btn_browse = QPushButton(browse_label)
+        btn_browse.setFixedHeight(28)
+        row.addWidget(btn_browse)
+        btn_clear = QPushButton("✕")
+        btn_clear.setFixedSize(28, 28)
+        btn_clear.setToolTip(clear_tooltip)
+        row.addWidget(btn_clear)
+        return row, btn_browse, btn_clear
+
+    def _build_audio_device_combo(self) -> QComboBox:
+        combo = QComboBox()
+        for name, desc in self._audio_devices:
+            combo.addItem(desc, name)
+        return combo
+
+    def _build_volume_row(self) -> tuple[QHBoxLayout, "ClickableSlider", QLabel]:
+        row = QHBoxLayout()
+        row.addWidget(self._sub_label("Volume"))
+        slider = ClickableSlider(Qt.Orientation.Horizontal)
+        slider.setRange(0, 100)
+        slider.setValue(100)
+        slider.setFixedHeight(22)
+        row.addWidget(slider)
+        lbl = QLabel("100")
+        lbl.setFixedWidth(28)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(lbl)
+        return row, slider, lbl
+
+    @staticmethod
+    def _build_hidden_label(parent) -> QLabel:
+        lbl = QLabel(parent)
+        lbl.setVisible(False)
+        return lbl
+
+    def _build_hidden_monitor_combo(self, parent) -> QComboBox:
+        combo = QComboBox(parent)
+        combo.setVisible(False)
+        self._populate_monitor_combo(combo, default_index=0)
+        return combo
+
+    @staticmethod
+    def _build_hidden_volume(parent, default: int) -> tuple["ClickableSlider", QLabel]:
+        slider = ClickableSlider(Qt.Orientation.Horizontal, parent)
+        slider.setRange(0, 100)
+        slider.setValue(default)
+        slider.setVisible(False)
+        lbl = QLabel(str(default), parent)
+        lbl.setVisible(False)
+        return slider, lbl
 
     # ── Slot-card visual helpers ──────────────────────────────────────────
 
