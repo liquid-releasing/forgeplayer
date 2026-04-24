@@ -72,10 +72,13 @@ class ControlWindow(QMainWindow):
 
         self._build_ui()
 
-        # Apply the saved control-panel-screen preference after the first
-        # event loop spin so the screen geometry is reliable. Zero-delay
-        # singleShot enqueues it after show() naturally resolves.
-        QTimer.singleShot(0, self._apply_startup_screen_preference)
+        # Apply the saved control-panel-screen preference BEFORE show()
+        # lands the window. If we do this via a deferred singleShot, Qt
+        # will first paint at the default position (triggering Windows'
+        # "Unable to set geometry" warning as the DWM snaps the window
+        # to the work area), then our move fires a frame later. Sync-
+        # setting the geometry here avoids the warning entirely.
+        self._apply_startup_screen_preference()
 
     def _apply_startup_screen_preference(self) -> None:
         idx = self._prefs.control_panel_screen

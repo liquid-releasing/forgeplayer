@@ -1,0 +1,279 @@
+name: Release Builds
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Windows build
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Build — Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Fetch libmpv-2.dll from shinchiro mpv-dev release
+        shell: pwsh
+        run: |
+          $ProgressPreference = "SilentlyContinue"
+          $release = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+          $asset = $release.assets |
+            Where-Object { $_.name -like "mpv-dev-x86_64-2*" } |
+            Select-Object -First 1
+          if (-not $asset) {
+            $asset = $release.assets |
+              Where-Object { $_.name -like "mpv-dev-x86_64*" } |
+              Select-Object -First 1
+          }
+          Write-Host "Downloading $($asset.name)"
+          $tmp = "$env:RUNNER_TEMP\mpv-dev.7z"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmp
+          7z e $tmp -o"$env:GITHUB_WORKSPACE" "libmpv-2.dll" -y
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\libmpv-2.dll")) {
+            Write-Error "libmpv-2.dll not extracted"
+            exit 1
+          }
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+      - name: Build with PyInstaller
+        run: pyinstaller ForgePlayer.spec --noconfirm --clean
+
+      - name: Verify build
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\ForgePlayer\ForgePlayer.exe")) {
+            Write-Error "Build artifact not found"
+            exit 1
+          }
+
+      - name: Zip artifact
+        shell: pwsh
+        run: Compress-Archive -Path dist\ForgePlayer -DestinationPath dist\ForgePlayer-windows.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ForgePlayer-windows
+          path: dist/ForgePlayer-windows.zip
+
+  # ---------------------------------------------------------------------------
+  # macOS build
+  # ---------------------------------------------------------------------------
+  build-macos:
+    name: Build — macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install libmpv via Homebrew
+        run: brew install mpv
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate .icns icon
+        run: |
+          ICO_SRC="branding/forgeplayer_icon.png"
+          ICNS_OUT="branding/forgeplayer.icns"
+          if [ -f "$ICO_SRC" ] && [ ! -f "$ICNS_OUT" ]; then
+            ICONSET_DIR="$(mktemp -d)/ForgePlayer.iconset"
+            mkdir -p "$ICONSET_DIR"
+            for SIZE in 16 32 64 128 256 512; do
+              sips -z "$SIZE" "$SIZE" "$ICO_SRC" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}.png" 2>/dev/null
+              DOUBLE=$((SIZE * 2))
+              sips -z "$DOUBLE" "$DOUBLE" "$ICO_SRC" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}@2x.png" 2>/dev/null
+            done
+            iconutil -c icns "$ICONSET_DIR" -o "$ICNS_OUT"
+            rm -rf "$(dirname "$ICONSET_DIR")"
+          fi
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+      - name: Build with PyInstaller
+        run: pyinstaller ForgePlayer.spec --noconfirm --clean
+
+      - name: Verify build
+        run: |
+          if [ ! -d "dist/ForgePlayer.app" ] && [ ! -d "dist/ForgePlayer" ]; then
+            echo "Build artifact not found"
+            exit 1
+          fi
+
+      - name: Zip artifact
+        run: |
+          cd dist
+          if [ -d "ForgePlayer.app" ]; then
+            zip -r ForgePlayer-macos.zip ForgePlayer.app
+          else
+            zip -r ForgePlayer-macos.zip ForgePlayer
+          fi
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ForgePlayer-macos
+          path: dist/ForgePlayer-macos.zip
+
+  # ---------------------------------------------------------------------------
+  # Linux build
+  # ---------------------------------------------------------------------------
+  build-linux:
+    name: Build — Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (libmpv + Qt runtime bits)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libmpv2 \
+            libmpv-dev \
+            libxcb-cursor0 \
+            libxcb-xinerama0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-sync1 \
+            libxcb-xfixes0 \
+            libxkbcommon-x11-0 \
+            libegl1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/ -q
+
+      - name: Build with PyInstaller
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pyinstaller ForgePlayer.spec --noconfirm --clean
+
+      - name: Verify build
+        run: |
+          if [ ! -f "dist/ForgePlayer/ForgePlayer" ]; then
+            echo "Build artifact not found"
+            exit 1
+          fi
+
+      - name: Create tarball
+        run: tar -czf dist/ForgePlayer-linux.tar.gz -C dist ForgePlayer
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ForgePlayer-linux
+          path: dist/ForgePlayer-linux.tar.gz
+
+  # ---------------------------------------------------------------------------
+  # Publish a GitHub Release with all three artifacts
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish Release
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ForgePlayer-windows
+          path: artifacts/
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ForgePlayer-macos
+          path: artifacts/
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ForgePlayer-linux
+          path: artifacts/
+
+      - name: Compute release name
+        id: relname
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          STRIPPED="${TAG#v}"
+          NAME="ForgePlayer ${STRIPPED//-/ }"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: liquid-releasing/forgeplayer-releases
+          token: ${{ secrets.RELEASES_PAT }}
+          name: ${{ steps.relname.outputs.name }}
+          prerelease: false
+          files: |
+            artifacts/ForgePlayer-windows.zip
+            artifacts/ForgePlayer-macos.zip
+            artifacts/ForgePlayer-linux.tar.gz
+          body: |
+            > ⚠️ **Alpha release.** This build is under active development. Expect rough edges.
+
+            ForgePlayer — the next-gen successor to Fred's CHPlayer for synchronized multi-monitor video + haptic playback. Point it at a FunscriptForge or ForgeAssembler pack folder, pick a scene in the Library, and it plays across your screens with audio routed separately to your speakers and USB estim device.
+
+            **Device compatibility:** mechanical, 2b, and stereostim devices are supported in this alpha via the pre-rendered-audio haptic path. FOC-stim support lands in v0.0.2 when native funscript playback ships.
+
+            ## Downloads
+            - **Windows** — `ForgePlayer-windows.zip` — unzip and run `ForgePlayer.exe`
+            - **macOS** — `ForgePlayer-macos.zip` — unzip and open `ForgePlayer.app`
+            - **Linux** — `ForgePlayer-linux.tar.gz` — extract and run `ForgePlayer/ForgePlayer`
+
+            First run: visit **Setup** to pick your Scene Audio and Haptic 1 devices, then **Library → Scan a folder** at your media root.
+
+            Questions, bug reports, and feedback welcome in [our Discord](https://discord.gg/sZWCqgxY).
+          append_body: true
+          generate_release_notes: false
