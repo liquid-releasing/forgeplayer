@@ -35,11 +35,11 @@ Items are roughly grouped by phase but not strictly ordered.
 
 ## Phase 2 — Funscript Playback
 
-- [ ] Load a `.funscript` file alongside each video slot
-- [ ] Parse funscript actions and fire them in sync with video position
-- [ ] Seek sync carries funscript position too — scrub video, haptic follows
-- [ ] Route haptic signals to the correct serial/USB port per slot
-- [ ] Funscripts authored and refined in **FunscriptForge**, played here
+- [x] Load a `.funscript` file alongside each video slot
+- [x] Parse funscript actions and fire them in sync with video position
+- [x] Seek sync carries funscript position too — scrub video, haptic follows
+- [x] Route haptic signals to the correct USB audio port per slot (audio-as-haptic transport)
+- [x] Funscripts authored and refined in **FunscriptForge**, played here
 - [ ] Script libraries to allow loading scripts not located next to the video file
 ---
 
