@@ -231,6 +231,7 @@ class _TimeSmoother:
     def __init__(self) -> None:
         self.offset: float = 0.0
         self.auto_resync_count: int = 0
+        self.just_auto_resynced: bool = False
         self._error_history: list[float] = []
         self._initialized = False
 
@@ -241,6 +242,7 @@ class _TimeSmoother:
         # auto_resync_count intentionally NOT cleared — it accumulates
         # over the stream's lifetime so the close-time DebugLog event
         # reports total auto-resyncs across the whole session.
+        self.just_auto_resynced = False
 
     def update(
         self,
@@ -272,16 +274,22 @@ class _TimeSmoother:
             self.offset = observed_offset
             self._error_history = [0.0]
             self._initialized = True
+            self.just_auto_resynced = False
             return steady_clock + self.offset
 
         if abs(observed_offset - self.offset) > self.AUTO_RESYNC_THRESHOLD:
             # Big jump — auto-adopt wholesale and reset smoothing
-            # history. Counted for debug visibility but otherwise
-            # silent (no exception, no silenced block).
+            # history. Flag the block so the stream can silence its
+            # output: the step in system_time_estimate at the block
+            # boundary would otherwise produce an audible click in the
+            # synth output (volume * carrier discontinuity).
             self.auto_resync_count += 1
+            self.just_auto_resynced = True
             self.offset = observed_offset
             self._error_history = [0.0]
             return steady_clock + self.offset
+
+        self.just_auto_resynced = False
 
         # Low-pass over recent observations.
         error = observed_offset - self.offset
@@ -538,6 +546,17 @@ class StimAudioStream:
                     block.shape, (frames, 2),
                 )
                 outdata.fill(0)
+                return
+
+            # Auto-resync silences this block. The smoother just stepped
+            # the offset, which produces a discontinuity in the synth's
+            # system_time_estimate at the block boundary — audible as a
+            # click in the carrier. Cheaper to drop one ~21 ms block.
+            # Also reset the fade gate so the next active block ramps in
+            # cleanly rather than starting at full amplitude.
+            if self._smoother.just_auto_resynced:
+                outdata.fill(0)
+                self._fade_gain = 0.0
                 return
 
             # Apply pause/play fade gate. A direct multiplication by 0/1

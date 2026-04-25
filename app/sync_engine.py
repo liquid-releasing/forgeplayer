@@ -21,6 +21,13 @@ class SyncEngine:
     def __init__(self) -> None:
         self._players: list[Optional[mpv.MPV]] = [None] * self.MAX_SLOTS
         self._lock = threading.Lock()
+        # Last good time_pos reading. mpv's time_pos is None during
+        # transient states (between frames, during seeks, while a buffer
+        # is being filled); without this cache the audio thread reads
+        # 0.0 → its time smoother thinks the clock just jumped backward
+        # → auto-resync → audible click. Cache the last numeric value
+        # and return it instead.
+        self._last_position: float = 0.0
 
     # ── Player lifecycle ──────────────────────────────────────────────────────
 
@@ -81,10 +88,15 @@ class SyncEngine:
             if p:
                 p.terminate()
                 self._players[slot] = None
+        # Drop cached position so the next scene starts fresh — last
+        # scene's final time_pos is meaningless to a new file.
+        if not any(self._players):
+            self._last_position = 0.0
 
     def terminate_all(self) -> None:
         for i in range(self.MAX_SLOTS):
             self.terminate_player(i)
+        self._last_position = 0.0
 
     # ── Sync transport ────────────────────────────────────────────────────────
 
@@ -123,14 +135,26 @@ class SyncEngine:
         return next(iter(self._active), None)
 
     def get_position(self) -> float:
+        """Return current playback position in seconds.
+
+        Cached: mpv's `time_pos` returns None during transient internal
+        states (between frames, during seeks, mid-buffer-fill).
+        Uncached, the audio thread would see those Nones as 0.0 and
+        the time smoother would auto-resync (audible click). Return
+        the last numeric reading whenever the live one is None.
+
+        Reset on player init so a new scene doesn't carry over the
+        previous scene's position.
+        """
         p = self._primary()
         if p:
             try:
                 pos = p.time_pos
-                return float(pos) if pos is not None else 0.0
+                if pos is not None:
+                    self._last_position = float(pos)
             except Exception:
-                return 0.0
-        return 0.0
+                pass
+        return self._last_position
 
     def get_duration(self) -> float:
         p = self._primary()

@@ -242,6 +242,38 @@ class TestTimeSmoother:
         delta = sm.offset - baseline_offset
         assert abs(delta) < 0.001  # well below the 50 ms jitter
 
+    def test_just_auto_resynced_flag_set_only_on_jump(self):
+        """The flag tells the stream to silence the block — must be
+        accurate for both paths (small adjust = clean, big jump =
+        silence-needed)."""
+        sm = _TimeSmoother()
+        sample_rate = 48000
+
+        sm.update(self._block(0, 1024), media_time=5.0, sample_rate=sample_rate)
+        # First-call adoption — flag stays False (initial wholesale
+        # adoption isn't an "unexpected" jump worth silencing).
+        assert sm.just_auto_resynced is False
+
+        # Tiny jitter — normal smoothing path.
+        sm.update(
+            self._block(1024, 1024),
+            media_time=5.0 + 1024 / sample_rate + 0.001,
+            sample_rate=sample_rate,
+        )
+        assert sm.just_auto_resynced is False
+
+        # Big jump — flag set.
+        sm.update(self._block(2048, 1024), media_time=180.0, sample_rate=sample_rate)
+        assert sm.just_auto_resynced is True
+
+        # Next normal update clears the flag.
+        sm.update(
+            self._block(3072, 1024),
+            media_time=180.0 + 2048 / sample_rate,
+            sample_rate=sample_rate,
+        )
+        assert sm.just_auto_resynced is False
+
     def test_big_jump_auto_adopts_silently(self):
         """When the observed offset jumps past AUTO_RESYNC_THRESHOLD
         (typically a seek or extended paused state), the smoother
