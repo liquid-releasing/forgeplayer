@@ -58,6 +58,33 @@ def _host_api_from_mpv_id(mpv_id: str) -> str | None:
     return _HOST_API_FROM_MPV_PREFIX.get(prefix)
 
 
+def query_device_sample_rate(
+    handle: int | str | None,
+    default: int = 44100,
+) -> int:
+    """Return the device's `default_samplerate` as an int.
+
+    `handle` is whatever `resolve_audio_device` returns: a sounddevice
+    integer index (preferred), a device-name string, or None for system
+    default. Returns `default` on any failure (sounddevice unavailable,
+    device gone, returned a non-numeric default_samplerate, etc.) so
+    callers don't have to handle errors at the call site — the synth
+    pipeline runs at `default` and the user gets PortAudio's own error
+    if even that's wrong.
+    """
+    try:
+        sd = _load_sounddevice()
+        if handle is None:
+            info = sd.query_devices(kind="output")
+        else:
+            info = sd.query_devices(handle)
+        rate = int(info.get("default_samplerate", default))
+        return rate if rate > 0 else default
+    except Exception as exc:
+        _log.debug("device sample-rate query failed (handle=%r): %s", handle, exc)
+        return default
+
+
 def _find_sounddevice_indices(sd, desc: str, target_host: str | None) -> list[int]:
     """Return ALL sounddevice integer indices matching `desc` on
     `target_host`, in enumeration order. Empty list if none match.
@@ -189,10 +216,11 @@ class StimAudioStream:
     wires this to the SyncEngine's Slot 1 mpv `time-pos`. Don't do any
     expensive work in the callable — it runs on the audio thread.
 
-    Sample rate is pinned to `SAMPLE_RATE` (44100); device is opened at
-    that rate. If the device can't run at 44100 (rare on USB dongles),
-    sounddevice raises and we let it propagate — caller decides whether
-    to fall back.
+    Sample rate is read from the synth (`synth.sample_rate`) so the
+    stream opens at whatever rate the device's `default_samplerate` was
+    when the synth was constructed. Most USB dongles default to 44100,
+    a few default to 48000; PortAudio raises -9997 "Invalid sample rate"
+    if asked for a rate the device doesn't accept.
     """
 
     BLOCK_SIZE = 512
@@ -231,7 +259,7 @@ class StimAudioStream:
             sd = _load_sounddevice()
             try:
                 stream = sd.OutputStream(
-                    samplerate=SAMPLE_RATE,
+                    samplerate=self._synth.sample_rate,
                     channels=2,
                     dtype="float32",
                     blocksize=self.BLOCK_SIZE,

@@ -1902,7 +1902,11 @@ class ControlWindow(QMainWindow):
         # Lazy imports — keep the audio stack out of cold-start when the
         # user's not playing a stim scene.
         from app.funscript_loader import load_stim_channels  # noqa: PLC0415
-        from app.stim_audio_output import StimAudioStream  # noqa: PLC0415
+        from app.stim_audio_output import (  # noqa: PLC0415
+            StimAudioStream,
+            query_device_sample_rate,
+            resolve_audio_device,
+        )
         from app.stim_synth import CallbackMediaSync, StimSynth  # noqa: PLC0415
 
         try:
@@ -1928,15 +1932,33 @@ class ControlWindow(QMainWindow):
         media_sync = CallbackMediaSync(
             lambda: engine.has_active_players() and not engine.is_paused()
         )
-        synth = StimSynth(
-            channels, media_sync, waveform=self._prefs.audio_algorithm,
-        )
 
         try:
             mpv_devices = engine.list_audio_devices(include_hdmi=True)
         except Exception as exc:
             DebugLog.record("stim.mpv_devices_failed", error=repr(exc))
             mpv_devices = []
+
+        # Query the device's default sample rate BEFORE constructing the
+        # synth. USB dongles vary (most run 44100, some 48000); PortAudio
+        # raises -9998 "Invalid sample rate" if we ask for a rate the
+        # device doesn't accept. The synth math runs at whatever rate
+        # we tell it, so opening the stream at the device's preferred
+        # rate is the simplest fix.
+        device_handle = resolve_audio_device(
+            audio_device or None, mpv_devices,
+        )
+        device_rate = query_device_sample_rate(device_handle)
+        DebugLog.record(
+            "stim.device_rate_query",
+            slot=slot_idx, device=str(device_handle), rate=device_rate,
+        )
+
+        synth = StimSynth(
+            channels, media_sync,
+            waveform=self._prefs.audio_algorithm,
+            sample_rate=device_rate,
+        )
 
         # Apply latency offset: positive ms means stim leads video, so we
         # feed the synth a media-time SLIGHTLY AHEAD of mpv's time-pos.

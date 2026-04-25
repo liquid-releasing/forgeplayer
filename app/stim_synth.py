@@ -126,6 +126,7 @@ class StimSynth:
         media_sync: AbstractMediaSync,
         *,
         waveform: WaveformMode = "continuous",
+        sample_rate: int = SAMPLE_RATE,
     ) -> None:
         """Build a synth for one channel set.
 
@@ -142,11 +143,18 @@ class StimSynth:
         Channel presence is orthogonal to algorithm choice — Euphoria-style
         scenes ship with pulse_* channels but those channels are ignored in
         continuous mode (same behavior as FunscriptForge).
+
+        `sample_rate` is the rate the audio output stream will run at —
+        typically the device's `default_samplerate` (44100 on most USB
+        dongles, 48000 on a few). The synth math runs at whatever rate
+        the algorithm is asked for; the user's ear is calibrated to the
+        funscript-defined modulation, not to the carrier sample rate.
         """
         self._channels = channels
         self._media_sync = media_sync
         self._sample_count = 0
         self.waveform: WaveformMode = waveform
+        self.sample_rate: int = sample_rate
 
         if waveform == "pulse":
             self._algorithm = self._build_pulse_based()
@@ -168,11 +176,11 @@ class StimSynth:
             return np.zeros((0, 2), dtype=np.float32)
 
         idx = np.arange(n_frames)
-        steady_clock = (idx + self._sample_count) / SAMPLE_RATE
-        system_time_estimate = media_time_s + idx / SAMPLE_RATE
+        steady_clock = (idx + self._sample_count) / self.sample_rate
+        system_time_estimate = media_time_s + idx / self.sample_rate
 
         left, right = self._algorithm.generate_audio(
-            samplerate=SAMPLE_RATE,
+            samplerate=self.sample_rate,
             steady_clock=steady_clock,
             system_time_estimate=system_time_estimate,
         )

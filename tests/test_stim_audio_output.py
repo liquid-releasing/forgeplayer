@@ -16,7 +16,11 @@ import numpy as np
 import pytest
 
 from app.funscript_loader import StimChannels
-from app.stim_audio_output import StimAudioStream, resolve_audio_device
+from app.stim_audio_output import (
+    StimAudioStream,
+    query_device_sample_rate,
+    resolve_audio_device,
+)
 from app.stim_synth import CallbackMediaSync, StimSynth
 
 
@@ -157,6 +161,38 @@ class TestResolveAudioDevice:
         rather than asking sounddevice to match against an empty string."""
         mpv_devices = [{"name": "wasapi/{aaa}", "description": ""}]
         assert resolve_audio_device("wasapi/{aaa}", mpv_devices) is None
+
+
+class TestQueryDeviceSampleRate:
+    def test_returns_device_default_rate(self, monkeypatch):
+        fake = types.ModuleType("sounddevice")
+        fake.query_devices = MagicMock(return_value={"default_samplerate": 48000})
+        monkeypatch.setitem(sys.modules, "sounddevice", fake)
+
+        assert query_device_sample_rate(20) == 48000
+
+    def test_falls_back_to_default_on_error(self, monkeypatch):
+        fake = types.ModuleType("sounddevice")
+        fake.query_devices = MagicMock(side_effect=RuntimeError("device gone"))
+        monkeypatch.setitem(sys.modules, "sounddevice", fake)
+
+        assert query_device_sample_rate(99) == 44100
+
+    def test_falls_back_when_rate_zero(self, monkeypatch):
+        fake = types.ModuleType("sounddevice")
+        fake.query_devices = MagicMock(return_value={"default_samplerate": 0})
+        monkeypatch.setitem(sys.modules, "sounddevice", fake)
+
+        assert query_device_sample_rate(20) == 44100
+
+    def test_handle_none_queries_system_default(self, monkeypatch):
+        fake = types.ModuleType("sounddevice")
+        fake.query_devices = MagicMock(return_value={"default_samplerate": 44100})
+        monkeypatch.setitem(sys.modules, "sounddevice", fake)
+
+        assert query_device_sample_rate(None) == 44100
+        # Verify it was called with kind="output", not a device handle.
+        fake.query_devices.assert_called_with(kind="output")
 
 
 # ── StimAudioStream ───────────────────────────────────────────────────────────

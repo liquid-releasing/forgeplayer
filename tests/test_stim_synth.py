@@ -65,6 +65,21 @@ class TestStimSynth:
         assert block.shape == (1024, 2)
         assert block.dtype == np.float32
 
+    def test_honors_explicit_sample_rate(self):
+        """Synth runs at whatever rate caller passes — needed because
+        USB dongles vary (44.1k vs 48k) and we open the output stream at
+        the device's `default_samplerate`."""
+        synth = StimSynth(
+            _scene_channels(),
+            CallbackMediaSync(lambda: True),
+            sample_rate=48000,
+        )
+        assert synth.sample_rate == 48000
+        # Run a block to confirm the rate is actually plumbed through —
+        # we just want no crash + correct shape.
+        block = synth.generate_block(1024, media_time_s=1.0)
+        assert block.shape == (1024, 2)
+
     def test_zero_frames_returns_empty(self):
         synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
         block = synth.generate_block(0, media_time_s=0.0)
