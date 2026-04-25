@@ -260,36 +260,95 @@ class TestScriptedVolume:
 
 
 class TestScriptedCarrier:
-    def test_scripted_carrier_shifts_spectrum_peak(self):
-        """The carrier_frequency channel's 0..1 maps to 500..1000 Hz. A
-        channel held at 0.0 → 500 Hz peak; at 1.0 → 1000 Hz peak. Verify
-        the FFT peak moves with the scripted value.
+    def test_continuous_mode_ignores_carrier_funscript(self):
+        """In continuous mode the carrier funscript is intentionally NOT
+        honored — restim's continuous algorithm samples carrier_frequency
+        once per chunk, which produces audible chunk-boundary artifacts
+        with a varying carrier funscript. We always use the constant
+        default (700 Hz) instead, matching FunscriptForge's MP3 renderer.
+        See `_build_continuous` in stim_synth.py for full rationale.
         """
         base = _scene_channels(motion=False)
-        low_carrier = FunscriptActions(
-            t=np.array([0.0, 4.0]),
-            p=np.array([0.0, 0.0]),  # → 500 Hz
-        )
-        high_carrier = FunscriptActions(
-            t=np.array([0.0, 4.0]),
-            p=np.array([1.0, 1.0]),  # → 1000 Hz
-        )
-        n = 16384
-
-        for actions, expected_hz in [(low_carrier, 500.0), (high_carrier, 1000.0)]:
+        # Two scenes with very different carrier funscripts. If the synth
+        # honored them, we'd see two different spectrum peaks. We expect
+        # both to peak at the constant default (700 Hz).
+        for pos_value in (0.0, 1.0):
+            actions = FunscriptActions(
+                t=np.array([0.0, 4.0]), p=np.array([pos_value, pos_value]),
+            )
             channels = StimChannels(
                 t=base.t, alpha=base.alpha, beta=base.beta, source=base.source,
                 carrier_frequency=actions,
             )
             synth = StimSynth(channels, CallbackMediaSync(lambda: True))
+            n = 16384
             block = synth.generate_block(n, media_time_s=1.0)
             signal = block[:, 0].astype(np.float64)
             if np.max(np.abs(signal)) < 1e-6:
-                continue  # centered alpha/beta can produce near-silence
+                continue  # centered alpha/beta produces near-silence
             spectrum = np.abs(np.fft.rfft(signal))
             freqs = np.fft.rfftfreq(n, d=1.0 / SAMPLE_RATE)
             peak_freq = freqs[int(np.argmax(spectrum))]
-            assert abs(peak_freq - expected_hz) < 15.0, (
-                f"carrier held at {actions.p[0]} → expected peak ~{expected_hz} Hz, "
-                f"got {peak_freq} Hz"
+            assert abs(peak_freq - 700.0) < 15.0, (
+                f"continuous mode should pin carrier to default 700 Hz "
+                f"regardless of funscript pos={pos_value}, got {peak_freq} Hz"
             )
+
+    def test_pulse_mode_honors_carrier_funscript(self):
+        """Pulse mode SHOULD honor carrier_frequency funscript — restim's
+        pulse-based algorithm samples carrier per-sample (full array),
+        no chunk-boundary artifact. The ratio of carrier-frequency-driven
+        pulse density between low and high values is the most stable
+        signal we can spot with FFT.
+        """
+        base = _scene_channels(motion=False)
+        # 0.5 maps to 600 Hz (Edger's max=1200), well below pulse-density-
+        # confusing edges. 0.83 → 996 Hz. Difference is meaningful.
+        low_carrier = FunscriptActions(
+            t=np.array([0.0, 4.0]), p=np.array([0.5, 0.5]),
+        )
+        high_carrier = FunscriptActions(
+            t=np.array([0.0, 4.0]), p=np.array([0.83, 0.83]),
+        )
+        # Pulse mode requires at least one pulse_* channel to dispatch
+        pulse_actions = FunscriptActions(
+            t=np.array([0.0, 4.0]), p=np.array([0.5, 0.5]),
+        )
+
+        spectra = []
+        for carrier in (low_carrier, high_carrier):
+            channels = StimChannels(
+                t=base.t, alpha=base.alpha, beta=base.beta, source=base.source,
+                carrier_frequency=carrier,
+                pulse_frequency=pulse_actions,
+            )
+            synth = StimSynth(
+                channels, CallbackMediaSync(lambda: True), waveform="pulse",
+            )
+            assert synth.waveform == "pulse"
+            n = 16384
+            block = synth.generate_block(n, media_time_s=1.0)
+            signal = block[:, 0].astype(np.float64)
+            spec = np.abs(np.fft.rfft(signal))
+            freqs = np.fft.rfftfreq(n, d=1.0 / SAMPLE_RATE)
+            # Capture the centroid of energy below 1500 Hz; pulse-shape
+            # spreads energy so a single-peak comparison is brittle.
+            band_mask = (freqs > 100) & (freqs < 1500)
+            centroid = float(
+                np.sum(freqs[band_mask] * spec[band_mask]) / max(np.sum(spec[band_mask]), 1e-12)
+            )
+            spectra.append(centroid)
+
+        low_centroid, high_centroid = spectra
+        assert high_centroid > low_centroid, (
+            "Pulse mode should shift spectrum upward when carrier funscript "
+            f"goes from 0.5 → 0.83 (i.e. 600 → 996 Hz). "
+            f"low_centroid={low_centroid:.1f} Hz, high_centroid={high_centroid:.1f} Hz"
+        )
+
+    def test_carrier_range_matches_edger_authoring_scale(self):
+        """Edger normalizes carrier with max=1200 Hz, not restim's 500-1000
+        safety range (those clamp at synthesis). Verify the module constant
+        reflects this so we don't silently drift."""
+        from app.stim_synth import _CARRIER_RANGE
+        assert _CARRIER_RANGE == (0.0, 1200.0)

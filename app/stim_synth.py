@@ -61,12 +61,20 @@ SAMPLE_RATE = 44100
 SAFETY_MIN_HZ = 500.0
 SAFETY_MAX_HZ = 1000.0
 
-# Native axis ranges per restim's funscript_kit.py. Funscript files carry
-# positions in 0..100 (normalized by the loader to 0..1). Each channel
-# maps that 0..1 window linearly onto its native range below.
+# Native axis ranges. Funscript files carry positions in 0..100 (normalized
+# by the loader to 0..1). Each channel maps that 0..1 window linearly onto
+# the range below. Sources:
+#   - alpha/beta:   restim's funscript_kit.py (POSITION_ALPHA: -1..1)
+#   - volume:       Edger's normalization table (max=1.0, already normalized)
+#   - frequency:    Edger's normalization table (max=1200 Hz). NOT restim's
+#                   safety range (500-1000) — restim's safety_limits clamp
+#                   at synthesis time; the funscript's *intent* is 0..1200.
+#   - pulse_*:      restim's funscript_kit.py
+# See docs/architecture/stim-synthesis.md and the upstream
+# funscript-tools/FUNDAMENTAL_OPERATIONS.md for the authoring contract.
 _ALPHA_BETA_RANGE = (-1.0, 1.0)
 _VOLUME_RANGE = (0.0, 1.0)
-_CARRIER_RANGE = (500.0, 1000.0)
+_CARRIER_RANGE = (0.0, 1200.0)
 _PULSE_FREQ_RANGE = (0.0, 100.0)
 _PULSE_WIDTH_RANGE = (4.0, 10.0)
 _PULSE_RISE_RANGE = (2.0, 20.0)
@@ -178,6 +186,18 @@ class StimSynth:
     # ── Algorithm construction ────────────────────────────────────────────────
 
     def _build_continuous(self) -> ThreePhaseAlgorithm:
+        # Continuous mode IGNORES carrier_frequency funscript and uses a
+        # constant default. Reason: restim's continuous algorithm samples
+        # carrier_frequency once per audio chunk (system_time_estimate[0],
+        # not the array). With ~4096-frame chunks at 44.1 kHz that's a
+        # frequency-step every 92.9 ms ≈ 10.7 Hz. A varying carrier
+        # funscript therefore creates an audible 10 Hz "horse-hoof" buzz
+        # at chunk boundaries. FunscriptForge's MP3 renderer
+        # (forge/audio_synthesis.py default carrier_frequency=700.0) does
+        # the same thing for the same reason — users' ears are calibrated
+        # to a constant carrier in continuous mode. If the scene's intent
+        # genuinely needs varying carrier, use pulse mode (which samples
+        # per-sample and has no chunk-step artifact).
         params = ThreephaseContinuousAlgorithmParams(
             position=self._build_position_params(),
             transform=_neutral_transform_params(),
@@ -185,7 +205,7 @@ class StimSynth:
             vibration_1=_disabled_vibration_params(),
             vibration_2=_disabled_vibration_params(),
             volume=self._build_volume_params(),
-            carrier_frequency=self._build_carrier_axis(),
+            carrier_frequency=create_constant_axis(_DEFAULT_CARRIER_HZ),
         )
         return ThreePhaseAlgorithm(
             media=self._media_sync,
@@ -194,6 +214,10 @@ class StimSynth:
         )
 
     def _build_pulse_based(self) -> DefaultThreePhasePulseBasedAlgorithm:
+        # Pulse mode HONORS carrier_frequency funscript. restim's pulse_based
+        # algorithm interpolates carrier_frequency from the full
+        # system_time_estimate array (per-sample), so a varying carrier
+        # plays cleanly without chunk-step artifacts.
         params = ThreephasePulsebasedAlgorithmParams(
             position=self._build_position_params(),
             transform=_neutral_transform_params(),

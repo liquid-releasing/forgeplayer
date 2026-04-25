@@ -103,11 +103,13 @@ StimSynth(channels, media_sync, waveform=...)
   │     Smooth sine carrier modulated by alpha+beta position. Used
   │     for legacy 2b (main 1D → radial 1D→2D) and stereostim.
   │     pulse_* channels are IGNORED in this mode (same as upstream).
+  │     carrier_frequency funscript ALSO IGNORED — see below.
   │
   └─ "pulse"                → DefaultThreePhasePulseBasedAlgorithm
         Discrete pulses, envelope-shaped, alternating polarity for
         DC balance. Consumes pulse_frequency / pulse_width /
-        pulse_rise_time when present. Sounds clicky on its own.
+        pulse_rise_time when present. Carrier funscript is honored
+        (sampled per-sample). Sounds clicky on its own.
         Opt-in for users with hardware tuned for pulse-based content.
 ```
 
@@ -116,26 +118,62 @@ ship with pulse_* channels, but they only matter if the user picks
 pulse mode. v0.0.2 has no UI to switch yet; future Setup work will
 expose it as part of device-profile config.
 
+### Carrier-funscript asymmetry (restim sampling discipline)
+
+restim's continuous algorithm samples carrier_frequency **once per
+audio chunk** ([continuous.py:43](../../app/vendor/restim_stim_math/audio_gen/continuous.py#L43)).
+With ~4096-frame chunks at 44.1 kHz that's a frequency-step every
+92.9 ms ≈ 10.7 Hz. A varying carrier funscript on continuous therefore
+creates an audible 10 Hz "horse-hoof" buzz at chunk boundaries.
+
+restim's pulse-based algorithm samples carrier per-sample ([pulse_based.py:121](../../app/vendor/restim_stim_math/audio_gen/pulse_based.py#L121)),
+no chunk artifact. Pulse mode honors carrier funscripts cleanly.
+
+ForgePlayer's choices follow restim's constraints:
+
+- **Continuous**: ignore the carrier funscript, use a constant default.
+  Matches FunscriptForge's MP3 renderer ([forge/audio_synthesis.py:64](https://github.com/liquid-releasing/funscript-updater/blob/main/forge/audio_synthesis.py#L64))
+  which defaults to `carrier_frequency=700.0` and only loads the funscript
+  when the user explicitly hands a path.
+- **Pulse**: honor the carrier funscript. Per-sample interpolation,
+  no artifact.
+
+This was diagnosed by spectral analysis of an offline render of
+`test_media/Zer0 Game/stereostim/`. With carrier funscript active,
+hi-band (>2 kHz) mean energy spiked from baseline 0.0002 to 0.13-0.15
+in the t=8-20s window. Removing the carrier funscript dropped it back
+to ~0.005 (noise floor). The "horse-hoof" sound user reported maps
+directly to that 10 Hz chunk-boundary stepping.
+
 ## Channel consumption table
 
-All values follow restim's `funscript_kit.py` axis ranges. Funscript
-`pos` values are always 0..100 on disk; the loader normalizes to 0..1
-floats; the synth rescales to each channel's native axis range.
+Funscript `pos` values are always 0..100 on disk; the loader normalizes
+to 0..1 floats; the synth rescales each 0..1 value to the channel's
+native axis range. Ranges follow Edger's `funscript-tools/FUNDAMENTAL_OPERATIONS.md`
+authoring contract (the canonical authoring scale) plus restim's
+`funscript_kit.py` for channels Edger doesn't enumerate. restim's
+`safety_limits` clamp at synthesis time independently — the funscript
+*intent* still uses the wider authoring range.
 
-| Funscript file (main) | Funscript file (prostate) | Synth param | Axis range | Default |
-|---|---|---|---|---|
-| `{stem}.funscript` | — | → radial 1D→2D → alpha + beta | — | (fallback only) |
-| `{stem}.alpha.funscript` | `{stem}.alpha-prostate.funscript` | `position.alpha` | −1 .. +1 | 0 (center) |
-| `{stem}.beta.funscript` | `{stem}.beta-prostate.funscript` | `position.beta` | −1 .. +1 | 0 (center) |
-| `{stem}.volume.funscript` | `{stem}.volume-prostate.funscript` | `volume.api` | 0 .. 1 | 1 (full) |
-| `{stem}.frequency.funscript` | (shared w/ main) | `carrier_frequency` | 500 .. 1000 Hz | 700 Hz |
-| `{stem}.pulse_frequency.funscript` | (shared) | `pulse_frequency` | 0 .. 100 Hz | 50 Hz |
-| `{stem}.pulse_width.funscript` | (shared) | `pulse_width` | 4 .. 10 cycles | 6 cycles |
-| `{stem}.pulse_rise_time.funscript` | (shared) | `pulse_rise_time` | 2 .. 20 cycles | 10 cycles |
+| Funscript file (main) | Funscript file (prostate) | Synth param | Axis range | Default | Continuous | Pulse |
+| --- | --- | --- | --- | --- | --- | --- |
+| `{stem}.funscript` | — | → radial 1D→2D → alpha + beta | — | (fallback only) | ✅ | ✅ |
+| `{stem}.alpha.funscript` | `{stem}.alpha-prostate.funscript` | `position.alpha` | −1 .. +1 | 0 (center) | ✅ | ✅ |
+| `{stem}.beta.funscript` | `{stem}.beta-prostate.funscript` | `position.beta` | −1 .. +1 | 0 (center) | ✅ | ✅ |
+| `{stem}.volume.funscript` | `{stem}.volume-prostate.funscript` | `volume.api` | 0 .. 1 | 1 (full) | ✅ | ✅ |
+| `{stem}.frequency.funscript` | (shared w/ main) | `carrier_frequency` | 0 .. 1200 Hz | 700 Hz | **❌ ignored** | ✅ |
+| `{stem}.pulse_frequency.funscript` | (shared) | `pulse_frequency` | 0 .. 100 Hz | 50 Hz | n/a | ✅ |
+| `{stem}.pulse_width.funscript` | (shared) | `pulse_width` | 4 .. 10 cycles | 6 cycles | n/a | ✅ |
+| `{stem}.pulse_rise_time.funscript` | (shared) | `pulse_rise_time` | 2 .. 20 cycles | 10 cycles | n/a | ✅ |
 
-"Default" applies when the channel is absent from the scene folder.
-Defaults match restim's out-of-the-box settings (see
-`qt_ui/settings.py` in upstream restim).
+"Default" applies when the channel is absent from the scene folder, OR
+in continuous mode for the carrier funscript (see asymmetry section
+above for the rationale).
+
+Defaults match restim's out-of-the-box settings (see `qt_ui/settings.py`
+in upstream restim). The 0..1200 Hz carrier authoring scale is Edger's,
+not restim's safety range — restim clamps to its own safety limits at
+the algorithm level, but the *funscript intent* spans the wider range.
 
 ## Test scenes
 
