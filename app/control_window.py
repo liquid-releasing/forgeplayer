@@ -265,8 +265,11 @@ class ControlWindow(QMainWindow):
 
         columns = QHBoxLayout()
         columns.setSpacing(16)
-        columns.addWidget(self._build_setup_audio_page(), 1)
+        # Order: Synthesis | Audio device roles | Monitors. Synthesis first
+        # because it shapes the experience (algorithm + offset) — once you
+        # pick it, audio devices and monitors are "where it goes."
         columns.addWidget(self._build_setup_synth_page(), 1)
+        columns.addWidget(self._build_setup_audio_page(), 1)
         columns.addWidget(self._build_setup_monitors_page(), 1)
         outer.addLayout(columns, 1)
 
@@ -312,17 +315,17 @@ class ControlWindow(QMainWindow):
 
         rl.addLayout(self._labeled_row_with_test(
             "Scene audio", self._setup_scene_combo,
-            "Video's embedded sound — typically your speakers or headphones.",
+            "Video's embedded sound (speakers / headphones).",
             is_haptic=False,
         ))
         rl.addLayout(self._labeled_row_with_test(
             "Haptic 1 (main stim)", self._setup_haptic1_combo,
-            "Primary estim output — typically your USB audio dongle.",
+            "Primary estim output (USB dongle).",
             is_haptic=True,
         ))
         rl.addLayout(self._labeled_row_with_test(
             "Haptic 2 (prostate)", self._setup_haptic2_combo,
-            "Optional second estim output for prostate channels. Leave unset if unused.",
+            "Optional prostate output. Leave unset if unused.",
             is_haptic=True,
         ))
 
@@ -377,12 +380,8 @@ class ControlWindow(QMainWindow):
         layout.addWidget(algo_label)
 
         self._setup_algo_group = QButtonGroup(self)
-        self._setup_algo_continuous = QRadioButton(
-            "Continuous — Classic waveform. Best for 312/2B. Low power-efficiency."
-        )
-        self._setup_algo_pulse = QRadioButton(
-            "Pulse-based — Power-efficient waveform. Slower numbing."
-        )
+        self._setup_algo_continuous = QRadioButton("Continuous")
+        self._setup_algo_pulse = QRadioButton("Pulse-based")
         self._setup_algo_group.addButton(self._setup_algo_continuous, 0)
         self._setup_algo_group.addButton(self._setup_algo_pulse, 1)
         if self._prefs.audio_algorithm == "pulse":
@@ -392,17 +391,21 @@ class ControlWindow(QMainWindow):
         self._setup_algo_group.idToggled.connect(
             lambda _id, checked: self._on_setup_changed() if checked else None
         )
-        layout.addWidget(self._setup_algo_continuous)
-        layout.addWidget(self._setup_algo_pulse)
 
-        algo_help = QLabel(
-            "Most users with a 312 or 2B keep Continuous (~100 Hz works "
-            "best with the 312). Pulse-based is for modern audio-based "
-            "stereostim hardware."
-        )
-        algo_help.setStyleSheet("color: #6b7280; font-size: 11px;")
-        algo_help.setWordWrap(True)
-        layout.addWidget(algo_help)
+        # Restim-wizard style: short radio label + wrapped description
+        # underneath. Radio buttons themselves don't word-wrap, so long
+        # descriptions get clipped when the column is narrow.
+        layout.addWidget(self._setup_algo_continuous)
+        layout.addWidget(self._make_help_label(
+            "Classic waveform. Best for 312/2B. Low power-efficiency. "
+            "(~100 Hz works best with the 312.)"
+        ))
+        layout.addSpacing(2)
+        layout.addWidget(self._setup_algo_pulse)
+        layout.addWidget(self._make_help_label(
+            "Power-efficient waveform. Slower numbing. For modern "
+            "audio-based stereostim hardware."
+        ))
 
         layout.addSpacing(4)
 
@@ -424,16 +427,24 @@ class ControlWindow(QMainWindow):
         offset_row.addStretch()
         layout.addLayout(offset_row)
 
-        offset_help = QLabel(
+        layout.addWidget(self._make_help_label(
             "Shift the stim signal relative to video. Positive = stim "
-            "leads video; negative = stim lags. Use to compensate for USB "
-            "dongle / driver latency."
-        )
-        offset_help.setStyleSheet("color: #6b7280; font-size: 11px;")
-        offset_help.setWordWrap(True)
-        layout.addWidget(offset_help)
+            "leads; negative = stim lags. Compensates for USB / driver "
+            "latency."
+        ))
 
         return box
+
+    @staticmethod
+    def _make_help_label(text: str) -> QLabel:
+        """Wrapped, muted-grey help label for sub-descriptions under
+        controls. Centralized so font size + color stay consistent and
+        word-wrap is on (controls like QRadioButton don't wrap their
+        own text — the help label below them does the heavy lifting)."""
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #6b7280; font-size: 11px;")
+        lbl.setWordWrap(True)
+        return lbl
 
     def _build_setup_monitors_page(self) -> QWidget:
         scroll = QScrollArea()
@@ -872,6 +883,11 @@ class ControlWindow(QMainWindow):
         else:
             self._set_slot_media(slot2, video_path="", audio_path="")
             slot2["funscript_set"] = None
+        # _set_slot_media already ran _refresh_audio_label, but at that
+        # point slot2["funscript_set"] still held the PREVIOUS scene's
+        # value. Re-run after the assignment so the UI reflects whatever
+        # this scene actually has (or doesn't have).
+        self._refresh_audio_label(slot2)
 
         if not (choices.video or choices.audio):
             QMessageBox.information(
