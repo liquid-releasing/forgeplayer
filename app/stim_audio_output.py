@@ -461,6 +461,29 @@ class StimAudioStream:
         underrun_count."""
         return self._smoother.auto_resync_count
 
+    @staticmethod
+    def _cosine_ramp(
+        start: float, end: float, frames: int, fade_samples: int,
+    ) -> np.ndarray:
+        """Hann-window-shaped ramp from `start` to `end` completing in
+        `fade_samples`, then holding at `end` for the remaining frames.
+
+        Cosine shape (`0.5 * (1 - cos(π t))`) has ZERO derivative at both
+        endpoints, unlike a linear ramp which has a slope discontinuity
+        at the moment it reaches the target. That kink is audible as a
+        soft click at fade boundaries — especially when the synth's
+        modulation amplitude is high at that moment. Cosine is smooth in
+        both amplitude AND slope, so the ear gets nothing transient to
+        latch onto.
+        """
+        if fade_samples >= frames:
+            phase = np.linspace(0.0, np.pi, frames, endpoint=True)
+        else:
+            phase = np.minimum(
+                np.arange(frames) / float(fade_samples), 1.0,
+            ) * np.pi
+        return start + (end - start) * 0.5 * (1.0 - np.cos(phase))
+
     def _apply_fade_gate(
         self,
         block: np.ndarray,
@@ -469,8 +492,8 @@ class StimAudioStream:
         sample_rate: int,
     ) -> np.ndarray:
         """Multiply `block` (stereo float32) by a per-sample gain that
-        ramps from `self._fade_gain` toward `target` (0.0 or 1.0) at
-        the FADE_MS rate. Updates `self._fade_gain` for the next block.
+        cosine-ramps from `self._fade_gain` toward `target` (0.0 or 1.0)
+        over FADE_MS, holding at `target` for the rest of the block.
 
         Steady-state (already at target) is the fast path: one scalar
         multiply. Transitions allocate a small ramp array.
@@ -484,15 +507,9 @@ class StimAudioStream:
             return block * self._fade_gain
 
         fade_samples = max(1, int(self.FADE_MS * 1e-3 * sample_rate))
-        step = 1.0 / fade_samples
-        if target > self._fade_gain:
-            ramp = np.minimum(
-                self._fade_gain + np.arange(frames) * step, target,
-            )
-        else:
-            ramp = np.maximum(
-                self._fade_gain - np.arange(frames) * step, target,
-            )
+        ramp = self._cosine_ramp(
+            self._fade_gain, target, frames, fade_samples,
+        )
         self._fade_gain = float(ramp[-1])
         return block * ramp.reshape(-1, 1)
 
@@ -543,14 +560,15 @@ class StimAudioStream:
             # `steady_clock + prev_offset` for THIS block, so `block` is
             # continuous with the previous block (carrier phase smooth,
             # funscript modulation smooth). Fade it OUT to silence over
-            # this whole block. Next block will see the jumped modulation
-            # but fade_gain=0 → ramps up from zero, masking the step.
-            #
-            # Without this, filling outdata with zeros produced a click
-            # because the previous block ended at full carrier amplitude
-            # and zero is a step away.
+            # this whole block via a cosine curve (zero derivative at
+            # both endpoints, no audible knee at the boundary). Next
+            # block will see the jumped modulation but fade_gain=0 →
+            # ramps up from zero with the same cosine shape, masking
+            # the step.
             if self._smoother.just_auto_resynced:
-                ramp = np.linspace(self._fade_gain, 0.0, frames, endpoint=True)
+                ramp = self._cosine_ramp(
+                    self._fade_gain, 0.0, frames, fade_samples=frames,
+                )
                 outdata[:] = block * ramp.reshape(-1, 1)
                 self._fade_gain = 0.0
                 return
