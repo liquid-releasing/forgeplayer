@@ -392,6 +392,12 @@ class StimAudioStream:
         # transition to "playing" fades up rather than punching the
         # carrier in instantly.
         self._fade_gain: float = 0.0
+        # Stop-in-progress flag — set before the device is closed so the
+        # last few audio callbacks force fade target to 0, ramping the
+        # output down to silence. Without this, PortAudio cuts the
+        # stream mid-buffer at full carrier amplitude → audible pop on
+        # close.
+        self._stopping: bool = False
 
     @property
     def device_name(self) -> str | int | None:
@@ -429,11 +435,37 @@ class StimAudioStream:
                 raise
             self._stream = stream
 
+    # Time to leave the audio callback running while the fade-out
+    # completes before tearing down the device. One block at typical
+    # rates is ~21–23 ms; 40 ms covers any reasonable block size with
+    # margin for OS scheduling. Short enough that a user won't notice
+    # the delay between hitting close and the window disappearing.
+    STOP_FADEOUT_MS = 40.0
+
     def stop(self) -> None:
-        """Close the audio device. Safe to call multiple times."""
+        """Close the audio device. Safe to call multiple times.
+
+        Sets `_stopping` so the next audio callback forces fade target
+        to 0 (regardless of `is_playing_source`), then sleeps long
+        enough for the fade-out to play out before actually closing
+        the stream. Otherwise PortAudio cuts at full carrier amplitude
+        and the user hears a pop on close.
+        """
+        with self._lock:
+            if self._stream is None:
+                return
+            self._stopping = True
+
+        # Block on the GUI thread for one fade window so the audio
+        # thread completes a fade-out callback. Acceptable because
+        # close-players is already a deliberate user gesture.
+        import time  # noqa: PLC0415
+        time.sleep(self.STOP_FADEOUT_MS * 1e-3)
+
         with self._lock:
             stream = self._stream
             self._stream = None
+
         if stream is not None:
             try:
                 stream.stop()
@@ -575,8 +607,13 @@ class StimAudioStream:
 
             # Apply pause/play fade gate. A direct multiplication by 0/1
             # would step the carrier and click; ramping over ~5 ms makes
-            # the transition inaudible.
-            if self._is_playing_source is not None:
+            # the transition inaudible. While `_stopping` is set we
+            # override target to 0 so the fade ramps down before stop()
+            # actually tears down the device — without this, PortAudio
+            # cuts at full carrier amplitude on close = audible pop.
+            if self._stopping:
+                block = self._apply_fade_gate(block, 0.0, frames, sample_rate)
+            elif self._is_playing_source is not None:
                 target = 1.0 if bool(self._is_playing_source()) else 0.0
                 block = self._apply_fade_gate(block, target, frames, sample_rate)
 
