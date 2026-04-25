@@ -92,21 +92,29 @@ but no `pulse_frequency-prostate`.
 
 ## Algorithm dispatch
 
-The synth picks continuous vs pulse-based per scene:
+The synth's waveform algorithm is **picked per call**, not derived from
+which channels exist. Default is **continuous** because that matches
+what FunscriptForge's MP3 renders use ([forge/audio_synthesis.py:124](https://github.com/liquid-releasing/funscript-updater/blob/main/forge/audio_synthesis.py#L124))
+— users' ears are calibrated to that waveform.
 
 ```
-has pulse_frequency / pulse_width / pulse_rise_time?
-  ├─ yes → DefaultThreePhasePulseBasedAlgorithm (pulse-based)
-  │         Used for modern stereostim + FOC-stim CONTENT. Output
-  │         is ordinary 2-channel audio — no FOC-stim hardware
-  │         required.
-  └─ no  → ThreePhaseAlgorithm (continuous)
-            Used for legacy 2b (main 1D → radial 1D→2D) and plain
-            stereostim (just alpha + beta).
+StimSynth(channels, media_sync, waveform=...)
+  ├─ "continuous" (default) → ThreePhaseAlgorithm
+  │     Smooth sine carrier modulated by alpha+beta position. Used
+  │     for legacy 2b (main 1D → radial 1D→2D) and stereostim.
+  │     pulse_* channels are IGNORED in this mode (same as upstream).
+  │
+  └─ "pulse"                → DefaultThreePhasePulseBasedAlgorithm
+        Discrete pulses, envelope-shaped, alternating polarity for
+        DC balance. Consumes pulse_frequency / pulse_width /
+        pulse_rise_time when present. Sounds clicky on its own.
+        Opt-in for users with hardware tuned for pulse-based content.
 ```
 
-Same dispatch for both the main and prostate synths, evaluated
-independently per channel set.
+Channel presence is orthogonal to algorithm — Euphoria-style scenes
+ship with pulse_* channels, but they only matter if the user picks
+pulse mode. v0.0.2 has no UI to switch yet; future Setup work will
+expose it as part of device-profile config.
 
 ## Channel consumption table
 

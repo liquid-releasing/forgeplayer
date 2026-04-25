@@ -26,11 +26,14 @@ axes, so a new scene means a new `StimSynth`.
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 
 from app.funscript_loader import FunscriptActions, StimChannels
+
+
+WaveformMode = Literal["continuous", "pulse"]
 from app.vendor.restim_stim_math.audio_gen.continuous import ThreePhaseAlgorithm
 from app.vendor.restim_stim_math.audio_gen.params import (
     SafetyParams,
@@ -113,17 +116,34 @@ class StimSynth:
         self,
         channels: StimChannels,
         media_sync: AbstractMediaSync,
+        *,
+        waveform: WaveformMode = "continuous",
     ) -> None:
+        """Build a synth for one channel set.
+
+        `waveform` picks the algorithm:
+          - "continuous" (default) → restim's continuous threephase, smooth
+            sine carrier modulated by position. **Matches FunscriptForge's
+            default MP3 render** — same waveform the user's ear is
+            calibrated to.
+          - "pulse" → pulse-based threephase. Discrete pulses with envelope
+            shaping, alternating polarity for DC balance. Sounds clicky on
+            its own; consumes pulse_frequency / pulse_width / pulse_rise_time
+            channels when present.
+
+        Channel presence is orthogonal to algorithm choice — Euphoria-style
+        scenes ship with pulse_* channels but those channels are ignored in
+        continuous mode (same behavior as FunscriptForge).
+        """
         self._channels = channels
         self._media_sync = media_sync
         self._sample_count = 0
+        self.waveform: WaveformMode = waveform
 
-        if channels.has_pulse_params:
+        if waveform == "pulse":
             self._algorithm = self._build_pulse_based()
-            self.mode = "pulse_based"
         else:
             self._algorithm = self._build_continuous()
-            self.mode = "continuous"
 
     def generate_block(self, n_frames: int, media_time_s: float) -> np.ndarray:
         """Synthesize `n_frames` of stereo PCM at the synth's sample rate.

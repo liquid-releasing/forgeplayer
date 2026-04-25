@@ -166,18 +166,36 @@ def _pulse_based_channels() -> StimChannels:
 
 
 class TestAlgorithmDispatch:
-    def test_continuous_when_no_pulse_params(self):
+    def test_default_is_continuous(self):
+        """Default waveform is continuous — matches FunscriptForge's MP3
+        renders, which is the user's ear-calibrated baseline.
+        """
         synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
-        assert synth.mode == "continuous"
+        assert synth.waveform == "continuous"
         assert isinstance(synth._algorithm, ThreePhaseAlgorithm)
 
-    def test_pulse_based_when_any_pulse_param_present(self):
-        synth = StimSynth(_pulse_based_channels(), CallbackMediaSync(lambda: True))
-        assert synth.mode == "pulse_based"
+    def test_pulse_mode_explicit_opt_in(self):
+        synth = StimSynth(
+            _pulse_based_channels(), CallbackMediaSync(lambda: True),
+            waveform="pulse",
+        )
+        assert synth.waveform == "pulse"
         assert isinstance(synth._algorithm, DefaultThreePhasePulseBasedAlgorithm)
 
-    def test_pulse_based_generates_stereo_float32(self):
+    def test_pulse_channels_present_but_continuous_default(self):
+        """A scene with pulse_* channels still defaults to continuous —
+        the channels are silently ignored (same behavior as FunscriptForge
+        and restim's continuous algorithm).
+        """
         synth = StimSynth(_pulse_based_channels(), CallbackMediaSync(lambda: True))
+        assert synth.waveform == "continuous"
+        assert isinstance(synth._algorithm, ThreePhaseAlgorithm)
+
+    def test_pulse_based_generates_stereo_float32(self):
+        synth = StimSynth(
+            _pulse_based_channels(), CallbackMediaSync(lambda: True),
+            waveform="pulse",
+        )
         block = synth.generate_block(4096, media_time_s=1.0)
 
         assert block.shape == (4096, 2)
@@ -185,13 +203,19 @@ class TestAlgorithmDispatch:
         assert np.all(np.isfinite(block))
 
     def test_pulse_based_silenced_when_not_playing(self):
-        synth = StimSynth(_pulse_based_channels(), CallbackMediaSync(lambda: False))
+        synth = StimSynth(
+            _pulse_based_channels(), CallbackMediaSync(lambda: False),
+            waveform="pulse",
+        )
         block = synth.generate_block(4096, media_time_s=1.0)
 
         np.testing.assert_array_equal(block, np.zeros_like(block))
 
     def test_pulse_based_non_silent_when_playing(self):
-        synth = StimSynth(_pulse_based_channels(), CallbackMediaSync(lambda: True))
+        synth = StimSynth(
+            _pulse_based_channels(), CallbackMediaSync(lambda: True),
+            waveform="pulse",
+        )
         block = synth.generate_block(8192, media_time_s=1.0)
 
         assert np.max(np.abs(block)) > 0.01

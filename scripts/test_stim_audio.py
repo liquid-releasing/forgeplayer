@@ -55,7 +55,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--device", default=None,
-        help="sounddevice device name substring (e.g. 'USB Audio'). Default: system default.",
+        help="sounddevice target — pass an integer device index (best when "
+             "multiple devices share the same name, e.g. WASAPI vs MME) or "
+             "a name substring (e.g. 'USB Audio'). Default: system default.",
     )
     parser.add_argument(
         "--list", action="store_true",
@@ -64,6 +66,12 @@ def main() -> int:
     parser.add_argument(
         "--prostate", action="store_true",
         help="Load prostate channels (alpha-prostate / beta-prostate / volume-prostate).",
+    )
+    parser.add_argument(
+        "--waveform", choices=["continuous", "pulse"], default="continuous",
+        help="Synthesis algorithm. continuous (default) matches FunscriptForge's "
+             "MP3 renders — smooth carrier modulated by position. pulse uses "
+             "discrete pulses with envelope shaping (clicky sound, FOC-content style).",
     )
     parser.add_argument(
         "--duration", type=float, default=20.0,
@@ -124,8 +132,8 @@ def main() -> int:
     # Synth + media sync. Wall-clock-driven media-time so the funscript
     # actually advances; is_playing always True for this smoke test.
     media_sync = CallbackMediaSync(lambda: True)
-    synth = StimSynth(channels=channels, media_sync=media_sync)
-    print(f"  algorithm: {synth.mode}")
+    synth = StimSynth(channels=channels, media_sync=media_sync, waveform=args.waveform)
+    print(f"  algorithm: {synth.waveform}")
 
     t0 = time.monotonic()
     start_offset = float(args.start_at)
@@ -136,11 +144,16 @@ def main() -> int:
         time_source=time_source,
         device_id=None,
     )
-    # Override the resolved name so the user can pass any sounddevice
-    # device-name substring directly (skipping the mpv lookup chain).
-    stream._device_name = args.device  # noqa: SLF001
+    # Override the resolved name with whatever the user passed.
+    # sounddevice accepts the `device` argument as either an integer
+    # index or a name substring — the script accepts both. A purely-
+    # numeric --device gets coerced to int; otherwise treated as a name.
+    device_arg: int | str | None = args.device
+    if isinstance(device_arg, str) and device_arg.lstrip("-").isdigit():
+        device_arg = int(device_arg)
+    stream._device_name = device_arg  # noqa: SLF001
 
-    print(f"\nOpening audio device: {args.device or '(system default)'}")
+    print(f"\nOpening audio device: {device_arg if device_arg is not None else '(system default)'}")
     print(f"Playing for up to {args.duration}s (Ctrl-C to stop early)\n")
 
     try:
