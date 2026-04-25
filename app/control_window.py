@@ -2232,5 +2232,14 @@ class ControlWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._timer.stop()
+        # Auto-export captured debug events. Saves the user from the
+        # "did I click Export before closing?" friction that's bitten
+        # multiple dogfood sessions. Best-effort — if export fails for
+        # any reason (disk full, permissions), don't block the close.
+        if DebugLog.event_count() > 0:
+            try:
+                DebugLog.export()
+            except Exception:
+                pass
         self._engine.terminate_all()
         super().closeEvent(event)
