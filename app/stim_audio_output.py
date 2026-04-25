@@ -226,10 +226,11 @@ class _TimeSmoother:
 
     HISTORY = 8
     MAX_DRIFT_PER_SEC = 0.02  # i.e. 20 ms per audio second of correction
-    RESYNC_THRESHOLD = 1.0    # seconds of disagreement → caller should resync
+    AUTO_RESYNC_THRESHOLD = 1.0  # seconds of disagreement → silent re-adoption
 
     def __init__(self) -> None:
         self.offset: float = 0.0
+        self.auto_resync_count: int = 0
         self._error_history: list[float] = []
         self._initialized = False
 
@@ -237,6 +238,9 @@ class _TimeSmoother:
         self.offset = 0.0
         self._error_history = []
         self._initialized = False
+        # auto_resync_count intentionally NOT cleared — it accumulates
+        # over the stream's lifetime so the close-time DebugLog event
+        # reports total auto-resyncs across the whole session.
 
     def update(
         self,
@@ -250,9 +254,13 @@ class _TimeSmoother:
 
         Returns an array same shape as `steady_clock`.
 
-        Raises `ResyncRequired` when `|observed_offset - self.offset|`
-        exceeds `RESYNC_THRESHOLD` — typically a seek (the media clock
-        jumped). Caller should reset the smoother and re-observe.
+        On big jumps (`|observed - offset| > AUTO_RESYNC_THRESHOLD`)
+        silently re-adopts the new offset wholesale — typically because
+        mpv is paused (media_time stops advancing while steady_clock
+        keeps going) or because a seek just landed. No exception, no
+        block silenced. The synth's algorithm internally silences when
+        `media_sync.is_playing()` is False, so no audible artifact
+        comes from a "weird" smoothed offset during paused playback.
         """
         n = steady_clock.shape[0]
         steady_end = float(steady_clock[-1]) if n else 0.0
@@ -266,10 +274,14 @@ class _TimeSmoother:
             self._initialized = True
             return steady_clock + self.offset
 
-        if abs(observed_offset - self.offset) > self.RESYNC_THRESHOLD:
-            # Big jump — caller (the stream) needs to reset and let the
-            # smoother re-converge instead of producing a huge sweep.
-            raise _TimeSmoother.ResyncRequired(observed_offset, self.offset)
+        if abs(observed_offset - self.offset) > self.AUTO_RESYNC_THRESHOLD:
+            # Big jump — auto-adopt wholesale and reset smoothing
+            # history. Counted for debug visibility but otherwise
+            # silent (no exception, no silenced block).
+            self.auto_resync_count += 1
+            self.offset = observed_offset
+            self._error_history = [0.0]
+            return steady_clock + self.offset
 
         # Low-pass over recent observations.
         error = observed_offset - self.offset
@@ -292,19 +304,6 @@ class _TimeSmoother:
         # a step at the block boundary.
         offset_ramp = np.linspace(prev_offset, self.offset, n, endpoint=False)
         return steady_clock + offset_ramp
-
-    class ResyncRequired(Exception):
-        """Raised when the media clock jumped beyond the smoother's
-        slew tolerance. Stream catches this, resets the smoother, and
-        re-observes on the next callback."""
-
-        def __init__(self, observed: float, smoothed: float) -> None:
-            super().__init__(
-                f"media-clock jump: observed={observed:.3f} "
-                f"smoothed={smoothed:.3f}"
-            )
-            self.observed = observed
-            self.smoothed = smoothed
 
 
 class StimAudioStream:
@@ -357,10 +356,6 @@ class StimAudioStream:
         # stops, so debug-mode can tell the user "your dongle dropped 14
         # buffers during this scene" instead of just "it crackled."
         self._underrun_count = 0
-        # Resync counter — number of times the media clock jumped past
-        # the smoother's tolerance (typically a seek). Useful only for
-        # debugging; usually 0 unless the user is actively scrubbing.
-        self._resync_count = 0
         # Sample-counter for the steady_clock baseline. Independent of
         # synth's internal counter so we don't reach into private state.
         self._frame_offset = 0
@@ -445,10 +440,12 @@ class StimAudioStream:
 
     @property
     def resync_count(self) -> int:
-        """Number of times the smoother detected a media-clock jump
-        past its tolerance (typically a seek). Surfaced for debug
-        export alongside underrun_count."""
-        return self._resync_count
+        """Number of times the smoother auto-adopted a new media-time
+        offset because the observation jumped past tolerance. Typical
+        triggers: paused playback (steady_clock advances, time-pos
+        stays put), seeks. Surfaced for debug export alongside
+        underrun_count."""
+        return self._smoother.auto_resync_count
 
     def _callback(self, outdata, frames, time_info, status) -> None:  # type: ignore[no-untyped-def]
         """sounddevice OutputStream callback. Runs on the audio thread.
@@ -478,18 +475,9 @@ class StimAudioStream:
             self._frame_offset += frames
 
             media_t = float(self._time_source())
-            try:
-                system_time_estimate = self._smoother.update(
-                    steady_clock, media_t, sample_rate,
-                )
-            except _TimeSmoother.ResyncRequired:
-                # Big jump (probably a seek). Reset the smoother and
-                # re-adopt the observed offset on next callback. This
-                # block is silent.
-                self._resync_count += 1
-                self._smoother.reset()
-                outdata.fill(0)
-                return
+            system_time_estimate = self._smoother.update(
+                steady_clock, media_t, sample_rate,
+            )
 
             block = self._synth.generate_block_with_clocks(
                 steady_clock, system_time_estimate,

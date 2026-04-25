@@ -242,17 +242,52 @@ class TestTimeSmoother:
         delta = sm.offset - baseline_offset
         assert abs(delta) < 0.001  # well below the 50 ms jitter
 
-    def test_seek_raises_resync_required(self):
+    def test_big_jump_auto_adopts_silently(self):
+        """When the observed offset jumps past AUTO_RESYNC_THRESHOLD
+        (typically a seek or extended paused state), the smoother
+        re-adopts the observation wholesale and increments
+        auto_resync_count. No exception."""
         sm = _TimeSmoother()
         sample_rate = 48000
 
         steady0 = self._block(0, 1024)
         sm.update(steady0, media_time=5.0, sample_rate=sample_rate)
+        assert sm.auto_resync_count == 0
 
         # Big jump (user seeked from t=5 to t=180).
         steady1 = self._block(1024, 1024)
-        with pytest.raises(_TimeSmoother.ResyncRequired):
-            sm.update(steady1, media_time=180.0, sample_rate=sample_rate)
+        out = sm.update(steady1, media_time=180.0, sample_rate=sample_rate)
+
+        # Auto-adopted, no exception, output reflects new offset.
+        assert sm.auto_resync_count == 1
+        expected_offset = 180.0 - float(steady1[-1])
+        np.testing.assert_allclose(out, steady1 + expected_offset)
+
+    def test_paused_playback_does_not_flood_resyncs(self):
+        """When mpv pauses, time-pos stops advancing while steady_clock
+        keeps going. The OLD implementation hit ResyncRequired roughly
+        every 1 audio second of pause (the user's debug log showed 18
+        resyncs in a 41 s session). New behavior: auto-adopt silently;
+        this test asserts at most a small number of auto-adoptions per
+        second of paused time, not one every second."""
+        sm = _TimeSmoother()
+        sample_rate = 48000
+        block_size = 1024
+        # Initialize at t=5.0
+        sm.update(self._block(0, block_size), media_time=5.0, sample_rate=sample_rate)
+
+        # Now run 3 seconds of "paused" callbacks: media_time stays
+        # at 5.0, steady_clock keeps growing.
+        n_blocks = int(3.0 * sample_rate / block_size)  # ~140
+        for i in range(1, n_blocks + 1):
+            steady = self._block(i * block_size, block_size)
+            sm.update(steady, media_time=5.0, sample_rate=sample_rate)
+
+        # 3 seconds / 1 s threshold = ~3 auto-adoptions, not 140.
+        assert sm.auto_resync_count <= 5, (
+            f"Expected ~3 auto-adoptions over 3 paused seconds, "
+            f"got {sm.auto_resync_count}"
+        )
 
     def test_reset_returns_to_uninitialized(self):
         sm = _TimeSmoother()
@@ -268,27 +303,27 @@ class TestTimeSmoother:
         sm.update(steady2, media_time=180.0, sample_rate=sample_rate)
         assert sm.offset == pytest.approx(180.0 - float(steady2[-1]))
 
-    def test_notify_seek_avoids_resync_exception(self):
-        """When notify_seek (via reset) is called between blocks, the
-        next update adopts the new offset wholesale even if it's a
-        >1 s jump — no ResyncRequired raised, no silenced block."""
+    def test_notify_seek_via_reset_does_not_count_as_auto_resync(self):
+        """Explicit reset (StimAudioStream.notify_seek) lets the next
+        update adopt wholesale via the first-callback path, NOT the
+        auto-resync path. Keeps the auto_resync_count accurate as a
+        signal of unexpected jumps (paused state, missed seeks)."""
         sm = _TimeSmoother()
         sample_rate = 48000
 
         steady0 = self._block(0, 1024)
         sm.update(steady0, media_time=5.0, sample_rate=sample_rate)
+        assert sm.auto_resync_count == 0
 
-        # Caller (StimAudioStream.notify_seek) resets the smoother
-        # because a seek to t=180 just happened.
         sm.reset()
 
-        # First update after reset: the 180-second jump is fine, no
-        # exception, smoother adopts new offset.
+        # First update after reset: adopts wholesale via _initialized
+        # path, not auto-adopt. Counter stays clean.
         steady1 = self._block(1024, 1024)
-        out = sm.update(steady1, media_time=180.0, sample_rate=sample_rate)
+        sm.update(steady1, media_time=180.0, sample_rate=sample_rate)
+        assert sm.auto_resync_count == 0
         expected_offset = 180.0 - float(steady1[-1])
         assert sm.offset == pytest.approx(expected_offset)
-        np.testing.assert_allclose(out, steady1 + expected_offset)
 
     def test_output_is_monotonic_within_block(self):
         """The system_time_estimate ramp must be monotonic (non-decreasing)
