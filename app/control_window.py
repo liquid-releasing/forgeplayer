@@ -244,10 +244,11 @@ class ControlWindow(QMainWindow):
         return tab
 
     def _build_setup_tab(self) -> QWidget:
-        """Setup — Audio and Monitors shown side-by-side so both fit in a
-        720p viewport with no scrolling (on a typical ~1000+ px wide control
-        window). The user configures device roles once; Library clicks then
-        auto-route Slot 1 to Scene Audio and Slot 2 to Haptic 1.
+        """Setup — three columns side-by-side: Audio device roles, Audio
+        synthesis, Monitor roles. Each gets equal stretch so they fit in a
+        ~1300 px control window without scrolling. The user configures all
+        three once; Library clicks then auto-route Slot 1 to Scene Audio,
+        Slot 2 to Haptic 1 with the chosen synthesis algorithm.
         """
         container = QWidget()
         outer = QVBoxLayout(container)
@@ -258,13 +259,14 @@ class ControlWindow(QMainWindow):
         tf = title.font(); tf.setPointSize(18); tf.setBold(True); title.setFont(tf)
         outer.addWidget(title)
 
-        # Save-status line (shared across both columns)
+        # Save-status line (shared across all columns)
         self._setup_status = QLabel("")
         self._setup_status.setStyleSheet("color: #9ba3c4; font-size: 11px;")
 
         columns = QHBoxLayout()
         columns.setSpacing(16)
         columns.addWidget(self._build_setup_audio_page(), 1)
+        columns.addWidget(self._build_setup_synth_page(), 1)
         columns.addWidget(self._build_setup_monitors_page(), 1)
         outer.addLayout(columns, 1)
 
@@ -325,6 +327,32 @@ class ControlWindow(QMainWindow):
         ))
 
         root.addWidget(role_box)
+        root.addStretch()
+
+        scroll.setWidget(inner)
+        return scroll
+
+    def _build_setup_synth_page(self) -> QWidget:
+        """Audio-synthesis column: algorithm picker + latency offset."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        inner = QWidget()
+        root = QVBoxLayout(inner)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        subtitle = QLabel(
+            "How the haptic signal is synthesized. The default works for "
+            "most users — flip Pulse-based only if you have modern "
+            "stereostim hardware."
+        )
+        subtitle.setStyleSheet("color: #9ba3c4;")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
         root.addWidget(self._build_setup_synth_box())
         root.addStretch()
 

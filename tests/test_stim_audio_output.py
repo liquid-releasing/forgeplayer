@@ -49,11 +49,74 @@ def fake_sounddevice(monkeypatch):
 
 # ── resolve_audio_device ──────────────────────────────────────────────────────
 
+@pytest.fixture
+def fake_sd_no_devices(monkeypatch):
+    """sounddevice mock that returns no matching devices — exercises the
+    description-fallback path (sounddevice can't disambiguate, so caller
+    relies on substring matching)."""
+    fake = types.ModuleType("sounddevice")
+    fake.query_devices = MagicMock(return_value=[])
+    fake.query_hostapis = MagicMock(return_value={"name": "Windows WASAPI"})
+    monkeypatch.setitem(sys.modules, "sounddevice", fake)
+    return fake
+
+
+@pytest.fixture
+def fake_sd_with_devices(monkeypatch):
+    """sounddevice mock with realistic Windows enumeration: same device
+    name on multiple host APIs (the bug that drove the resolver fix)."""
+    fake = types.ModuleType("sounddevice")
+    fake.query_devices = MagicMock(return_value=[
+        # idx 0-1: MME duplicates
+        {"name": "Speakers (USB Audio Device)", "max_output_channels": 2, "hostapi": 0},
+        {"name": "Speakers (USB Audio Device)", "max_output_channels": 2, "hostapi": 0},
+        # idx 2-3: DirectSound
+        {"name": "Speakers (USB Audio Device)", "max_output_channels": 2, "hostapi": 1},
+        {"name": "Speakers (USB Audio Device)", "max_output_channels": 2, "hostapi": 1},
+        # idx 4: WASAPI (the unique one we want)
+        {"name": "Speakers (USB Audio Device)", "max_output_channels": 2, "hostapi": 2},
+        # idx 5: a different device
+        {"name": "Speakers (Realtek(R) Audio)", "max_output_channels": 2, "hostapi": 2},
+    ])
+    fake.query_hostapis = MagicMock(side_effect=lambda i: [
+        {"name": "MME"},
+        {"name": "Windows DirectSound"},
+        {"name": "Windows WASAPI"},
+    ][i])
+    monkeypatch.setitem(sys.modules, "sounddevice", fake)
+    return fake
+
+
 class TestResolveAudioDevice:
-    def test_returns_description_for_matching_id(self):
+    def test_returns_int_index_when_unique_wasapi_match(self, fake_sd_with_devices):
         mpv_devices = [
             {"name": "wasapi/{aaa}", "description": "Speakers (USB Audio Device)"},
-            {"name": "wasapi/{bbb}", "description": "Speakers (Realtek(R) Audio)"},
+        ]
+        # Filtered by WASAPI host → only idx 4 matches.
+        assert resolve_audio_device("wasapi/{aaa}", mpv_devices) == 4
+
+    def test_picks_first_when_multiple_wasapi_matches(self, monkeypatch):
+        """Two physically-identical dongles both on WASAPI — pick first
+        deterministically. User can swap dongles physically if wrong one
+        activates."""
+        fake = types.ModuleType("sounddevice")
+        fake.query_devices = MagicMock(return_value=[
+            {"name": "Speakers (USB Audio Device)", "max_output_channels": 2, "hostapi": 0},
+            {"name": "Speakers (USB Audio Device)", "max_output_channels": 2, "hostapi": 0},
+        ])
+        fake.query_hostapis = MagicMock(return_value={"name": "Windows WASAPI"})
+        monkeypatch.setitem(sys.modules, "sounddevice", fake)
+
+        mpv_devices = [
+            {"name": "wasapi/{aaa}", "description": "Speakers (USB Audio Device)"},
+        ]
+        assert resolve_audio_device("wasapi/{aaa}", mpv_devices) == 0
+
+    def test_falls_back_to_description_when_sounddevice_unavailable(self, fake_sd_no_devices):
+        """If sounddevice can't see the device (no match), return the
+        description so sounddevice's substring matcher can try."""
+        mpv_devices = [
+            {"name": "wasapi/{aaa}", "description": "Speakers (USB Audio Device)"},
         ]
         assert resolve_audio_device("wasapi/{aaa}", mpv_devices) == "Speakers (USB Audio Device)"
 

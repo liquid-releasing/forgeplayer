@@ -39,17 +39,85 @@ from app.stim_synth import SAMPLE_RATE, StimSynth
 _log = logging.getLogger(__name__)
 
 
+_HOST_API_FROM_MPV_PREFIX = {
+    "wasapi": "Windows WASAPI",
+    "coreaudio": "Core Audio",
+    "alsa": "ALSA",
+    "pulse": "PulseAudio",
+    "jack": "JACK Audio Connection Kit",
+    "oss": "OSS",
+}
+
+
+def _host_api_from_mpv_id(mpv_id: str) -> str | None:
+    """Translate the `wasapi/{guid}` mpv-id prefix to the sounddevice
+    hostapi name. Used to filter sounddevice device lookups so a Windows
+    user with the same dongle visible on MME / DirectSound / WASAPI
+    doesn't get an "ambiguous match" failure."""
+    prefix = mpv_id.split("/", 1)[0] if "/" in mpv_id else mpv_id
+    return _HOST_API_FROM_MPV_PREFIX.get(prefix)
+
+
+def _find_sounddevice_index(sd, desc: str, target_host: str | None) -> int | None:
+    """Look up the integer device index for `desc` in sounddevice.
+
+    Filters by `target_host` (e.g. "Windows WASAPI") when provided, so a
+    name like "Speakers (USB Audio Device)" that exists on MME +
+    DirectSound + WASAPI narrows to the host api the mpv id belongs to.
+
+    Returns the int index of the unique match, the FIRST index if
+    multiple matches remain (e.g. two physically-identical dongles —
+    we can't disambiguate without Windows GUIDs), or None if there's
+    no match at all (caller falls back to the description string).
+    """
+    matches: list[int] = []
+    try:
+        devices = sd.query_devices()
+    except Exception:
+        return None
+
+    for idx, dev in enumerate(devices):
+        if dev.get("max_output_channels", 0) <= 0:
+            continue
+        if dev.get("name") != desc:
+            continue
+        if target_host is not None:
+            try:
+                host_name = sd.query_hostapis(dev["hostapi"]).get("name", "")
+            except Exception:
+                host_name = ""
+            if host_name != target_host:
+                continue
+        matches.append(idx)
+
+    if not matches:
+        return None
+    if len(matches) > 1:
+        _log.warning(
+            "Multiple sounddevice indices match %r on %r; picking %d. "
+            "If the wrong dongle activates, physically swap them.",
+            desc, target_host, matches[0],
+        )
+    return matches[0]
+
+
 def resolve_audio_device(
     mpv_device_id: str | None,
     mpv_devices: list[dict] | None = None,
-) -> str | None:
+) -> str | int | None:
     """Translate an mpv audio-device id (`wasapi/{guid}`) to a sounddevice
-    device name string.
+    device handle.
 
     Returns:
-      - The mpv device's description when it's found in `mpv_devices` —
-        sounddevice uses this as a name-substring match in its own
-        device list.
+      - An **integer device index** when sounddevice can uniquely (or
+        deterministically) identify the device for the given description
+        + host api. This avoids name-substring ambiguity when the same
+        device name appears on multiple host apis (MME, DirectSound,
+        WASAPI all expose the same physical device on Windows).
+      - The mpv device's **description string** as a fallback when
+        sounddevice isn't available or doesn't recognize the device.
+        sounddevice will substring-match — fragile when ambiguous, but
+        good enough when it's not.
       - `None` when the input is empty / "auto" / not in `mpv_devices`.
         Caller passes None straight to sounddevice → system default.
 
@@ -63,11 +131,24 @@ def resolve_audio_device(
     if mpv_devices is None:
         mpv_devices = _query_mpv_audio_devices()
 
+    desc: str | None = None
     for d in mpv_devices:
         if d.get("name") == mpv_device_id:
             desc = d.get("description") or ""
-            return desc or None
-    return None
+            break
+    if not desc:
+        return None
+
+    target_host = _host_api_from_mpv_id(mpv_device_id)
+    try:
+        sd = _load_sounddevice()
+        idx = _find_sounddevice_index(sd, desc, target_host)
+        if idx is not None:
+            return idx
+    except Exception as exc:
+        _log.debug("sounddevice index lookup failed: %s", exc)
+
+    return desc
 
 
 class StimAudioStream:
@@ -109,10 +190,11 @@ class StimAudioStream:
         self._lock = threading.Lock()
 
     @property
-    def device_name(self) -> str | None:
-        """The sounddevice device-name string this stream targets, or
-        None when falling back to system default. Useful for debug logs
-        + UI surfacing."""
+    def device_name(self) -> str | int | None:
+        """The sounddevice device handle this stream targets — an int
+        index (preferred) or name string (fallback), or None when
+        falling back to system default. Useful for debug logs + UI
+        surfacing."""
         return self._device_name
 
     def start(self) -> None:
