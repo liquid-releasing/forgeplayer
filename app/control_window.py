@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QSlider, QComboBox, QFileDialog,
     QGroupBox, QCheckBox, QSizePolicy, QLineEdit, QSpacerItem,
     QMenu, QToolBar, QFrame, QTabWidget, QMessageBox, QScrollArea,
+    QRadioButton, QButtonGroup, QSpinBox,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QScreen, QAction
@@ -324,10 +325,87 @@ class ControlWindow(QMainWindow):
         ))
 
         root.addWidget(role_box)
+        root.addWidget(self._build_setup_synth_box())
         root.addStretch()
 
         scroll.setWidget(inner)
         return scroll
+
+    def _build_setup_synth_box(self) -> QGroupBox:
+        """Audio synthesis settings — algorithm picker + latency offset.
+
+        Wording mirrors restim's device wizard so users who already know
+        restim's UI immediately recognize the controls. Continuous is the
+        default (matches FunscriptForge's MP3 baseline + restim's own
+        out-of-the-box choice); modern stereostim users flip to pulse
+        once.
+        """
+        box = QGroupBox("Audio synthesis")
+        layout = QVBoxLayout(box)
+        layout.setSpacing(8)
+
+        algo_label = QLabel("Generation algorithm")
+        af = algo_label.font(); af.setBold(True); algo_label.setFont(af)
+        layout.addWidget(algo_label)
+
+        self._setup_algo_group = QButtonGroup(self)
+        self._setup_algo_continuous = QRadioButton(
+            "Continuous — Classic waveform. Best for 312/2B. Low power-efficiency."
+        )
+        self._setup_algo_pulse = QRadioButton(
+            "Pulse-based — Power-efficient waveform. Slower numbing."
+        )
+        self._setup_algo_group.addButton(self._setup_algo_continuous, 0)
+        self._setup_algo_group.addButton(self._setup_algo_pulse, 1)
+        if self._prefs.audio_algorithm == "pulse":
+            self._setup_algo_pulse.setChecked(True)
+        else:
+            self._setup_algo_continuous.setChecked(True)
+        self._setup_algo_group.idToggled.connect(
+            lambda _id, checked: self._on_setup_changed() if checked else None
+        )
+        layout.addWidget(self._setup_algo_continuous)
+        layout.addWidget(self._setup_algo_pulse)
+
+        algo_help = QLabel(
+            "Most users with a 312 or 2B keep Continuous (~100 Hz works "
+            "best with the 312). Pulse-based is for modern audio-based "
+            "stereostim hardware."
+        )
+        algo_help.setStyleSheet("color: #6b7280; font-size: 11px;")
+        algo_help.setWordWrap(True)
+        layout.addWidget(algo_help)
+
+        layout.addSpacing(4)
+
+        offset_row = QHBoxLayout()
+        offset_label = QLabel("Haptic offset (ms)")
+        of = offset_label.font(); of.setBold(True); offset_label.setFont(of)
+        offset_row.addWidget(offset_label)
+
+        self._setup_offset_spin = QSpinBox()
+        self._setup_offset_spin.setRange(-500, 500)
+        self._setup_offset_spin.setSingleStep(5)
+        self._setup_offset_spin.setSuffix(" ms")
+        self._setup_offset_spin.setFixedWidth(110)
+        self._setup_offset_spin.setValue(int(self._prefs.haptic_offset_ms))
+        self._setup_offset_spin.valueChanged.connect(
+            lambda _v: self._on_setup_changed()
+        )
+        offset_row.addWidget(self._setup_offset_spin)
+        offset_row.addStretch()
+        layout.addLayout(offset_row)
+
+        offset_help = QLabel(
+            "Shift the stim signal relative to video. Positive = stim "
+            "leads video; negative = stim lags. Use to compensate for USB "
+            "dongle / driver latency."
+        )
+        offset_help.setStyleSheet("color: #6b7280; font-size: 11px;")
+        offset_help.setWordWrap(True)
+        layout.addWidget(offset_help)
+
+        return box
 
     def _build_setup_monitors_page(self) -> QWidget:
         scroll = QScrollArea()
@@ -556,12 +634,19 @@ class ControlWindow(QMainWindow):
         self._prefs.scene_audio_device = self._setup_scene_combo.currentData() or ""
         self._prefs.haptic1_audio_device = self._setup_haptic1_combo.currentData() or ""
         self._prefs.haptic2_audio_device = self._setup_haptic2_combo.currentData() or ""
+        if self._setup_algo_pulse.isChecked():
+            self._prefs.audio_algorithm = "pulse"
+        else:
+            self._prefs.audio_algorithm = "continuous"
+        self._prefs.haptic_offset_ms = int(self._setup_offset_spin.value())
         self._prefs.save()
         DebugLog.record(
             "setup.prefs_saved",
             scene=bool(self._prefs.scene_audio_device),
             haptic1=bool(self._prefs.haptic1_audio_device),
             haptic2=bool(self._prefs.haptic2_audio_device),
+            algo=self._prefs.audio_algorithm,
+            offset_ms=self._prefs.haptic_offset_ms,
         )
         self._setup_status.setText(f"Saved to {Preferences.path()}")
         QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
@@ -1739,7 +1824,9 @@ class ControlWindow(QMainWindow):
         media_sync = CallbackMediaSync(
             lambda: engine.has_active_players() and not engine.is_paused()
         )
-        synth = StimSynth(channels, media_sync, waveform="continuous")
+        synth = StimSynth(
+            channels, media_sync, waveform=self._prefs.audio_algorithm,
+        )
 
         try:
             mpv_devices = engine.list_audio_devices(include_hdmi=True)
@@ -1747,9 +1834,20 @@ class ControlWindow(QMainWindow):
             DebugLog.record("stim.mpv_devices_failed", error=repr(exc))
             mpv_devices = []
 
+        # Apply latency offset: positive ms means stim leads video, so we
+        # feed the synth a media-time SLIGHTLY AHEAD of mpv's time-pos.
+        # Captured at launch since prefs changes mid-playback don't apply
+        # until the next launch (matches how device pickers behave).
+        offset_seconds = float(self._prefs.haptic_offset_ms) / 1000.0
+        if offset_seconds == 0.0:
+            time_source = engine.get_position
+        else:
+            def time_source(_get=engine.get_position, _off=offset_seconds):
+                return _get() + _off
+
         stream = StimAudioStream(
             synth=synth,
-            time_source=engine.get_position,
+            time_source=time_source,
             device_id=audio_device or None,
             mpv_devices=mpv_devices,
         )
@@ -1775,6 +1873,7 @@ class ControlWindow(QMainWindow):
             mode="stim_synth",
             base_stem=funscript_set.base_stem,
             algorithm=synth.waveform,
+            offset_ms=self._prefs.haptic_offset_ms,
             source=channels.source,
             device=stream.device_name or "(default)",
         )
