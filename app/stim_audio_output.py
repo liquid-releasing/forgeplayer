@@ -278,16 +278,25 @@ class _TimeSmoother:
             return steady_clock + self.offset
 
         if abs(observed_offset - self.offset) > self.AUTO_RESYNC_THRESHOLD:
-            # Big jump — auto-adopt wholesale and reset smoothing
-            # history. Flag the block so the stream can silence its
-            # output: the step in system_time_estimate at the block
-            # boundary would otherwise produce an audible click in the
-            # synth output (volume * carrier discontinuity).
+            # Big jump — auto-adopt the new offset and reset smoothing
+            # history. Critically, we still return the PREVIOUS offset
+            # for THIS block so the synth's output is continuous (carrier
+            # phase + funscript modulation both advance smoothly from the
+            # last block). The new offset takes effect on the NEXT block.
+            #
+            # The stream callback observes `just_auto_resynced` and fades
+            # the synth's continuous-but-stale output OUT to silence over
+            # this whole block. Then the next block, with the jumped
+            # modulation, fades back IN from zero — masking the step at
+            # the modulation boundary entirely. Without this two-step,
+            # filling outdata with zeros produced a click because the
+            # previous block ended at full carrier amplitude.
             self.auto_resync_count += 1
             self.just_auto_resynced = True
+            prev_offset = self.offset
             self.offset = observed_offset
             self._error_history = [0.0]
-            return steady_clock + self.offset
+            return steady_clock + prev_offset
 
         self.just_auto_resynced = False
 
@@ -530,14 +539,19 @@ class StimAudioStream:
                 outdata.fill(0)
                 return
 
-            # Auto-resync silences this block. The smoother just stepped
-            # the offset, which produces a discontinuity in the synth's
-            # system_time_estimate at the block boundary — audible as a
-            # click in the carrier. Cheaper to drop one ~21 ms block.
-            # Also reset the fade gate so the next active block ramps in
-            # cleanly rather than starting at full amplitude.
+            # Auto-resync: the smoother stored a new offset but returned
+            # `steady_clock + prev_offset` for THIS block, so `block` is
+            # continuous with the previous block (carrier phase smooth,
+            # funscript modulation smooth). Fade it OUT to silence over
+            # this whole block. Next block will see the jumped modulation
+            # but fade_gain=0 → ramps up from zero, masking the step.
+            #
+            # Without this, filling outdata with zeros produced a click
+            # because the previous block ended at full carrier amplitude
+            # and zero is a step away.
             if self._smoother.just_auto_resynced:
-                outdata.fill(0)
+                ramp = np.linspace(self._fade_gain, 0.0, frames, endpoint=True)
+                outdata[:] = block * ramp.reshape(-1, 1)
                 self._fade_gain = 0.0
                 return
 

@@ -276,24 +276,42 @@ class TestTimeSmoother:
 
     def test_big_jump_auto_adopts_silently(self):
         """When the observed offset jumps past AUTO_RESYNC_THRESHOLD
-        (typically a seek or extended paused state), the smoother
-        re-adopts the observation wholesale and increments
-        auto_resync_count. No exception."""
+        (typically a seek or extended paused state), the smoother stores
+        the new offset for next block but returns THIS block at the
+        previous offset. Keeps audio continuous so the stream callback
+        can fade out cleanly. No exception."""
         sm = _TimeSmoother()
         sample_rate = 48000
 
         steady0 = self._block(0, 1024)
         sm.update(steady0, media_time=5.0, sample_rate=sample_rate)
+        prev_offset = sm.offset
         assert sm.auto_resync_count == 0
 
         # Big jump (user seeked from t=5 to t=180).
         steady1 = self._block(1024, 1024)
         out = sm.update(steady1, media_time=180.0, sample_rate=sample_rate)
 
-        # Auto-adopted, no exception, output reflects new offset.
+        # Auto-adopted: count incremented, flag set, new offset stored.
         assert sm.auto_resync_count == 1
-        expected_offset = 180.0 - float(steady1[-1])
-        np.testing.assert_allclose(out, steady1 + expected_offset)
+        assert sm.just_auto_resynced is True
+        new_offset = 180.0 - float(steady1[-1])
+        assert sm.offset == pytest.approx(new_offset)
+        # But THIS block's output uses the previous offset for continuity.
+        np.testing.assert_allclose(out, steady1 + prev_offset)
+
+        # Next block: smoother is at new offset, normal smoothing path.
+        steady2 = self._block(2048, 1024)
+        out2 = sm.update(
+            steady2,
+            media_time=180.0 + 1024 / sample_rate,
+            sample_rate=sample_rate,
+        )
+        assert sm.just_auto_resynced is False
+        # Output is around the new offset (slight smoothing tolerance).
+        assert float(out2[-1]) == pytest.approx(
+            180.0 + 1024 / sample_rate, abs=0.01,
+        )
 
     def test_paused_playback_does_not_flood_resyncs(self):
         """When mpv pauses, time-pos stops advancing while steady_clock
