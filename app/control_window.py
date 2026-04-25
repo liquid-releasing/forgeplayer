@@ -26,6 +26,7 @@ from app.debug_log import DebugLog
 from app.widgets import ClickableSlider
 from app.preferences import Preferences
 from app.audio_test import play_tone_on_device
+from app.stim_preview import play_test_clip as play_haptic_test_clip
 
 _SLOT_LABELS = ["▶ Video", "⚡ Stim", "▶ Video 2"]
 _SLOT_ROLES = ["video", "stim", "mirror"]
@@ -309,14 +310,17 @@ class ControlWindow(QMainWindow):
         rl.addLayout(self._labeled_row_with_test(
             "Scene audio", self._setup_scene_combo,
             "Video's embedded sound — typically your speakers or headphones.",
+            is_haptic=False,
         ))
         rl.addLayout(self._labeled_row_with_test(
             "Haptic 1 (main stim)", self._setup_haptic1_combo,
             "Primary estim output — typically your USB audio dongle.",
+            is_haptic=True,
         ))
         rl.addLayout(self._labeled_row_with_test(
             "Haptic 2 (prostate)", self._setup_haptic2_combo,
             "Optional second estim output for prostate channels. Leave unset if unused.",
+            is_haptic=True,
         ))
 
         root.addWidget(role_box)
@@ -474,12 +478,20 @@ class ControlWindow(QMainWindow):
 
     def _labeled_row_with_test(
         self, label_text: str, combo: QComboBox, help_text: str = "",
+        *,
+        is_haptic: bool,
     ) -> QVBoxLayout:
         """Variant of _labeled_row that includes a 'Test' button which plays
-        a short tone through the currently-selected device. Gives users an
+        a short sample through the currently-selected device. Gives users an
         immediate, audible confirmation of whether the device actually
         outputs audio — the fastest way to diagnose 'why is my haptic silent?'
-        problems (wrong device / OS-level mute / unplugged dongle)."""
+        problems (wrong device / OS-level mute / unplugged dongle).
+
+        `is_haptic` picks the sample. Speakers get a 0.5 s 440 Hz sine; haptic
+        roles get a synthesized stim clip via `stim_preview.play_test_clip`
+        so the preview matches what real scene playback feels like (not a
+        harsh sine into the user's electrodes).
+        """
         row = QVBoxLayout()
         row.setSpacing(2)
 
@@ -493,12 +505,20 @@ class ControlWindow(QMainWindow):
         test_btn = QPushButton("🔊 Test")
         test_btn.setFixedHeight(32)
         test_btn.setFixedWidth(80)
-        test_btn.setToolTip(
-            "Play a half-second tone through this device.\n"
-            "Silent? Check for OS-level per-app mute or unplugged hardware."
-        )
+        if is_haptic:
+            test_btn.setToolTip(
+                "Play a brief stim sample through this device — "
+                "centered electrode, gentle volume ramp.\n"
+                "Silent? Check the dongle, the device's hardware knob, or "
+                "OS-level per-app mute."
+            )
+        else:
+            test_btn.setToolTip(
+                "Play a half-second tone through this device.\n"
+                "Silent? Check for OS-level per-app mute or unplugged hardware."
+            )
         test_btn.clicked.connect(
-            lambda _, c=combo: self._on_test_device(c)
+            lambda _, c=combo, h=is_haptic: self._on_test_device(c, is_haptic=h)
         )
         combo_row.addWidget(test_btn)
         row.addLayout(combo_row)
@@ -510,19 +530,25 @@ class ControlWindow(QMainWindow):
             row.addWidget(helper)
         return row
 
-    def _on_test_device(self, combo: QComboBox) -> None:
+    def _on_test_device(self, combo: QComboBox, *, is_haptic: bool) -> None:
         device_id = combo.currentData() or ""
         DebugLog.record(
             "setup.test_device",
             device=device_id or "(not set)",
+            kind="haptic" if is_haptic else "speaker",
         )
         if not device_id:
             self._setup_status.setText("Pick a device first, then press Test.")
             QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
             return
-        play_tone_on_device(device_id)
+        if is_haptic:
+            play_haptic_test_clip(device_id)
+            label = "stim sample"
+        else:
+            play_tone_on_device(device_id)
+            label = "tone"
         self._setup_status.setText(
-            f"Playing tone on: {combo.currentText()}"
+            f"Playing {label} on: {combo.currentText()}"
         )
         QTimer.singleShot(2000, lambda: self._setup_status.setText(""))
 
