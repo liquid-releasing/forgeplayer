@@ -75,9 +75,9 @@ class ControlWindow(QMainWindow):
         # out — they confuse the Scene/Haptic role picker).
         self._screens: list[QScreen] = self.screen().virtualSiblings()
         raw_devices = SyncEngine.list_audio_devices()
-        self._audio_devices: list[tuple[str, str]] = [
-            (d["name"], d.get("description", d["name"])) for d in raw_devices
-        ]
+        self._audio_devices: list[tuple[str, str]] = (
+            self._disambiguate_audio_descriptions(raw_devices)
+        )
 
         # Load persisted device-role preferences (Scene / Haptic 1 / Haptic 2).
         self._prefs = Preferences.load()
@@ -562,6 +562,66 @@ class ControlWindow(QMainWindow):
         QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
         # Refresh slot monitor combos so they reflect the new allowed set.
         self._refresh_all_slot_monitor_combos()
+
+    @staticmethod
+    def _disambiguate_audio_descriptions(
+        raw_devices: list[dict],
+    ) -> list[tuple[str, str]]:
+        """Build the (mpv_id, display_label) pairs for audio dropdowns.
+
+        When two devices share the same description (typical: two
+        physically-identical USB dongles, both reporting "Speakers (USB
+        Audio Device)"), prefix the display label with the PortAudio
+        integer index so users can tell them apart in the picker. Single-
+        occurrence descriptions stay clean (no noisy [N] prefix when
+        there's nothing to disambiguate).
+
+        The PortAudio index is what `resolve_audio_device` picks at
+        runtime, so the number visible in the dropdown matches what the
+        synth actually opens. Caveat: indices shift on USB replug — same
+        caveat as with hardcoded indices anywhere else in the system.
+        """
+        from collections import Counter  # noqa: PLC0415
+        from app.stim_audio_output import (  # noqa: PLC0415
+            _find_sounddevice_indices,
+            _host_api_from_mpv_id,
+            _load_sounddevice,
+        )
+
+        base = [
+            (d["name"], d.get("description", d["name"])) for d in raw_devices
+        ]
+        desc_counts = Counter(desc for _, desc in base)
+        if all(c == 1 for c in desc_counts.values()):
+            return base
+
+        # Try to query sounddevice for indices. If unavailable, fall back
+        # to plain labels — better silent than a noisy/broken dropdown.
+        try:
+            sd = _load_sounddevice()
+        except Exception:
+            return base
+
+        # Per (desc, host) bucket: track which index in sounddevice's
+        # match list is next to consume. Pairing by mpv enumeration
+        # order with sounddevice enumeration order is the best we can
+        # do without GUID-aware Windows lookups.
+        consumed: dict[tuple[str, str], int] = {}
+        out: list[tuple[str, str]] = []
+        for name, desc in base:
+            if desc_counts[desc] <= 1:
+                out.append((name, desc))
+                continue
+            host = _host_api_from_mpv_id(name) or ""
+            sd_indices = _find_sounddevice_indices(sd, desc, host or None)
+            pos = consumed.get((desc, host), 0)
+            if pos < len(sd_indices):
+                idx = sd_indices[pos]
+                consumed[(desc, host)] = pos + 1
+                out.append((name, f"[{idx}] {desc}"))
+            else:
+                out.append((name, desc))
+        return out
 
     def _build_role_combo(self, *, saved_value: str) -> QComboBox:
         combo = QComboBox()

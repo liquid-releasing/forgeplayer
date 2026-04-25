@@ -58,23 +58,20 @@ def _host_api_from_mpv_id(mpv_id: str) -> str | None:
     return _HOST_API_FROM_MPV_PREFIX.get(prefix)
 
 
-def _find_sounddevice_index(sd, desc: str, target_host: str | None) -> int | None:
-    """Look up the integer device index for `desc` in sounddevice.
+def _find_sounddevice_indices(sd, desc: str, target_host: str | None) -> list[int]:
+    """Return ALL sounddevice integer indices matching `desc` on
+    `target_host`, in enumeration order. Empty list if none match.
 
-    Filters by `target_host` (e.g. "Windows WASAPI") when provided, so a
-    name like "Speakers (USB Audio Device)" that exists on MME +
-    DirectSound + WASAPI narrows to the host api the mpv id belongs to.
-
-    Returns the int index of the unique match, the FIRST index if
-    multiple matches remain (e.g. two physically-identical dongles —
-    we can't disambiguate without Windows GUIDs), or None if there's
-    no match at all (caller falls back to the description string).
+    Multi-match is the two-physical-dongle case: same description on
+    the same host. Caller decides whether to pick the first (for a
+    unique pick) or the N-th (for position-paired matching against
+    mpv's list).
     """
     matches: list[int] = []
     try:
         devices = sd.query_devices()
     except Exception:
-        return None
+        return matches
 
     for idx, dev in enumerate(devices):
         if dev.get("max_output_channels", 0) <= 0:
@@ -89,7 +86,16 @@ def _find_sounddevice_index(sd, desc: str, target_host: str | None) -> int | Non
             if host_name != target_host:
                 continue
         matches.append(idx)
+    return matches
 
+
+def _find_sounddevice_index(sd, desc: str, target_host: str | None) -> int | None:
+    """Single-match lookup. Returns the unique index, the first when
+    multiple match (with a warning), or None when none match. Kept for
+    use sites that don't have the mpv list available — production
+    `resolve_audio_device` uses the position-aware variant when it can.
+    """
+    matches = _find_sounddevice_indices(sd, desc, target_host)
     if not matches:
         return None
     if len(matches) > 1:
@@ -142,9 +148,26 @@ def resolve_audio_device(
     target_host = _host_api_from_mpv_id(mpv_device_id)
     try:
         sd = _load_sounddevice()
-        idx = _find_sounddevice_index(sd, desc, target_host)
-        if idx is not None:
-            return idx
+        sd_indices = _find_sounddevice_indices(sd, desc, target_host)
+        if sd_indices:
+            # Position-aware match: pair the N-th mpv entry sharing
+            # (desc, host) with the N-th sounddevice index sharing the
+            # same. Both lists are in driver enumeration order, so on
+            # WASAPI this puts two physically-identical USB dongles on
+            # different sounddevice indices instead of collapsing them.
+            same_host_mpv = [
+                d for d in mpv_devices
+                if _host_api_from_mpv_id(d.get("name", "")) == target_host
+                and (d.get("description") or "") == desc
+            ]
+            pos = next(
+                (i for i, d in enumerate(same_host_mpv)
+                 if d.get("name") == mpv_device_id),
+                None,
+            )
+            if pos is not None and pos < len(sd_indices):
+                return sd_indices[pos]
+            return sd_indices[0]
     except Exception as exc:
         _log.debug("sounddevice index lookup failed: %s", exc)
 

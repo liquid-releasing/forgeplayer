@@ -112,6 +112,27 @@ class TestResolveAudioDevice:
         ]
         assert resolve_audio_device("wasapi/{aaa}", mpv_devices) == 0
 
+    def test_position_pairs_mpv_with_sounddevice(self, monkeypatch):
+        """When mpv has TWO entries sharing description on the same host
+        and sounddevice also has two, pair by enumeration position so
+        each mpv id resolves to a different sounddevice index."""
+        fake = types.ModuleType("sounddevice")
+        fake.query_devices = MagicMock(return_value=[
+            {"name": "Speakers (USB Audio Device)", "max_output_channels": 2, "hostapi": 0},
+            {"name": "Speakers (USB Audio Device)", "max_output_channels": 2, "hostapi": 0},
+        ])
+        fake.query_hostapis = MagicMock(return_value={"name": "Windows WASAPI"})
+        monkeypatch.setitem(sys.modules, "sounddevice", fake)
+
+        mpv_devices = [
+            {"name": "wasapi/{aaa}", "description": "Speakers (USB Audio Device)"},
+            {"name": "wasapi/{bbb}", "description": "Speakers (USB Audio Device)"},
+        ]
+        # Position 0 in mpv list → sounddevice index 0.
+        assert resolve_audio_device("wasapi/{aaa}", mpv_devices) == 0
+        # Position 1 in mpv list → sounddevice index 1 (NOT 0).
+        assert resolve_audio_device("wasapi/{bbb}", mpv_devices) == 1
+
     def test_falls_back_to_description_when_sounddevice_unavailable(self, fake_sd_no_devices):
         """If sounddevice can't see the device (no match), return the
         description so sounddevice's substring matcher can try."""
