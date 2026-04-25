@@ -268,6 +268,28 @@ class TestTimeSmoother:
         sm.update(steady2, media_time=180.0, sample_rate=sample_rate)
         assert sm.offset == pytest.approx(180.0 - float(steady2[-1]))
 
+    def test_notify_seek_avoids_resync_exception(self):
+        """When notify_seek (via reset) is called between blocks, the
+        next update adopts the new offset wholesale even if it's a
+        >1 s jump — no ResyncRequired raised, no silenced block."""
+        sm = _TimeSmoother()
+        sample_rate = 48000
+
+        steady0 = self._block(0, 1024)
+        sm.update(steady0, media_time=5.0, sample_rate=sample_rate)
+
+        # Caller (StimAudioStream.notify_seek) resets the smoother
+        # because a seek to t=180 just happened.
+        sm.reset()
+
+        # First update after reset: the 180-second jump is fine, no
+        # exception, smoother adopts new offset.
+        steady1 = self._block(1024, 1024)
+        out = sm.update(steady1, media_time=180.0, sample_rate=sample_rate)
+        expected_offset = 180.0 - float(steady1[-1])
+        assert sm.offset == pytest.approx(expected_offset)
+        np.testing.assert_allclose(out, steady1 + expected_offset)
+
     def test_output_is_monotonic_within_block(self):
         """The system_time_estimate ramp must be monotonic (non-decreasing)
         for the synth's per-sample axis interpolation to work right."""
