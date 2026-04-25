@@ -287,12 +287,10 @@ class ControlWindow(QMainWindow):
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
-        subtitle = QLabel(
+        subtitle = self._column_subtitle(
             "Pick which physical audio device handles each role. Library clicks "
             "use these to route automatically — you only set this once."
         )
-        subtitle.setStyleSheet("color: #9ba3c4;")
-        subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
         role_box = QGroupBox("Audio device roles")
@@ -347,13 +345,11 @@ class ControlWindow(QMainWindow):
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
-        subtitle = QLabel(
+        subtitle = self._column_subtitle(
             "How the haptic signal is synthesized. The default works for "
             "most users — flip Pulse-based only if you have modern "
             "stereostim hardware."
         )
-        subtitle.setStyleSheet("color: #9ba3c4;")
-        subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
         root.addWidget(self._build_setup_synth_box())
@@ -444,6 +440,28 @@ class ControlWindow(QMainWindow):
         lbl = QLabel(text)
         lbl.setStyleSheet("color: #6b7280; font-size: 11px;")
         lbl.setWordWrap(True)
+        # Ignored horizontal lets the label shrink below its preferred
+        # text width so it actually wraps inside narrow columns.
+        # Without this, a long unwrapped string forces the parent
+        # widget wider than its allocated 1/3 column.
+        lbl.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        lbl.setMinimumWidth(0)
+        return lbl
+
+    @staticmethod
+    def _column_subtitle(text: str) -> QLabel:
+        """Top-of-column subtitle. Larger than help labels but still
+        word-wrapping. Same size-policy trick as `_make_help_label` so
+        the column doesn't get pushed wider by the unwrapped string."""
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #9ba3c4;")
+        lbl.setWordWrap(True)
+        lbl.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        lbl.setMinimumWidth(0)
         return lbl
 
     def _build_setup_monitors_page(self) -> QWidget:
@@ -457,12 +475,10 @@ class ControlWindow(QMainWindow):
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
-        subtitle = QLabel(
+        subtitle = self._column_subtitle(
             "Which monitors host the control panel and video playback. "
             "Slot monitor pickers will only offer your checked playback screens."
         )
-        subtitle.setStyleSheet("color: #9ba3c4;")
-        subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
         monitor_box = QGroupBox("Monitor roles")
@@ -626,6 +642,19 @@ class ControlWindow(QMainWindow):
     def _build_role_combo(self, *, saved_value: str) -> QComboBox:
         combo = QComboBox()
         combo.setMinimumHeight(32)
+        # Without these, the combo's preferred width is the longest item
+        # name (e.g. "[21] Speakers (USB Audio Device)") which forces the
+        # whole column wider than its allocated 1/3, cropping the Test
+        # button on the right. With AdjustToMinimumContentsLengthWithIcon
+        # + minimum length, the combo can shrink to roughly 12 chars and
+        # the dropdown still shows the full name when opened.
+        combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        combo.setMinimumContentsLength(12)
+        combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         combo.addItem("— not set —", "")
         for name, desc in self._audio_devices:
             combo.addItem(desc, name)
@@ -1154,6 +1183,15 @@ class ControlWindow(QMainWindow):
         self._btn_debug_export.clicked.connect(self._on_debug_export)
         h.addWidget(self._btn_debug_export)
 
+        self._btn_debug_clear = QPushButton("Clear")
+        self._btn_debug_clear.setFixedHeight(30)
+        self._btn_debug_clear.setToolTip(
+            "Drop captured events and reset the t=0 timestamp. Useful when "
+            "starting a fresh repro after exporting an earlier session."
+        )
+        self._btn_debug_clear.clicked.connect(self._on_debug_clear)
+        h.addWidget(self._btn_debug_clear)
+
         return bar
 
     def _build_slot(self, index: int) -> QGroupBox:
@@ -1638,6 +1676,17 @@ class ControlWindow(QMainWindow):
             self, "Debug log exported",
             f"Wrote {DebugLog.event_count()} events to:\n{path}"
         )
+
+    def _on_debug_clear(self) -> None:
+        count = DebugLog.event_count()
+        if count == 0:
+            return
+        DebugLog.reset()
+        # Toast-style status using the existing setup status line area is
+        # awkward here — use the Mark button label briefly so the user
+        # gets visual confirmation without an extra dialog.
+        self._btn_debug_clear.setText(f"Cleared {count}")
+        QTimer.singleShot(1500, lambda: self._btn_debug_clear.setText("Clear"))
 
     # ── Folder scan ──────────────────────────────────────────────────────────
 
