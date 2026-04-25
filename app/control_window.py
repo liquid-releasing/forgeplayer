@@ -1857,9 +1857,15 @@ class ControlWindow(QMainWindow):
             stream = data.get("stim_audio_stream")
             if stream is not None:
                 try:
+                    underruns = stream.underrun_count
                     stream.stop()
                 except Exception as exc:
                     DebugLog.record("stim.stream_stop_error", slot=i, error=repr(exc))
+                else:
+                    DebugLog.record(
+                        "stim.stream_closed",
+                        slot=i, underruns=underruns,
+                    )
                 data["stim_audio_stream"] = None
         # Terminate every engine slot — including audio-only slots that
         # don't have a PlayerWindow — so no mpv instances leak.

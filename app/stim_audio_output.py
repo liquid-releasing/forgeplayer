@@ -223,7 +223,15 @@ class StimAudioStream:
     if asked for a rate the device doesn't accept.
     """
 
-    BLOCK_SIZE = 512
+    # blocksize=0 lets PortAudio / the driver pick (typically the device's
+    # native preferred buffer size). Pinning a small number like 512 forces
+    # extra hops through the host's resampler/buffer and crackles on USB
+    # dongles when CPU spikes briefly.
+    BLOCK_SIZE = 0
+    # 'high' targets ~50–100 ms output latency depending on host API. Trades
+    # haptic-vs-video sync precision for crackle resistance — the user can
+    # compensate with the haptic_offset_ms preference.
+    LATENCY = "high"
 
     def __init__(
         self,
@@ -239,6 +247,10 @@ class StimAudioStream:
         self._device_name = resolve_audio_device(device_id, mpv_devices)
         self._stream: object | None = None
         self._lock = threading.Lock()
+        # Underrun counter — surfaces glitch counts after the stream
+        # stops, so debug-mode can tell the user "your dongle dropped 14
+        # buffers during this scene" instead of just "it crackled."
+        self._underrun_count = 0
 
     @property
     def device_name(self) -> str | int | None:
@@ -263,6 +275,7 @@ class StimAudioStream:
                     channels=2,
                     dtype="float32",
                     blocksize=self.BLOCK_SIZE,
+                    latency=self.LATENCY,
                     device=self._device_name,
                     callback=self._callback,
                 )
@@ -290,6 +303,14 @@ class StimAudioStream:
     def is_running(self) -> bool:
         return self._stream is not None
 
+    @property
+    def underrun_count(self) -> int:
+        """Number of `output_underflow` reports observed by the audio
+        callback during this stream's lifetime. Non-zero means crackle —
+        the device thread starved at least once. Surfaced after stop()
+        so post-mortem debugging can quantify driver hiccups."""
+        return self._underrun_count
+
     def _callback(self, outdata, frames, time_info, status) -> None:  # type: ignore[no-untyped-def]
         """sounddevice OutputStream callback. Runs on the audio thread.
 
@@ -299,6 +320,11 @@ class StimAudioStream:
         die hard and the stream stops producing samples until restart.
         """
         if status:
+            # output_underflow is the "crackle" condition — the audio
+            # thread didn't get a buffer ready in time. Tally separately
+            # from generic "status" so we can post-mortem.
+            if getattr(status, "output_underflow", False):
+                self._underrun_count += 1
             _log.debug("sounddevice status: %s", status)
         try:
             media_t = float(self._time_source())

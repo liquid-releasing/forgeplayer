@@ -233,7 +233,10 @@ class TestStimAudioStream:
             assert kwargs["samplerate"] == 44100
             assert kwargs["channels"] == 2
             assert kwargs["dtype"] == "float32"
-            assert kwargs["blocksize"] == 512
+            # blocksize=0 means "let driver pick" — more reliable on USB
+            # dongles than pinning a small explicit value.
+            assert kwargs["blocksize"] == 0
+            assert kwargs["latency"] == "high"
             assert kwargs["device"] is None
             assert callable(kwargs["callback"])
             assert stream.is_running() is True

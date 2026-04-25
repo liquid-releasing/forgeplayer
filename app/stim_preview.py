@@ -37,7 +37,11 @@ from typing import Optional
 import numpy as np
 
 from app.funscript_loader import FunscriptActions, StimChannels
-from app.stim_audio_output import _load_sounddevice, resolve_audio_device
+from app.stim_audio_output import (
+    _load_sounddevice,
+    query_device_sample_rate,
+    resolve_audio_device,
+)
 from app.stim_synth import SAMPLE_RATE, CallbackMediaSync, StimSynth
 
 
@@ -97,18 +101,24 @@ def synthesize_test_clip_channels(
     )
 
 
-def render_clip(channels: StimChannels, duration_s: float) -> np.ndarray:
+def render_clip(
+    channels: StimChannels,
+    duration_s: float,
+    sample_rate: int = SAMPLE_RATE,
+) -> np.ndarray:
     """Synthesize a finite stim clip into a stereo float32 buffer.
 
     Runs the StimSynth in continuous mode against `channels` for
-    `duration_s` seconds at SAMPLE_RATE, with media_sync.is_playing()
+    `duration_s` seconds at `sample_rate`, with media_sync.is_playing()
     pinned True so the synth doesn't silence itself.
 
     Returns: float32 ndarray, shape (n_frames, 2), values in ~[-1, 1].
     """
     sync = CallbackMediaSync(lambda: True)
-    synth = StimSynth(channels, sync, waveform="continuous")
-    n_frames = int(round(duration_s * SAMPLE_RATE))
+    synth = StimSynth(
+        channels, sync, waveform="continuous", sample_rate=sample_rate,
+    )
+    n_frames = int(round(duration_s * sample_rate))
     return synth.generate_block(n_frames, media_time_s=0.0)
 
 
@@ -135,23 +145,27 @@ def play_test_clip(
     if not audio_device:
         return
 
+    device_name = resolve_audio_device(audio_device, mpv_devices)
+    # Render at the device's native rate. Many USB dongles default to
+    # 48 kHz; rendering at 44.1k and asking sd.play to retarget to a
+    # 48k device produces audible crackle (and -9997 in the worst case).
+    sample_rate = query_device_sample_rate(device_name)
+
     try:
         channels = synthesize_test_clip_channels(
             duration_s=duration_s,
             ramp_s=ramp_s,
             peak_volume=peak_volume,
         )
-        audio = render_clip(channels, duration_s=duration_s)
+        audio = render_clip(channels, duration_s=duration_s, sample_rate=sample_rate)
     except Exception as exc:
         _log.exception("Failed to synthesize test clip: %s", exc)
         return
 
-    device_name = resolve_audio_device(audio_device, mpv_devices)
-
     def _run() -> None:
         try:
             sd = _load_sounddevice()
-            sd.play(audio, samplerate=SAMPLE_RATE, device=device_name)
+            sd.play(audio, samplerate=sample_rate, device=device_name)
         except Exception as exc:
             _log.error(
                 "Failed to play test clip (device=%r): %s", device_name, exc,
