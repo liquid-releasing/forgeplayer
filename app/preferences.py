@@ -16,10 +16,19 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Literal
 
 
 _PREFS_PATH = Path.home() / ".forgeplayer" / "preferences.json"
+
+
+# Audio synthesis algorithm. Mirrors restim's "Select generation algorithm"
+# wizard: continuous is restim's default ("Best for 312/2B"); pulse-based
+# targets modern audio-based stereostim hardware ("Power-efficient
+# waveform. Slower numbing"). One global setting; both haptic roles use
+# the same algorithm in v0.0.2 since real users don't run mixed device
+# families on one rig.
+AudioAlgorithm = Literal["continuous", "pulse"]
 
 
 @dataclass
@@ -34,6 +43,13 @@ class Preferences:
     scene_audio_device: str = ""
     haptic1_audio_device: str = ""
     haptic2_audio_device: str = ""
+    # Synthesis algorithm — see AudioAlgorithm above.
+    audio_algorithm: AudioAlgorithm = "continuous"
+    # Constant offset applied to the haptic stream's media-time. Positive
+    # ms = stim leads video; negative = stim lags. Compensates for USB
+    # dongle / driver / electrode-placement latency. Restim and CHPlayer
+    # ship the same control under "offset [s]" — we use ms granularity.
+    haptic_offset_ms: int = 0
     # Monitor roles. -1 = not set (ControlWindow uses Qt's default placement).
     control_panel_screen: int = -1
     # Which screen indices are usable for video playback. Empty list means
@@ -48,7 +64,18 @@ class Preferences:
         except Exception:
             return cls()
         fields = {k for k in cls.__dataclass_fields__}
-        return cls(**{k: v for k, v in data.items() if k in fields})
+        clean = {k: v for k, v in data.items() if k in fields}
+        # Coerce algorithm enum: stale or hand-edited values should fall
+        # back to default rather than crash the synth at launch time.
+        if clean.get("audio_algorithm") not in ("continuous", "pulse"):
+            clean.pop("audio_algorithm", None)
+        # Coerce offset to int and clamp to safety range.
+        if "haptic_offset_ms" in clean:
+            try:
+                clean["haptic_offset_ms"] = max(-500, min(500, int(clean["haptic_offset_ms"])))
+            except (TypeError, ValueError):
+                clean.pop("haptic_offset_ms", None)
+        return cls(**clean)
 
     def save(self) -> None:
         """Write preferences to disk. Best-effort — a failure here should

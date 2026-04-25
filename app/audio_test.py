@@ -1,18 +1,20 @@
 # Copyright (c) 2026 Liquid Releasing. Licensed under the MIT License.
-"""Test-tone playback — verify a device role actually produces sound.
+"""Speaker test-tone playback — for the Scene Audio role only.
 
 Generates a short 440 Hz sine wave on first call and caches it at
-`~/.forgeplayer/test_tone.wav`. The Setup tab's "🔊 Test" buttons use
-this to route a half-second beep to the selected device, so users can
-tell at a glance whether:
+`~/.forgeplayer/test_tone.wav`, then plays it through a fresh mpv
+instance pointed at the selected device.
 
-- The device is reachable (tone plays).
-- The device is muted / unreachable at the OS level (tone doesn't play
-  despite ForgePlayer routing to it correctly).
+This module is **not** for haptic roles. A 440 Hz sine into an estim
+electrode is a harsh buzz, not a representative preview, and mpv's
+device-open / device-close pops can dominate the tone on USB dongles.
+The Setup tab's Haptic 1 / Haptic 2 Test buttons route through
+`app.stim_preview.play_test_clip` instead — same StimSynth path real
+scene playback uses.
 
-Intentionally NOT a full-blown audio-API: we avoid pycaw / Windows Core
-Audio bindings in v0.0.1. A single 0.5s tone answers the user's
-practical question without adding dependencies.
+Intentionally NOT a full-blown audio API: we avoid pycaw / Windows Core
+Audio bindings in v0.0.1. A single 0.5 s tone answers the user's
+practical "is my speaker reachable?" question without adding dependencies.
 """
 
 from __future__ import annotations

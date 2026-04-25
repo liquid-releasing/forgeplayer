@@ -204,12 +204,24 @@ Later phases: pack loading, restim integration, phone remote, timestamps / favor
 
 ## Credits
 
-ForgePlayer.app builds on the work of:
+Standing on the shoulders of giants. ForgePlayer.app exists because the
+people below already did the hard part:
 
-- **diglet48** (https://github.com/diglet48) — restim (https://github.com/diglet48/restim): years of estim signal processing, electrode math, pulse algorithms, 17 movement patterns, sensor integration. An extraordinary body of work.
-- **edger477** (https://github.com/edger477) — funscript-tools: the 1D→2D funscript conversion pipeline
-- **mpv project** (https://mpv.io) — the media engine under everything
-- **Qt / PySide6** (https://wiki.qt.io/Qt_for_Python) — the UI framework
+- **puste1** — **CHPlayer**: a monumental achievement, and the prior art
+  this whole space lives downstream of. Synchronized video + funscript
+  playback with device routing, in a single coherent player, before the
+  rest of the ecosystem caught up. Years before "multi-screen with
+  device sync" became table stakes, CHPlayer shipped it. Anyone building
+  a player today is, knowingly or not, completing patterns puste1 set.
+- **diglet48** (https://github.com/diglet48) — restim (https://github.com/diglet48/restim):
+  years of estim signal processing, electrode math, pulse algorithms,
+  17 movement patterns, sensor integration. An extraordinary body of
+  work and the math layer ForgePlayer renders through.
+- **edger477** (https://github.com/edger477) — funscript-tools: the
+  1D→2D funscript conversion pipeline and the channel taxonomy that
+  modern packs are authored against.
+- **mpv project** (https://mpv.io) — the media engine under everything.
+- **Qt / PySide6** (https://wiki.qt.io/Qt_for_Python) — the UI framework.
 
 ---
 
