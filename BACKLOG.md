@@ -17,6 +17,7 @@ Items are roughly grouped by phase but not strictly ordered.
 - [ ] Per-player window title bar showing filename
 - [ ] Remember control window size/position between sessions
 - [ ] play representative sample for user to calibrate hardware settings without starting video or audio
+- [ ] mkdocs User docs
 
 ---
 
@@ -98,6 +99,18 @@ v2
 > real-time music→motion generator for Restim. Source-available (non-commercial license).
 > Study the approach for inspiration; cannot use code or models commercially.
 > Consider reaching out to the author about collaboration.
+
+---
+
+## Bugs & Dogfood Follow-ups (v0.0.2 → v0.0.3)
+
+- [ ] **White-screen-after-double-click** intermittent — reproduced ~3x in v002 dogfood. Library double-click → both video panes white, won't respond to Play. App restart only recovery. Capture stderr cleanly when it recurs (`python main.py 2> mpv-err.txt`); auto-exported debug log will be available too. Suspects: mpv vs Qt window race, GL context lost from prior session, single+double-click double-fire in handler.
+- [ ] **Apply Setup algorithm change without restart** — Continuous ↔ Pulse picker change is captured at player launch only. Mid-session change requires close + relaunch to take effect. Either restart the stim stream on prefs change or document the behavior in the picker subtitle.
+- [ ] **Wire Haptic 2 routing** — Setup combo for Haptic 2 exists but the second stim channel isn't dispatched yet. Useful for prostate / second-stim-device users.
+- [ ] **Verify no clicks when advancing across scene / chapter boundaries** — v002 audio quality work covers within-scene playback only. Auto-advance + chapter-end behavior is untested. Gate before any playlist or chapter-jump UI ships.
+- [ ] **Residual ~7% audible click rate on stim playback** — likely device-level analog transient response in USB dongle when funscript modulation has steep edges during a fade window. Candidate fixes: freeze modulation across whole fade window (synth-side), or longer fade durations (loses haptic responsiveness). Only worth investigating if users report.
+- [ ] **Right-click Mark with inline note** — pop a tiny text input on right-click of the ⚑ Mark button so the user can label the mark ("loud click", "horseshoe", etc.). Makes 40-mark debug sessions searchable. Skip if marks remain mostly "click happened here" without context.
+- [ ] **Hardware feel-test of v0.0.2 release artifact** — pull the CI-built bundle on the RTX 4070 workstation, run with the haptic dongle plugged in, confirm the audio-saga fixes feel right end-to-end (not just sound right through a headphone).
 
 ---
 
