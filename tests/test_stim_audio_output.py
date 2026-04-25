@@ -441,6 +441,103 @@ class TestStimAudioStream:
 
         stream.stop()
 
+    def test_fade_gate_steady_state_passes_through(self, fake_sounddevice):
+        """When is_playing has been steady (gate at 1.0 for several
+        blocks), output equals synth output exactly — fast path, no
+        ramp allocation."""
+        synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
+        stream = StimAudioStream(
+            synth=synth,
+            time_source=lambda: 0.0,
+            is_playing_source=lambda: True,
+        )
+        # Drive _fade_gain to 1.0 by running enough callbacks.
+        outdata = np.zeros((1024, 2), dtype=np.float32)
+        for _ in range(50):
+            stream._callback(outdata, 1024, None, None)
+        assert stream._fade_gain == pytest.approx(1.0)
+
+    def test_fade_gate_ramps_down_on_pause(self, fake_sounddevice):
+        """When is_playing flips True→False, the next block ramps from
+        prev gain toward 0 over ~5 ms, NOT a step."""
+        synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
+        playing = [True]
+        stream = StimAudioStream(
+            synth=synth,
+            time_source=lambda: 0.0,
+            is_playing_source=lambda: playing[0],
+        )
+        # Settle to playing.
+        outdata = np.zeros((1024, 2), dtype=np.float32)
+        for _ in range(50):
+            stream._callback(outdata, 1024, None, None)
+        assert stream._fade_gain == pytest.approx(1.0)
+
+        # Flip to paused. Next block must ramp down, not step.
+        playing[0] = False
+        stream._callback(outdata, 1024, None, None)
+
+        # At 44100 Hz with 5 ms fade = 220 samples, the gain reaches 0
+        # before the end of a 1024-frame block.
+        assert stream._fade_gain == pytest.approx(0.0)
+        # First sample should be near 1.0 (still playing); samples
+        # toward the end of the ramp should be 0 (faded out).
+        # Verify by checking the block's amplitude profile.
+        first_sample_loud = abs(outdata[0, 0]) > 0.01 or abs(outdata[0, 1]) > 0.01
+        last_sample_silent = (
+            abs(outdata[-1, 0]) < 1e-6 and abs(outdata[-1, 1]) < 1e-6
+        )
+        assert first_sample_loud, "ramp should start with the playing signal"
+        assert last_sample_silent, "ramp should end at silence"
+
+    def test_fade_gate_ramps_up_on_play(self, fake_sounddevice):
+        """When is_playing flips False→True, the next block ramps from
+        0 up to 1 over ~5 ms — eliminates the carrier click on resume."""
+        synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
+        playing = [False]
+        stream = StimAudioStream(
+            synth=synth,
+            time_source=lambda: 0.0,
+            is_playing_source=lambda: playing[0],
+        )
+        # First few callbacks while paused — fade_gain stays at 0.
+        outdata = np.zeros((1024, 2), dtype=np.float32)
+        for _ in range(3):
+            stream._callback(outdata, 1024, None, None)
+        assert stream._fade_gain == pytest.approx(0.0)
+        # Output is silent during pause.
+        assert np.all(outdata == 0.0)
+
+        # Flip to playing.
+        playing[0] = True
+        stream._callback(outdata, 1024, None, None)
+
+        # Gain reaches 1.0 within the block.
+        assert stream._fade_gain == pytest.approx(1.0)
+        # First sample is near silent (start of ramp), last is full.
+        first_sample_silent = (
+            abs(outdata[0, 0]) < 1e-3 and abs(outdata[0, 1]) < 1e-3
+        )
+        assert first_sample_silent, "ramp should start at silence"
+
+    def test_no_fade_gate_when_source_is_none(self, fake_sounddevice):
+        """is_playing_source=None bypasses the gate entirely (used by
+        tests + offline rendering where caller manages pause)."""
+        synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
+        stream = StimAudioStream(
+            synth=synth,
+            time_source=lambda: 0.0,
+            is_playing_source=None,
+        )
+        outdata = np.zeros((1024, 2), dtype=np.float32)
+        stream._callback(outdata, 1024, None, None)
+
+        # _fade_gain should remain at its initial 0.0 (untouched).
+        assert stream._fade_gain == 0.0
+        # And the output should be the synth's full output, not silenced.
+        # (Some samples will be non-zero given the test channels.)
+        assert np.any(np.abs(outdata) > 0.0)
+
     def test_callback_silences_on_synth_error(self, fake_sounddevice):
         """If the synth's `generate_block` raises (e.g. transient stale
         time_source), the callback must still write to outdata — sounddevice

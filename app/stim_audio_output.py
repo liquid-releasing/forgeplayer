@@ -337,6 +337,10 @@ class StimAudioStream:
     # haptic-vs-video sync precision for crackle resistance — the user can
     # compensate with the haptic_offset_ms preference.
     LATENCY = "high"
+    # Pause/play transition fade. A step from full carrier amplitude to
+    # zero in a single sample is a click; ~5 ms ramp is below the
+    # ear's transient threshold while still feeling instantaneous.
+    FADE_MS = 5.0
 
     def __init__(
         self,
@@ -345,9 +349,16 @@ class StimAudioStream:
         device_id: str | None = None,
         *,
         mpv_devices: list[dict] | None = None,
+        is_playing_source: Callable[[], bool] | None = None,
     ) -> None:
         self._synth = synth
         self._time_source = time_source
+        # is_playing_source gates the output via a fade envelope at this
+        # layer instead of letting the synth's algorithm internally
+        # silence (a synth-internal step from full to zero is a click).
+        # When None (tests, offline rendering), output is always
+        # ungated — caller is responsible for pause semantics.
+        self._is_playing_source = is_playing_source
         self._device_id = device_id
         self._device_name = resolve_audio_device(device_id, mpv_devices)
         self._stream: object | None = None
@@ -360,6 +371,10 @@ class StimAudioStream:
         # synth's internal counter so we don't reach into private state.
         self._frame_offset = 0
         self._smoother = _TimeSmoother()
+        # Pause/play fade gate state. Starts at 0 (silent) so the first
+        # transition to "playing" fades up rather than punching the
+        # carrier in instantly.
+        self._fade_gain: float = 0.0
 
     @property
     def device_name(self) -> str | int | None:
@@ -447,6 +462,41 @@ class StimAudioStream:
         underrun_count."""
         return self._smoother.auto_resync_count
 
+    def _apply_fade_gate(
+        self,
+        block: np.ndarray,
+        target: float,
+        frames: int,
+        sample_rate: int,
+    ) -> np.ndarray:
+        """Multiply `block` (stereo float32) by a per-sample gain that
+        ramps from `self._fade_gain` toward `target` (0.0 or 1.0) at
+        the FADE_MS rate. Updates `self._fade_gain` for the next block.
+
+        Steady-state (already at target) is the fast path: one scalar
+        multiply. Transitions allocate a small ramp array.
+        """
+        if abs(self._fade_gain - target) < 1e-6:
+            if self._fade_gain == 1.0:
+                return block
+            if self._fade_gain == 0.0:
+                # Silence — skip the multiply entirely.
+                return np.zeros_like(block)
+            return block * self._fade_gain
+
+        fade_samples = max(1, int(self.FADE_MS * 1e-3 * sample_rate))
+        step = 1.0 / fade_samples
+        if target > self._fade_gain:
+            ramp = np.minimum(
+                self._fade_gain + np.arange(frames) * step, target,
+            )
+        else:
+            ramp = np.maximum(
+                self._fade_gain - np.arange(frames) * step, target,
+            )
+        self._fade_gain = float(ramp[-1])
+        return block * ramp.reshape(-1, 1)
+
     def _callback(self, outdata, frames, time_info, status) -> None:  # type: ignore[no-untyped-def]
         """sounddevice OutputStream callback. Runs on the audio thread.
 
@@ -489,6 +539,14 @@ class StimAudioStream:
                 )
                 outdata.fill(0)
                 return
+
+            # Apply pause/play fade gate. A direct multiplication by 0/1
+            # would step the carrier and click; ramping over ~5 ms makes
+            # the transition inaudible.
+            if self._is_playing_source is not None:
+                target = 1.0 if bool(self._is_playing_source()) else 0.0
+                block = self._apply_fade_gate(block, target, frames, sample_rate)
+
             outdata[:] = block
         except Exception as exc:
             _log.exception("audio callback failed: %s", exc)

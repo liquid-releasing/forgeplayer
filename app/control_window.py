@@ -1994,12 +1994,15 @@ class ControlWindow(QMainWindow):
             )
             return False
 
-        # Media sync follows the primary mpv player — when video plays,
-        # synth plays; when video pauses, synth silences (volume*0
-        # internally). Reads happen on the audio thread; mpv property
-        # access is thread-safe via python-mpv.
+        # Media sync stays always-true: synth generates non-silent audio
+        # at all times. Pause/play gating happens in StimAudioStream via
+        # a 5 ms fade envelope (a synth-internal step from full carrier
+        # to zero in a single sample is a click; the fade hides it).
+        # The stream's is_playing_source uses the same engine query the
+        # old media_sync did.
         engine = self._engine
-        media_sync = CallbackMediaSync(
+        media_sync = CallbackMediaSync(lambda: True)
+        is_playing_source = (
             lambda: engine.has_active_players() and not engine.is_paused()
         )
 
@@ -2046,6 +2049,7 @@ class ControlWindow(QMainWindow):
             time_source=time_source,
             device_id=audio_device or None,
             mpv_devices=mpv_devices,
+            is_playing_source=is_playing_source,
         )
         try:
             stream.start()
