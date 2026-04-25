@@ -699,17 +699,40 @@ class ControlWindow(QMainWindow):
             else:
                 self._set_slot_media(slot1, video_path="", audio_path="")
 
-        # Picked audio → Slot 2 audio-only, heading to the user's haptic
-        # device (Slot 2's audio output — typically the USB dongle). This is
-        # true whether or not there's a video: Slot 2 is the "stim" slot.
-        if choices.audio:
+        # Slot 2 is the Stim slot — its source can be either a native
+        # FunscriptSet (preferred — real-time synthesis via StimSynth +
+        # the user's Haptic 1 dongle) or a pre-rendered audio file
+        # (legacy v0.0.1 path; mpv plays it through Slot 2's output).
+        # Native funscript wins when both are available; the audio file
+        # is the fallback when the scene has only pre-renders.
+        if choices.funscript_set is not None and (
+            choices.funscript_set.main_path or choices.funscript_set.channels
+        ):
+            self._set_slot_media(slot2, video_path="", audio_path="")
+            slot2["funscript_set"] = choices.funscript_set
+            DebugLog.record(
+                "stim.dispatch",
+                slot=1,
+                source="funscript_set",
+                base_stem=choices.funscript_set.base_stem,
+                pulse_based=any(
+                    ch.startswith("pulse_") for ch in choices.funscript_set.channels
+                ),
+            )
+        elif choices.audio:
             self._set_slot_media(
                 slot2,
                 video_path="",
                 audio_path=choices.audio.path,
             )
+            slot2["funscript_set"] = None
+            DebugLog.record(
+                "stim.dispatch", slot=1, source="audio_file",
+                path=choices.audio.path,
+            )
         else:
             self._set_slot_media(slot2, video_path="", audio_path="")
+            slot2["funscript_set"] = None
 
         if not (choices.video or choices.audio):
             QMessageBox.information(
@@ -843,16 +866,20 @@ class ControlWindow(QMainWindow):
 
     @staticmethod
     def _refresh_audio_label(data: dict) -> None:
-        """Render the Audio-override label from whichever of (override
-        audio, embedded video audio, nothing) is currently in effect.
+        """Render the Audio-override label from whichever of (native
+        funscript, override audio, embedded video audio, nothing) is
+        currently in effect.
 
         When no override is set, we show ``(from <video filename>)`` so
         the user sees WHICH source the slot is actually playing — more
         informative than the old ``(uses video audio)`` placeholder.
         """
+        fs = data.get("funscript_set")
         audio = data.get("audio_path", "")
         video = data.get("video_path", "")
-        if audio:
+        if fs is not None:
+            text = f"⚡ {fs.base_stem} (live synth)"
+        elif audio:
             text = os.path.basename(audio)
         elif video:
             text = f"(from {os.path.basename(video)})"
@@ -1154,6 +1181,13 @@ class ControlWindow(QMainWindow):
             "video_path":     "",
             "audio_label":    audio_label,
             "audio_path":     "",
+            # Native funscript playback (Stim slot only). When non-None,
+            # _on_launch routes to StimSynth instead of mpv. Populated by
+            # _apply_scene_choices when the picker yields a FunscriptSet.
+            "funscript_set":  None,
+            # Live StimAudioStream while playing — kept here so
+            # _close_players can stop it during teardown.
+            "stim_audio_stream": None,
             "monitor_combo":  monitor_combo,
             "audio_combo":    audio_combo,
             "volume_slider":  volume_slider,
@@ -1311,7 +1345,13 @@ class ControlWindow(QMainWindow):
         DebugLog.record("browse.audio.dialog_closed", picked=bool(path))
         if path:
             data["audio_path"] = path
-            data["audio_label"].setText(os.path.basename(path))
+            # Browse-picked audio overrides any prior FunscriptSet on the
+            # slot — they're mutually exclusive sources for the haptic
+            # output. (Browse picking a `.funscript` directly is not yet
+            # wired up; users build the FunscriptSet via the Library /
+            # picker flow.)
+            data["funscript_set"] = None
+            self._refresh_audio_label(data)
             data["audio_label"].setToolTip(path)
             self._refresh_monitor_state(data)
             if not data["video_path"]:
@@ -1319,6 +1359,9 @@ class ControlWindow(QMainWindow):
 
     def _on_clear_audio(self, data: dict) -> None:
         data["audio_path"] = ""
+        # Clear the funscript source too — the X button means "wipe this
+        # slot's haptic source," not "only the audio-file fallback."
+        data["funscript_set"] = None
         data["audio_label"].setToolTip("")
         self._refresh_audio_label(data)
         self._refresh_monitor_state(data)
@@ -1446,6 +1489,12 @@ class ControlWindow(QMainWindow):
             d["video_label"].setToolTip(cfg.video_path)
 
             d["audio_path"] = cfg.audio_path
+            # Session schema doesn't yet carry funscript_set — clear any
+            # leftover from a prior in-memory scene so loading an older
+            # session can't accidentally inherit the previous scene's
+            # stim source. (TODO: extend SlotConfig to round-trip
+            # native funscript playback through saved sessions.)
+            d["funscript_set"] = None
             d["audio_label"].setToolTip(cfg.audio_path)
             self._refresh_audio_label(d)
 
@@ -1584,6 +1633,19 @@ class ControlWindow(QMainWindow):
         )
         self._timer.stop()
         self._engine.stop_all()
+        # Stop any live StimSynth audio streams BEFORE terminating mpv —
+        # the synth's media-sync callback reads mpv state, so killing
+        # mpv first could let an in-flight callback see a half-torn-down
+        # player. Stop streams first, then mpv.
+        for i in range(3):
+            data = self._slot_data(i)
+            stream = data.get("stim_audio_stream")
+            if stream is not None:
+                try:
+                    stream.stop()
+                except Exception as exc:
+                    DebugLog.record("stim.stream_stop_error", slot=i, error=repr(exc))
+                data["stim_audio_stream"] = None
         # Terminate every engine slot — including audio-only slots that
         # don't have a PlayerWindow — so no mpv instances leak.
         for i in range(3):
@@ -1601,6 +1663,97 @@ class ControlWindow(QMainWindow):
         self._time_label.setText("0:00")
         self._dur_label.setText("0:00")
 
+    def _launch_stim_synth(
+        self,
+        slot_idx: int,
+        slot_data: dict,
+        funscript_set,
+        audio_device: str,
+    ) -> bool:
+        """Spawn a StimSynth + StimAudioStream for the Stim slot.
+
+        Returns True on success. Failures (no playable channels, audio
+        device couldn't open) log via DebugLog and return False — the
+        rest of the launch continues so the user still sees the video
+        play even if stim fails.
+
+        Time source: `engine.get_position()` reads the primary mpv
+        player's `time-pos`. Stim audio thus follows the video clock —
+        seek, pause, even buffer underruns on the video propagate.
+
+        Play state: `not engine.is_paused()` gates the synth's volume
+        to zero when video is paused. Hard mute through transport.
+        """
+        # Lazy imports — keep the audio stack out of cold-start when the
+        # user's not playing a stim scene.
+        from app.funscript_loader import load_stim_channels  # noqa: PLC0415
+        from app.stim_audio_output import StimAudioStream  # noqa: PLC0415
+        from app.stim_synth import CallbackMediaSync, StimSynth  # noqa: PLC0415
+
+        try:
+            channels = load_stim_channels(funscript_set, prostate=False)
+        except ValueError as exc:
+            DebugLog.record(
+                "stim.load_failed", slot=slot_idx, error=repr(exc),
+                base_stem=funscript_set.base_stem,
+            )
+            return False
+        if channels is None:
+            DebugLog.record(
+                "stim.load_failed", slot=slot_idx, error="no_playable_channels",
+                base_stem=funscript_set.base_stem,
+            )
+            return False
+
+        # Media sync follows the primary mpv player — when video plays,
+        # synth plays; when video pauses, synth silences (volume*0
+        # internally). Reads happen on the audio thread; mpv property
+        # access is thread-safe via python-mpv.
+        engine = self._engine
+        media_sync = CallbackMediaSync(
+            lambda: engine.has_active_players() and not engine.is_paused()
+        )
+        synth = StimSynth(channels, media_sync, waveform="continuous")
+
+        try:
+            mpv_devices = engine.list_audio_devices(include_hdmi=True)
+        except Exception as exc:
+            DebugLog.record("stim.mpv_devices_failed", error=repr(exc))
+            mpv_devices = []
+
+        stream = StimAudioStream(
+            synth=synth,
+            time_source=engine.get_position,
+            device_id=audio_device or None,
+            mpv_devices=mpv_devices,
+        )
+        try:
+            stream.start()
+        except Exception as exc:
+            DebugLog.record(
+                "stim.stream_open_failed", slot=slot_idx, error=repr(exc),
+                device_id=audio_device,
+            )
+            QMessageBox.warning(
+                self, "Stim audio failed",
+                f"Could not open stim audio output for "
+                f"{funscript_set.base_stem}:\n{exc}\n\n"
+                f"Try a different Haptic 1 device in Setup.",
+            )
+            return False
+
+        slot_data["stim_audio_stream"] = stream
+        DebugLog.record(
+            "players.launch_slot",
+            slot=slot_idx,
+            mode="stim_synth",
+            base_stem=funscript_set.base_stem,
+            algorithm=synth.waveform,
+            source=channels.source,
+            device=stream.device_name or "(default)",
+        )
+        return True
+
     def _on_launch(self) -> None:
         DebugLog.record("players.launch_request")
         self._close_players()
@@ -1610,11 +1763,21 @@ class ControlWindow(QMainWindow):
             data = self._slot_data(i)
             video_path: str = data["video_path"]
             audio_path: str = data["audio_path"]
+            funscript_set = data.get("funscript_set")
             # Slot is "enabled" iff it has media. No separate checkbox anymore.
-            if not (video_path or audio_path):
+            if not (video_path or audio_path or funscript_set):
                 continue
 
             audio_device: str = data["audio_combo"].currentData() or ""
+
+            # Native funscript synthesis (Stim slot, v0.0.2). Bypasses mpv
+            # entirely — StimSynth produces audio from the funscript and
+            # streams to the slot's audio device. Time and play/pause
+            # follow the SyncEngine's primary player (Slot 1's video).
+            if funscript_set is not None:
+                if self._launch_stim_synth(i, data, funscript_set, audio_device):
+                    launched = True
+                continue
 
             # Audio-only: no PlayerWindow, no monitor. Headless mpv still
             # participates in sync (seek/pause/play apply via _active list).
