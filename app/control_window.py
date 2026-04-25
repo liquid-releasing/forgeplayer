@@ -268,9 +268,12 @@ class ControlWindow(QMainWindow):
         # Order: Synthesis | Audio device roles | Monitors. Synthesis first
         # because it shapes the experience (algorithm + offset) — once you
         # pick it, audio devices and monitors are "where it goes."
-        columns.addWidget(self._build_setup_synth_page(), 1)
-        columns.addWidget(self._build_setup_audio_page(), 1)
-        columns.addWidget(self._build_setup_monitors_page(), 1)
+        # Stretch ratios 2:3:2 — audio devices want extra room for long
+        # device names like "[21] Speakers (USB Audio Device)"; synthesis
+        # is just radio buttons + a spinbox so it can be narrower.
+        columns.addWidget(self._build_setup_synth_page(), 2)
+        columns.addWidget(self._build_setup_audio_page(), 3)
+        columns.addWidget(self._build_setup_monitors_page(), 2)
         outer.addLayout(columns, 1)
 
         outer.addWidget(self._setup_status)
@@ -1907,13 +1910,14 @@ class ControlWindow(QMainWindow):
             if stream is not None:
                 try:
                     underruns = stream.underrun_count
+                    resyncs = stream.resync_count
                     stream.stop()
                 except Exception as exc:
                     DebugLog.record("stim.stream_stop_error", slot=i, error=repr(exc))
                 else:
                     DebugLog.record(
                         "stim.stream_closed",
-                        slot=i, underruns=underruns,
+                        slot=i, underruns=underruns, resyncs=resyncs,
                     )
                 data["stim_audio_stream"] = None
         # Terminate every engine slot — including audio-only slots that

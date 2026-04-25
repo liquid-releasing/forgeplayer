@@ -164,6 +164,12 @@ class StimSynth:
     def generate_block(self, n_frames: int, media_time_s: float) -> np.ndarray:
         """Synthesize `n_frames` of stereo PCM at the synth's sample rate.
 
+        Simple linear time interpolation: `system_time_estimate[i] =
+        media_time_s + i / sample_rate`. Used by tests and offline
+        rendering where the caller has a perfectly linear time source.
+        Production live playback uses `generate_block_with_clocks`
+        instead, with a smoothed clock from `StimAudioStream`.
+
         `media_time_s` is the video player's current `time-pos` in seconds —
         the funscript axes are interpolated against this so estim follows
         the video clock. While `media_sync.is_playing()` is False the
@@ -178,6 +184,30 @@ class StimSynth:
         idx = np.arange(n_frames)
         steady_clock = (idx + self._sample_count) / self.sample_rate
         system_time_estimate = media_time_s + idx / self.sample_rate
+
+        return self.generate_block_with_clocks(steady_clock, system_time_estimate)
+
+    def generate_block_with_clocks(
+        self,
+        steady_clock: np.ndarray,
+        system_time_estimate: np.ndarray,
+    ) -> np.ndarray:
+        """Lower-level entry point that takes both clock arrays directly.
+
+        `steady_clock` is the audio thread's monotonic sample-counter
+        clock (perfectly linear). `system_time_estimate` is the smoothed
+        media-time estimate fed to the funscript axes — must be SAME
+        SHAPE as steady_clock. Both are arrays of seconds.
+
+        Used by `StimAudioStream` so the caller can low-pass-filter the
+        media clock outside the synth (restim's pattern) and avoid
+        per-block discontinuities from a jittery time source.
+
+        Returns: float32 ndarray, shape (len(steady_clock), 2).
+        """
+        n_frames = int(steady_clock.shape[0])
+        if n_frames == 0:
+            return np.zeros((0, 2), dtype=np.float32)
 
         left, right = self._algorithm.generate_audio(
             samplerate=self.sample_rate,

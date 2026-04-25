@@ -201,6 +201,112 @@ def resolve_audio_device(
     return desc
 
 
+class _TimeSmoother:
+    """Low-pass-filtered, slew-rate-limited offset between sample clock
+    and media clock — port of restim's pattern from
+    device/audio/audio_stim_device.py:173-194.
+
+    Why: our audio callback runs at audio-block rate (~46 Hz at 48k/1024
+    frames); mpv updates its `time-pos` property at video-frame rate
+    (~60 Hz). Reading `time-pos` once per callback gets a noisy clock —
+    some callbacks see a stalled value (no update since last call),
+    others see a doubled jump. Feeding that raw to the synth produces
+    discontinuities at block boundaries, which the user hears as crackle
+    even when the audio buffer never underruns.
+
+    Smoothed solution: maintain `self.offset` such that
+    `system_time_estimate ≈ steady_clock + offset`. Each callback,
+    observe `media_time - steady_clock_end` as a noisy offset estimate,
+    average over the last 8 observations, then nudge `self.offset`
+    toward the average at most ±2% drift per second of audio. Within
+    one block, `system_time_estimate` is a linear ramp from the previous
+    offset to the new offset — guarantees monotonic, smooth time even
+    when the underlying mpv clock is jittery.
+    """
+
+    HISTORY = 8
+    MAX_DRIFT_PER_SEC = 0.02  # i.e. 20 ms per audio second of correction
+    RESYNC_THRESHOLD = 1.0    # seconds of disagreement → caller should resync
+
+    def __init__(self) -> None:
+        self.offset: float = 0.0
+        self._error_history: list[float] = []
+        self._initialized = False
+
+    def reset(self) -> None:
+        self.offset = 0.0
+        self._error_history = []
+        self._initialized = False
+
+    def update(
+        self,
+        steady_clock: np.ndarray,
+        media_time: float,
+        sample_rate: int,
+    ) -> np.ndarray:
+        """Build a smoothed `system_time_estimate` array for one audio
+        block. Caller passes the perfectly-linear `steady_clock` for
+        this block plus the current media-time observation.
+
+        Returns an array same shape as `steady_clock`.
+
+        Raises `ResyncRequired` when `|observed_offset - self.offset|`
+        exceeds `RESYNC_THRESHOLD` — typically a seek (the media clock
+        jumped). Caller should reset the smoother and re-observe.
+        """
+        n = steady_clock.shape[0]
+        steady_end = float(steady_clock[-1]) if n else 0.0
+        observed_offset = media_time - steady_end
+
+        if not self._initialized:
+            # First callback — adopt observed offset wholesale; nothing to
+            # smooth against yet.
+            self.offset = observed_offset
+            self._error_history = [0.0]
+            self._initialized = True
+            return steady_clock + self.offset
+
+        if abs(observed_offset - self.offset) > self.RESYNC_THRESHOLD:
+            # Big jump — caller (the stream) needs to reset and let the
+            # smoother re-converge instead of producing a huge sweep.
+            raise _TimeSmoother.ResyncRequired(observed_offset, self.offset)
+
+        # Low-pass over recent observations.
+        error = observed_offset - self.offset
+        self._error_history.append(error)
+        if len(self._error_history) > self.HISTORY:
+            self._error_history = self._error_history[-self.HISTORY:]
+        avg_error = sum(self._error_history) / len(self._error_history)
+
+        # Slew-rate-limit the correction. dt is the audio time covered by
+        # this block (in seconds); max correction is dt * 2%/sec.
+        dt = n / sample_rate
+        max_adjustment = dt * self.MAX_DRIFT_PER_SEC
+        adjustment = max(-max_adjustment, min(avg_error * dt, max_adjustment))
+
+        prev_offset = self.offset
+        self.offset = prev_offset + adjustment
+
+        # Within this block, ramp linearly from prev_offset to the new
+        # offset — gives the synth a smooth monotonic clock instead of
+        # a step at the block boundary.
+        offset_ramp = np.linspace(prev_offset, self.offset, n, endpoint=False)
+        return steady_clock + offset_ramp
+
+    class ResyncRequired(Exception):
+        """Raised when the media clock jumped beyond the smoother's
+        slew tolerance. Stream catches this, resets the smoother, and
+        re-observes on the next callback."""
+
+        def __init__(self, observed: float, smoothed: float) -> None:
+            super().__init__(
+                f"media-clock jump: observed={observed:.3f} "
+                f"smoothed={smoothed:.3f}"
+            )
+            self.observed = observed
+            self.smoothed = smoothed
+
+
 class StimAudioStream:
     """One sounddevice OutputStream driven by one StimSynth.
 
@@ -251,6 +357,14 @@ class StimAudioStream:
         # stops, so debug-mode can tell the user "your dongle dropped 14
         # buffers during this scene" instead of just "it crackled."
         self._underrun_count = 0
+        # Resync counter — number of times the media clock jumped past
+        # the smoother's tolerance (typically a seek). Useful only for
+        # debugging; usually 0 unless the user is actively scrubbing.
+        self._resync_count = 0
+        # Sample-counter for the steady_clock baseline. Independent of
+        # synth's internal counter so we don't reach into private state.
+        self._frame_offset = 0
+        self._smoother = _TimeSmoother()
 
     @property
     def device_name(self) -> str | int | None:
@@ -311,6 +425,13 @@ class StimAudioStream:
         so post-mortem debugging can quantify driver hiccups."""
         return self._underrun_count
 
+    @property
+    def resync_count(self) -> int:
+        """Number of times the smoother detected a media-clock jump
+        past its tolerance (typically a seek). Surfaced for debug
+        export alongside underrun_count."""
+        return self._resync_count
+
     def _callback(self, outdata, frames, time_info, status) -> None:  # type: ignore[no-untyped-def]
         """sounddevice OutputStream callback. Runs on the audio thread.
 
@@ -318,6 +439,12 @@ class StimAudioStream:
         write them into `outdata`. If anything goes wrong we silence
         the buffer and log — never raise, because the audio thread will
         die hard and the stream stops producing samples until restart.
+
+        Time source is read once per callback and fed through
+        `_TimeSmoother` to produce a low-pass-filtered, monotonic
+        `system_time_estimate` for the synth. Without smoothing,
+        mpv's time-pos jitter (block rate ≠ video frame rate) causes
+        per-block discontinuities that the user hears as crackle.
         """
         if status:
             # output_underflow is the "crackle" condition — the audio
@@ -327,8 +454,28 @@ class StimAudioStream:
                 self._underrun_count += 1
             _log.debug("sounddevice status: %s", status)
         try:
+            sample_rate = self._synth.sample_rate
+            idx = np.arange(frames)
+            steady_clock = (idx + self._frame_offset) / sample_rate
+            self._frame_offset += frames
+
             media_t = float(self._time_source())
-            block = self._synth.generate_block(frames, media_t)
+            try:
+                system_time_estimate = self._smoother.update(
+                    steady_clock, media_t, sample_rate,
+                )
+            except _TimeSmoother.ResyncRequired:
+                # Big jump (probably a seek). Reset the smoother and
+                # re-adopt the observed offset on next callback. This
+                # block is silent.
+                self._resync_count += 1
+                self._smoother.reset()
+                outdata.fill(0)
+                return
+
+            block = self._synth.generate_block_with_clocks(
+                steady_clock, system_time_estimate,
+            )
             if block.shape != (frames, 2):
                 _log.warning(
                     "synth returned %s, expected %s — silencing",

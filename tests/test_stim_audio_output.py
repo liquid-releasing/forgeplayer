@@ -18,6 +18,7 @@ import pytest
 from app.funscript_loader import StimChannels
 from app.stim_audio_output import (
     StimAudioStream,
+    _TimeSmoother,
     query_device_sample_rate,
     resolve_audio_device,
 )
@@ -193,6 +194,94 @@ class TestQueryDeviceSampleRate:
         assert query_device_sample_rate(None) == 44100
         # Verify it was called with kind="output", not a device handle.
         fake.query_devices.assert_called_with(kind="output")
+
+
+# ── _TimeSmoother ─────────────────────────────────────────────────────────────
+
+class TestTimeSmoother:
+    """Restim-pattern smoother for the media clock fed to the synth."""
+
+    def _block(self, frame_offset: int, n: int, sample_rate: int = 48000) -> np.ndarray:
+        return (np.arange(n) + frame_offset) / sample_rate
+
+    def test_first_callback_adopts_observed_offset_wholesale(self):
+        sm = _TimeSmoother()
+        steady = self._block(0, 1024)
+        # Observed offset = media_time - steady_clock[-1] = 5.0 - end
+        media_time = 5.0
+        out = sm.update(steady, media_time, sample_rate=48000)
+
+        # First-call shortcut: system_time_estimate = steady + observed_offset.
+        expected_offset = media_time - float(steady[-1])
+        np.testing.assert_allclose(out, steady + expected_offset)
+        assert sm.offset == pytest.approx(expected_offset)
+
+    def test_jitter_is_smoothed_not_followed(self):
+        """A single noisy media-time observation should NOT pull the
+        smoothed offset all the way — that's the whole point."""
+        sm = _TimeSmoother()
+        sample_rate = 48000
+
+        # Establish baseline at t=5.0 (steady=0..1024/sr).
+        steady0 = self._block(0, 1024)
+        sm.update(steady0, media_time=5.0, sample_rate=sample_rate)
+        baseline_offset = sm.offset
+
+        # Next callback: jittery media-time jumps an extra 50 ms.
+        steady1 = self._block(1024, 1024)
+        # Steady continues linearly. Media time jumps:
+        # The "expected" media_time for this block end is 5.0 + 1024/sr ≈ 5.021.
+        # We add 50 ms of jitter.
+        expected_media = 5.0 + 1024 / sample_rate
+        jittery_media = expected_media + 0.050
+        sm.update(steady1, media_time=jittery_media, sample_rate=sample_rate)
+
+        # The offset should have moved slightly toward the jitter, not
+        # all the way to it. Max drift per block = (1024/48000) * 0.02 ≈
+        # 0.43 ms — much less than the 50 ms jitter.
+        delta = sm.offset - baseline_offset
+        assert abs(delta) < 0.001  # well below the 50 ms jitter
+
+    def test_seek_raises_resync_required(self):
+        sm = _TimeSmoother()
+        sample_rate = 48000
+
+        steady0 = self._block(0, 1024)
+        sm.update(steady0, media_time=5.0, sample_rate=sample_rate)
+
+        # Big jump (user seeked from t=5 to t=180).
+        steady1 = self._block(1024, 1024)
+        with pytest.raises(_TimeSmoother.ResyncRequired):
+            sm.update(steady1, media_time=180.0, sample_rate=sample_rate)
+
+    def test_reset_returns_to_uninitialized(self):
+        sm = _TimeSmoother()
+        sample_rate = 48000
+        steady = self._block(0, 1024)
+        sm.update(steady, media_time=5.0, sample_rate=sample_rate)
+
+        sm.reset()
+
+        # First update after reset adopts the new offset wholesale (no
+        # smoothing yet because there's no history).
+        steady2 = self._block(0, 1024)
+        sm.update(steady2, media_time=180.0, sample_rate=sample_rate)
+        assert sm.offset == pytest.approx(180.0 - float(steady2[-1]))
+
+    def test_output_is_monotonic_within_block(self):
+        """The system_time_estimate ramp must be monotonic (non-decreasing)
+        for the synth's per-sample axis interpolation to work right."""
+        sm = _TimeSmoother()
+        sample_rate = 48000
+
+        steady0 = self._block(0, 1024)
+        sm.update(steady0, media_time=5.0, sample_rate=sample_rate)
+        # A normal (small) clock advance.
+        steady1 = self._block(1024, 1024)
+        media1 = 5.0 + 1024 / sample_rate + 0.020  # 20 ms jitter
+        out = sm.update(steady1, media_time=media1, sample_rate=sample_rate)
+
+        assert np.all(np.diff(out) >= 0), "system_time_estimate must be monotonic"
 
 
 # ── StimAudioStream ───────────────────────────────────────────────────────────
