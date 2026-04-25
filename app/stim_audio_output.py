@@ -420,24 +420,6 @@ class StimAudioStream:
                 raise
             self._stream = stream
 
-    def notify_seek(self) -> None:
-        """Tell the stream a seek just landed.
-
-        Resets the time smoother so the next audio callback adopts the
-        new media position wholesale instead of either (a) absorbing it
-        as jitter into the smoothed offset (slow drift, audible) or
-        (b) tripping ResyncRequired and silencing one block (audible
-        scratch).
-
-        Called proactively from the seek paths in ControlWindow. There's
-        a small race window — if an audio callback fires between
-        engine.seek_all() and notify_seek(), it'll see new media-time
-        with old smoother state and will resync-silence one block — but
-        that's microseconds, far less likely than the tens-of-ms window
-        without the proactive reset.
-        """
-        self._smoother.reset()
-
     def stop(self) -> None:
         """Close the audio device. Safe to call multiple times."""
         with self._lock:

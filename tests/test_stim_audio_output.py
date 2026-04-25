@@ -335,11 +335,11 @@ class TestTimeSmoother:
         sm.update(steady2, media_time=180.0, sample_rate=sample_rate)
         assert sm.offset == pytest.approx(180.0 - float(steady2[-1]))
 
-    def test_notify_seek_via_reset_does_not_count_as_auto_resync(self):
-        """Explicit reset (StimAudioStream.notify_seek) lets the next
-        update adopt wholesale via the first-callback path, NOT the
-        auto-resync path. Keeps the auto_resync_count accurate as a
-        signal of unexpected jumps (paused state, missed seeks)."""
+    def test_reset_does_not_count_as_auto_resync(self):
+        """Explicit reset() lets the next update adopt wholesale via the
+        first-callback path, NOT the auto-resync path. Keeps the
+        auto_resync_count accurate as a signal of unexpected jumps
+        (paused state, real seeks that auto-resync handles)."""
         sm = _TimeSmoother()
         sample_rate = 48000
 

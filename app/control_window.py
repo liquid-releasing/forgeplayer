@@ -2185,7 +2185,6 @@ class ControlWindow(QMainWindow):
         dur = self._engine.get_duration()
         new_pos = max(0.0, min(pos + seconds, dur))
         self._engine.seek_all(new_pos)
-        self._notify_stim_seek()
 
     def _on_seek_press(self) -> None:
         self._seek_dragging = True
@@ -2195,26 +2194,7 @@ class ControlWindow(QMainWindow):
         if dur > 0:
             pos = (self._seek_bar.value() / 10000.0) * dur
             self._engine.seek_all(pos)
-            self._notify_stim_seek()
         self._seek_dragging = False
-
-    def _notify_stim_seek(self) -> None:
-        """Tell every active stim stream that a seek just landed so its
-        time smoother re-initializes on the next callback. Without this,
-        the smoother sees a >1 s jump in media-time on the next read,
-        trips its ResyncRequired path, and silences one audio block —
-        audible as a brief scratch on every seek."""
-        for i in range(3):
-            data = self._slot_data(i)
-            stream = data.get("stim_audio_stream")
-            if stream is not None:
-                try:
-                    stream.notify_seek()
-                except Exception as exc:
-                    DebugLog.record(
-                        "stim.notify_seek_failed",
-                        slot=i, error=repr(exc),
-                    )
 
     # ── Poll timer ─────────────────────────────────────────────────────────────
 
