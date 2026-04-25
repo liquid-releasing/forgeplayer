@@ -268,12 +268,12 @@ class ControlWindow(QMainWindow):
         # Order: Synthesis | Audio device roles | Monitors. Synthesis first
         # because it shapes the experience (algorithm + offset) — once you
         # pick it, audio devices and monitors are "where it goes."
-        # Stretch ratios 2:3:2 — audio devices want extra room for long
-        # device names like "[21] Speakers (USB Audio Device)"; synthesis
-        # is just radio buttons + a spinbox so it can be narrower.
-        columns.addWidget(self._build_setup_synth_page(), 2)
-        columns.addWidget(self._build_setup_audio_page(), 3)
-        columns.addWidget(self._build_setup_monitors_page(), 2)
+        # Equal stretch — combo size policies (AdjustToMinimumContentsLength)
+        # let each column shrink its dropdowns; long device names and
+        # screen labels still show fully when the dropdown is opened.
+        columns.addWidget(self._build_setup_synth_page(), 1)
+        columns.addWidget(self._build_setup_audio_page(), 1)
+        columns.addWidget(self._build_setup_monitors_page(), 1)
         outer.addLayout(columns, 1)
 
         outer.addWidget(self._setup_status)
@@ -490,6 +490,17 @@ class ControlWindow(QMainWindow):
 
         self._setup_control_screen_combo = QComboBox()
         self._setup_control_screen_combo.setMinimumHeight(32)
+        # Same shrink policy as the audio role combos — long screen
+        # labels like "Screen 1  —  3840×1080  (Odyssey G95NC)" can
+        # otherwise pin the column wider than its allocation and clip
+        # neighboring text.
+        self._setup_control_screen_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._setup_control_screen_combo.setMinimumContentsLength(12)
+        self._setup_control_screen_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         self._setup_control_screen_combo.addItem("— auto —", -1)
         for idx, s in enumerate(self._screens):
             geo = s.geometry()
