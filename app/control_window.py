@@ -712,7 +712,7 @@ class ControlWindow(QMainWindow):
         DebugLog.record(
             "setup.test_device",
             device=device_id or "(not set)",
-            kind="haptic" if is_haptic else "speaker",
+            role="haptic" if is_haptic else "speaker",
         )
         if not device_id:
             self._setup_status.setText("Pick a device first, then press Test.")
