@@ -276,4 +276,8 @@ jobs:
 
             Questions, bug reports, and feedback welcome in [our Discord](https://discord.gg/sZWCqgxY).
           append_body: true
-          generate_release_notes: false
+          # Auto-prepend the commit/PR list since the previous tag.
+          # Cross-project policy (FA, FunscriptForge, ForgeYT, FP) —
+          # cheap per-version notes for minor releases; curated body
+          # via CHANGELOG / tag-message for major/marketing releases.
+          generate_release_notes: true
