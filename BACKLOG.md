@@ -7,6 +7,8 @@ Items are roughly grouped by phase but not strictly ordered.
 
 ## Phase 1 — Sync Foundation (in progress)
 
+alpha
+
 - [x] rename eHaptic Studio Player to ForgePlayer
 - [x] rename syncplayer in this project to ForgePlayer (syncplayer project is the video wall industrial version)
 - [ ] Loop mode (loop a single file or all slots)
@@ -23,9 +25,11 @@ Items are roughly grouped by phase but not strictly ordered.
 
 ## Phase 1.1 - UI controller
 
+alpha
+
 - [ ] Review spec, discuss, make changes
 - [ ] Revise architecture as needed
-- [ ] Incroporate controller for app (no keyboard)
+- [ ] Incorporate controller for app (no keyboard)
 - [ ] support device selection
 - [ ] support full screen video with multiple files fitting into the right window
 - [ ] provide user options on how to display in ultrawide: crop to fit (high medium low), two instances side by side, or Pillarboxes
@@ -69,18 +73,20 @@ v2 features
 v2
 
 - [ ] Ability to generate additional motion or fill script gaps using random, script, pattern or custom curve motion providers
+- [ ] support for vibe devices
 
 ## Phase 4 — Polish
 
 v1 feature
 
-- [ ] PyInstaller packaging (Windows .exe, macOS .app)
+- [x] PyInstaller packaging (Windows .exe, macOS .app)
 - [ ] Multi-funscript layering (primary + accent track per slot)
 - [ ] Auto-update check (point to funscriptforge-releases or dedicated release feed)
 - [ ] In-app mpv.dll download helper for Windows users
 - [ ] Theming / custom accent color
 - [ ] Script heatmap of main funscript with range and heat visualization
 - [ ] Support event.yml integration
+- [ ] **forgegen handoff** — when loading a funscript that has a sibling `<stem>.analysis.json` (forgegen v0.1+ sidecar), surface its `structural.chapter_proposals` as quick-jump chapter markers; later, visualize the source-energy track alongside the heatmap. Symmetric to the FunscriptForge auto-load pattern.
 
 ---
 
@@ -102,9 +108,9 @@ v2
 
 ---
 
-## Bugs & Dogfood Follow-ups (v0.0.2 → v0.0.3)
+## v0.0.3 — Dogfood Polish
 
-- [ ] **White-screen-after-double-click** intermittent — reproduced ~3x in v002 dogfood. Library double-click → both video panes white, won't respond to Play. App restart only recovery. Capture stderr cleanly when it recurs (`python main.py 2> mpv-err.txt`); auto-exported debug log will be available too. Suspects: mpv vs Qt window race, GL context lost from prior session, single+double-click double-fire in handler.
+- [ ] **White-screen-after-double-click intermittent** — reproduced ~3x in v0.0.2 dogfood; **not seen since (as of 2026-04-29)**. Library double-click → both video panes white, won't respond to Play. App restart only recovery. May have been incidentally fixed by v0.0.2-onward stim-audio / startup-timing work. Demoted from blocker to monitor — capture stderr if it recurs (`python main.py 2> mpv-err.txt`). Original suspects: mpv vs Qt window race, GL context loss from prior session, single+double-click double-fire in handler. Close after a clean v0.0.3 dogfood pass.
 - [ ] **Apply Setup algorithm change without restart** — Continuous ↔ Pulse picker change is captured at player launch only. Mid-session change requires close + relaunch to take effect. Either restart the stim stream on prefs change or document the behavior in the picker subtitle.
 - [ ] **Wire Haptic 2 routing** — Setup combo for Haptic 2 exists but the second stim channel isn't dispatched yet. Useful for prostate / second-stim-device users.
 - [ ] **Verify no clicks when advancing across scene / chapter boundaries** — v002 audio quality work covers within-scene playback only. Auto-advance + chapter-end behavior is untested. Gate before any playlist or chapter-jump UI ships.
