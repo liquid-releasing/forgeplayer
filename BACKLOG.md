@@ -21,6 +21,7 @@ alpha
 - [ ] play representative sample for user to calibrate hardware settings without starting video or audio
 - [ ] mkdocs User docs
 - [ ] **Reorder + split tabs** — left-to-right: **Library** → **Live** → **Settings** (audio + video devices) → **Preferences** (pulse vs continuous, plus other behavior toggles to come). Splits the current Setup tab into a hardware-routing tab (Settings) and a behavior tab (Preferences). Natural place to also resolve the v0.0.3 "Apply Setup algorithm change without restart" item — Preferences-tab toggles should take effect mid-session.
+- [ ] **Add third monitor** — light up the third output already in the v0.0.1 spec ("same video, full-screen, across up to three output monitors"). Today's build supports up to two; extend slot/window plumbing + Settings device-routing to expose monitor 3, with the same frame-perfect single-decoder / N-render-surfaces sync as monitors 1–2.
 
 ---
 
