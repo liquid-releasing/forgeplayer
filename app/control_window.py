@@ -326,11 +326,13 @@ class ControlWindow(QMainWindow):
         ))
         rl.addLayout(self._labeled_row_with_test(
             "Haptic 2 (prostate)", self._setup_haptic2_combo,
-            "Optional prostate output. Leave unset if unused.",
+            "Optional prostate output. Same device family as Haptic 1 "
+            "recommended for tight sync.",
             is_haptic=True,
         ))
 
         root.addWidget(role_box)
+        root.addWidget(self._build_setup_haptic2_fallback_box())
         root.addStretch()
 
         scroll.setWidget(inner)
@@ -430,6 +432,65 @@ class ControlWindow(QMainWindow):
             "Shift the stim signal relative to video. Positive = stim "
             "leads; negative = stim lags. Compensates for USB / driver "
             "latency."
+        ))
+
+        return box
+
+    def _build_setup_haptic2_fallback_box(self) -> QGroupBox:
+        """Picker for what Haptic 2 plays when the scene has no prostate
+        source (no `alpha-prostate`/`beta-prostate` funscripts and no
+        sibling `<stem>.prostate.wav`).
+
+        Lives next to the Haptic 2 device picker because it modifies
+        that device's behavior. Will migrate to the planned Preferences
+        tab during the Library / Live / Settings / Preferences reorder.
+        """
+        box = QGroupBox("Haptic 2 — no prostate source")
+        layout = QVBoxLayout(box)
+        layout.setSpacing(8)
+
+        layout.addWidget(self._make_help_label(
+            "If a scene has no prostate funscripts and no "
+            "<stem>.prostate.wav file, what should the Haptic 2 device "
+            "play?"
+        ))
+
+        self._setup_h2fb_group = QButtonGroup(self)
+        self._setup_h2fb_silent = QRadioButton("Silent (default)")
+        self._setup_h2fb_mirror = QRadioButton("Mirror Haptic 1")
+        self._setup_h2fb_video = QRadioButton("Video soundtrack")
+        self._setup_h2fb_group.addButton(self._setup_h2fb_silent, 0)
+        self._setup_h2fb_group.addButton(self._setup_h2fb_mirror, 1)
+        self._setup_h2fb_group.addButton(self._setup_h2fb_video, 2)
+
+        fb = self._prefs.haptic2_fallback
+        if fb == "mirror_h1":
+            self._setup_h2fb_mirror.setChecked(True)
+        elif fb == "video_soundtrack":
+            self._setup_h2fb_video.setChecked(True)
+        else:
+            self._setup_h2fb_silent.setChecked(True)
+
+        self._setup_h2fb_group.idToggled.connect(
+            lambda _id, checked: self._on_setup_changed() if checked else None
+        )
+
+        layout.addWidget(self._setup_h2fb_silent)
+        layout.addWidget(self._make_help_label(
+            "Haptic 2 stays silent unless the scene provides prostate content."
+        ))
+        layout.addSpacing(2)
+        layout.addWidget(self._setup_h2fb_mirror)
+        layout.addWidget(self._make_help_label(
+            "Haptic 2 plays the same stim signal as Haptic 1 — identical "
+            "synthesis on a second dongle."
+        ))
+        layout.addSpacing(2)
+        layout.addWidget(self._setup_h2fb_video)
+        layout.addWidget(self._make_help_label(
+            "Reserved — mpv audio fan-out is not implemented yet. "
+            "Currently behaves the same as 'Silent'; the value persists "
+            "across versions for when the feature lands."
         ))
 
         return box
@@ -780,6 +841,12 @@ class ControlWindow(QMainWindow):
             self._prefs.audio_algorithm = "pulse"
         else:
             self._prefs.audio_algorithm = "continuous"
+        if self._setup_h2fb_mirror.isChecked():
+            self._prefs.haptic2_fallback = "mirror_h1"
+        elif self._setup_h2fb_video.isChecked():
+            self._prefs.haptic2_fallback = "video_soundtrack"
+        else:
+            self._prefs.haptic2_fallback = "silent"
         self._prefs.haptic_offset_ms = int(self._setup_offset_spin.value())
         self._prefs.save()
         DebugLog.record(
@@ -788,6 +855,7 @@ class ControlWindow(QMainWindow):
             haptic1=bool(self._prefs.haptic1_audio_device),
             haptic2=bool(self._prefs.haptic2_audio_device),
             algo=self._prefs.audio_algorithm,
+            haptic2_fallback=self._prefs.haptic2_fallback,
             offset_ms=self._prefs.haptic_offset_ms,
         )
         self._setup_status.setText(f"Saved to {Preferences.path()}")
@@ -1455,6 +1523,12 @@ class ControlWindow(QMainWindow):
             # Live StimAudioStream while playing — kept here so
             # _close_players can stop it during teardown.
             "stim_audio_stream": None,
+            # Auxiliary streams piggy-backing on this slot's launch
+            # (Haptic 2 prostate output today; future MP4-audio fan-out
+            # to e.g. headset + body-shaker arrays). Each entry is a
+            # StimAudioStream whose source is either a second StimSynth
+            # (prostate or mirror) or an AudioFilePlaybackSource.
+            "aux_audio_streams": [],
             "monitor_combo":  monitor_combo,
             "audio_combo":    audio_combo,
             "volume_slider":  volume_slider,
@@ -1915,22 +1989,52 @@ class ControlWindow(QMainWindow):
         # the synth's media-sync callback reads mpv state, so killing
         # mpv first could let an in-flight callback see a half-torn-down
         # player. Stop streams first, then mpv.
+        #
+        # Parallel-stop: each StimAudioStream.stop() blocks ~40 ms on a
+        # GUI-thread sleep waiting for the fade-out to complete. With one
+        # primary plus one aux stream per slot (Haptic 2 prostate, future
+        # MP4 fan-outs), serial stops would compound into noticeable lag
+        # on close. Threadpool-parallel stops keep the overall close at
+        # ~40 ms regardless of stream count.
+        from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+        all_streams: list[tuple[int, str, object]] = []
         for i in range(3):
             data = self._slot_data(i)
-            stream = data.get("stim_audio_stream")
-            if stream is not None:
-                try:
-                    underruns = stream.underrun_count
-                    resyncs = stream.resync_count
-                    stream.stop()
-                except Exception as exc:
-                    DebugLog.record("stim.stream_stop_error", slot=i, error=repr(exc))
-                else:
-                    DebugLog.record(
-                        "stim.stream_closed",
-                        slot=i, underruns=underruns, resyncs=resyncs,
-                    )
-                data["stim_audio_stream"] = None
+            primary = data.get("stim_audio_stream")
+            if primary is not None:
+                all_streams.append((i, "primary", primary))
+            for aux in data.get("aux_audio_streams") or []:
+                all_streams.append((i, "aux", aux))
+
+        if all_streams:
+            with ThreadPoolExecutor(max_workers=len(all_streams)) as pool:
+                futures = {
+                    pool.submit(s.stop): (slot, role, s)
+                    for slot, role, s in all_streams
+                }
+                for fut in futures:
+                    slot, role, stream = futures[fut]
+                    try:
+                        fut.result()
+                    except Exception as exc:
+                        DebugLog.record(
+                            "stim.stream_stop_error",
+                            slot=slot, role=role, error=repr(exc),
+                        )
+                    else:
+                        DebugLog.record(
+                            "stim.stream_closed",
+                            slot=slot, role=role,
+                            underruns=getattr(stream, "underrun_count", 0),
+                            resyncs=getattr(stream, "resync_count", 0),
+                        )
+
+        # Clear references after all threads have completed.
+        for i in range(3):
+            data = self._slot_data(i)
+            data["stim_audio_stream"] = None
+            data["aux_audio_streams"] = []
         # Terminate every engine slot — including audio-only slots that
         # don't have a PlayerWindow — so no mpv instances leak.
         for i in range(3):
@@ -2077,7 +2181,222 @@ class ControlWindow(QMainWindow):
             source=channels.source,
             device=stream.device_name or "(default)",
         )
+
+        # Haptic 2 aux output. Best-effort — failure here logs but does
+        # not fail the primary launch (user still gets Haptic 1 stim
+        # working even if their H2 device is unplugged or misconfigured).
+        try:
+            self._maybe_launch_haptic2_aux(
+                slot_idx=slot_idx,
+                slot_data=slot_data,
+                funscript_set=funscript_set,
+                primary_channels=channels,
+                primary_sample_rate=device_rate,
+                mpv_devices=mpv_devices,
+                time_source=time_source,
+                is_playing_source=is_playing_source,
+                media_sync=media_sync,
+            )
+        except Exception as exc:
+            DebugLog.record(
+                "stim.aux_launch_unexpected_error",
+                slot=slot_idx, error=repr(exc),
+            )
+
         return True
+
+    def _maybe_launch_haptic2_aux(
+        self,
+        *,
+        slot_idx: int,
+        slot_data: dict,
+        funscript_set,
+        primary_channels,
+        primary_sample_rate: int,
+        mpv_devices: list[dict],
+        time_source,
+        is_playing_source,
+        media_sync,
+    ) -> None:
+        """Spawn the Haptic 2 auxiliary audio stream when configured.
+
+        Source-detection cascade (per scene):
+
+          1. Prostate funscripts (`alpha-prostate` + `beta-prostate`) →
+             second StimSynth with `prostate=True` channels.
+          2. Sibling `<stem>.prostate.wav` → AudioFilePlaybackSource
+             (option B: requires matching device sample rate, fails clean).
+          3. Neither present → user-selected `haptic2_fallback` preference:
+               - `silent`         : no aux stream
+               - `mirror_h1`      : second StimSynth with the SAME primary
+                                    channels (Haptic 2 plays exactly what
+                                    Haptic 1 plays — identical math, no
+                                    state sharing for thread safety)
+               - `video_soundtrack`: deferred (mpv fan-out not implemented
+                                    yet); falls through to silent.
+
+        All failures inside this method are logged and swallowed —
+        Haptic 2 is auxiliary; primary stim must keep working.
+        """
+        h2_device = self._prefs.haptic2_audio_device
+        if not h2_device:
+            return  # User hasn't configured a Haptic 2 device.
+
+        # Refuse to open the same device twice — would conflict with
+        # primary stream's exclusive output handle.
+        h1_device = self._prefs.haptic1_audio_device
+        if h1_device and h1_device == h2_device:
+            DebugLog.record(
+                "stim.aux_skip_same_device",
+                slot=slot_idx, device=h2_device,
+                reason="Haptic 2 picker matches Haptic 1 — refusing to open twice",
+            )
+            return
+
+        # Lazy imports — keep the audio stack out of cold-start when the
+        # user's not playing a stim scene.
+        from app.funscript_loader import (  # noqa: PLC0415
+            detect_prostate_source, load_stim_channels,
+        )
+        from app.stim_audio_output import (  # noqa: PLC0415
+            AudioFilePlaybackSource, StimAudioStream,
+            query_device_sample_rate, resolve_audio_device,
+        )
+        from app.stim_synth import StimSynth  # noqa: PLC0415
+
+        # Resolve the Haptic 2 device + its native sample rate up front.
+        # We require similar devices (same family); mismatched rates just
+        # log a warning and proceed — the user only sees pitch/timing
+        # weirdness, not a crash.
+        h2_handle = resolve_audio_device(h2_device, mpv_devices)
+        h2_rate = query_device_sample_rate(h2_handle)
+        if primary_sample_rate != h2_rate:
+            DebugLog.record(
+                "stim.aux_rate_mismatch",
+                slot=slot_idx,
+                primary_rate=primary_sample_rate, h2_rate=h2_rate,
+                note="Recommended: Haptic 2 device family should match "
+                     "Haptic 1 for tight sync.",
+            )
+
+        src = detect_prostate_source(funscript_set)
+
+        # Diagnostic: defense-in-depth log for partial prostate. Edger's
+        # tool emits both alpha-prostate AND beta-prostate; if we ever
+        # see a scene with only one, surface it so the user knows why
+        # Haptic 2 isn't synthing prostate.
+        if src.kind == "none":
+            has_alpha_p = "alpha-prostate" in funscript_set.channels
+            has_beta_p = "beta-prostate" in funscript_set.channels
+            if has_alpha_p ^ has_beta_p:
+                DebugLog.record(
+                    "stim.partial_prostate",
+                    slot=slot_idx,
+                    base_stem=funscript_set.base_stem,
+                    has_alpha_prostate=has_alpha_p,
+                    has_beta_prostate=has_beta_p,
+                    note="ForgePlayer requires both alpha-prostate and "
+                         "beta-prostate funscripts for the prostate synth path.",
+                )
+
+        # Build the source object based on the detection result.
+        aux_source = None
+        aux_kind: str = ""
+
+        if src.kind == "funscripts":
+            try:
+                prostate_channels = load_stim_channels(funscript_set, prostate=True)
+            except ValueError as exc:
+                DebugLog.record(
+                    "stim.aux_prostate_load_failed",
+                    slot=slot_idx, error=repr(exc),
+                )
+                return
+            if prostate_channels is None:
+                # Shouldn't happen — detect_prostate_source already
+                # confirmed both files exist. Defensive guard.
+                DebugLog.record(
+                    "stim.aux_prostate_unexpected_none", slot=slot_idx,
+                )
+                return
+            aux_source = StimSynth(
+                prostate_channels, media_sync,
+                waveform=self._prefs.audio_algorithm,
+                sample_rate=h2_rate,
+            )
+            aux_kind = "prostate_synth"
+
+        elif src.kind == "audio_file":
+            try:
+                aux_source = AudioFilePlaybackSource(
+                    src.audio_path, h2_rate,
+                )
+            except (ValueError, OSError) as exc:
+                # Sample-rate mismatch, unsupported format, file IO
+                # error — surface for debugging, fall through to silent
+                # rather than guessing at a fallback (the user
+                # explicitly placed this file).
+                DebugLog.record(
+                    "stim.aux_audio_file_failed",
+                    slot=slot_idx,
+                    path=str(src.audio_path),
+                    error=repr(exc),
+                )
+                return
+            aux_kind = "audio_file"
+
+        else:
+            # No prostate source — fall back to user pref.
+            fallback = self._prefs.haptic2_fallback
+            if fallback == "mirror_h1":
+                # Spawn a SECOND StimSynth with the primary channels.
+                # Two synth instances rather than sharing one — vendored
+                # restim algorithms aren't documented as thread-safe
+                # under concurrent generate_audio() calls, so we pay
+                # the doubled-CPU cost for correctness.
+                aux_source = StimSynth(
+                    primary_channels, media_sync,
+                    waveform=self._prefs.audio_algorithm,
+                    sample_rate=h2_rate,
+                )
+                aux_kind = "mirror_h1"
+            else:
+                # silent (default) or video_soundtrack (deferred).
+                DebugLog.record(
+                    "stim.aux_silent",
+                    slot=slot_idx, fallback=fallback,
+                    reason="no prostate source and fallback resolves to silent",
+                )
+                return
+
+        if aux_source is None:
+            return
+
+        aux_stream = StimAudioStream(
+            synth=aux_source,
+            time_source=time_source,
+            device_id=h2_device,
+            mpv_devices=mpv_devices,
+            is_playing_source=is_playing_source,
+        )
+        try:
+            aux_stream.start()
+        except Exception as exc:
+            DebugLog.record(
+                "stim.aux_stream_open_failed",
+                slot=slot_idx, kind=aux_kind, device=h2_device,
+                error=repr(exc),
+            )
+            return
+
+        slot_data.setdefault("aux_audio_streams", []).append(aux_stream)
+        DebugLog.record(
+            "stim.aux_stream_opened",
+            slot=slot_idx,
+            kind=aux_kind,
+            device=aux_stream.device_name or "(default)",
+            sample_rate=h2_rate,
+        )
 
     def _on_launch(self) -> None:
         DebugLog.record("players.launch_request")

@@ -15,6 +15,7 @@ in `mkdocs.yml` (or move to `docs/internal/architecture/` and exclude
 | [restim-channels.md](restim-channels.md) | Devs + scripters | Canonical list of restim-recognized funscript filenames; what's restim's vs ours. |
 | [stim-synthesis.md](stim-synthesis.md) | Devs | Phase tracking + device support matrix + channel consumption table for the v0.0.2 native funscript playback path. |
 | [funscript-implementation.md](funscript-implementation.md) | Upstream maintainers (Edger, diglet48) + devs | Read-along companion to `funscript-tools/FUNDAMENTAL_OPERATIONS.md` and restim source — describes how ForgePlayer consumes each channel + operation. Includes "open questions for upstream" section. |
+| [audio-routing.md](audio-routing.md) | Devs | The control panel's source→destination model: audio-source protocol (`sample_rate` + `generate_block_with_clocks`), aux streams, source-detection cascade, threading. Read this before adding a new source class or destination role. |
 
 ## What this folder is NOT
 

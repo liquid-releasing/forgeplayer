@@ -68,6 +68,16 @@ v2 features
 - [ ] Low-latency audio output path to keep haptic sync tight with video
 - [ ] UI: "Haptic output" combo per slot — choose between serial port or audio channel
 
+### Source fan-out + pluggable sources
+Builds on the v0.0.3 audio-routing architecture (see [docs/architecture/audio-routing.md](docs/architecture/audio-routing.md)). A source instance can drive multiple destinations; new source kinds slot in by implementing `sample_rate` + `generate_block_with_clocks` and registering a detection branch.
+
+- [ ] **MP4 audio fan-out** — same scene-audio source on more than one destination. Real motivation: user has a headset + a body-shaker array, wants the video sound on both simultaneously. Implementation: `MPVAudioTapSource` (or a dual-decode path) → multiple `StimAudioStream` instances. Probably feeds via mpv's `lavfi` filter chain or a duplicate audio decode.
+- [ ] **`.tact` file source** — bHaptics-format vest file decoded into PCM. `BHapticsTactSource` class implementing the audio-source protocol; detection by sibling-file naming convention.
+- [ ] **TCode-driven mechanical source** — render TCode v0.2/v0.3 commands as the audio waveform that audio-driven mechanical actuators expect. Rare hardware; ship after we know there's demand.
+- [ ] **Beat-driven shaker source** — forgegen-side: audio track → beat tracker → shaker `.funscript`. ForgePlayer-side: just consume the funscript as another channel. The "source" classes already exist; only the channel naming/routing convention is new.
+- [ ] **Live-capture source** — WASAPI loopback / BlackHole capture → real-time haptic generation (also covered in Phase 5; consolidate when implementing).
+- [ ] **Pluggable source registry** — formalize the audio-source protocol as a `typing.Protocol` and add a registry so detection / dispatch isn't hard-coded in `_maybe_launch_haptic2_aux`-style methods. Defer until 4+ source classes exist; current branching is fine for 2.
+
 ---
 
 ## Phase 2a - Mechanical

@@ -30,6 +30,17 @@ _PREFS_PATH = Path.home() / ".forgeplayer" / "preferences.json"
 # families on one rig.
 AudioAlgorithm = Literal["continuous", "pulse"]
 
+# What to play on the Haptic 2 (prostate) device when the scene has no
+# prostate source (no `alpha-prostate`/`beta-prostate` funscripts and no
+# `<stem>.prostate.wav` file). `silent` is the safe default — the user
+# only picked Haptic 2 because they have a second dongle, not because they
+# want surprise output. `mirror_h1` is the "feel the same stim everywhere"
+# choice (the Haptic 2 dongle plays the main stim synth identically to
+# Haptic 1). `video_soundtrack` is reserved for a later release — the
+# UI accepts the value so that prefs files survive a downgrade, but the
+# launch path falls through to silent until the mpv-fan-out work lands.
+Haptic2Fallback = Literal["silent", "mirror_h1", "video_soundtrack"]
+
 
 @dataclass
 class Preferences:
@@ -43,6 +54,11 @@ class Preferences:
     scene_audio_device: str = ""
     haptic1_audio_device: str = ""
     haptic2_audio_device: str = ""
+    # When the loaded scene has no prostate source (neither
+    # `alpha-prostate` + `beta-prostate` funscripts nor a sibling
+    # `<stem>.prostate.wav`), this controls what the Haptic 2 dongle
+    # plays. See `Haptic2Fallback` above for the option semantics.
+    haptic2_fallback: Haptic2Fallback = "silent"
     # Synthesis algorithm — see AudioAlgorithm above.
     audio_algorithm: AudioAlgorithm = "continuous"
     # Constant offset applied to the haptic stream's media-time. Positive
@@ -69,6 +85,10 @@ class Preferences:
         # back to default rather than crash the synth at launch time.
         if clean.get("audio_algorithm") not in ("continuous", "pulse"):
             clean.pop("audio_algorithm", None)
+        if clean.get("haptic2_fallback") not in (
+            "silent", "mirror_h1", "video_soundtrack",
+        ):
+            clean.pop("haptic2_fallback", None)
         # Coerce offset to int and clamp to safety range.
         if "haptic_offset_ms" in clean:
             try:

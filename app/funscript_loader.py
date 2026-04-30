@@ -48,6 +48,60 @@ from app.library.catalog import FunscriptSet
 
 
 @dataclass(frozen=True)
+class ProstateSource:
+    """What prostate audio source is available for a scene.
+
+    `kind`:
+      - `"funscripts"` — both `alpha-prostate` and `beta-prostate`
+        funscripts exist; use the synth path (`load_stim_channels(prostate=True)`).
+      - `"audio_file"` — sibling `<stem>.prostate.wav` exists; use the
+        file-playback path. `audio_path` is the absolute path.
+      - `"none"` — no prostate source; caller falls back to the
+        user-selected `haptic2_fallback` preference.
+
+    Funscripts win when both forms are present (synth is more flexible
+    and runs at the device rate without resampling concerns).
+    """
+    kind: Literal["funscripts", "audio_file", "none"]
+    audio_path: Path | None = None
+
+
+def detect_prostate_source(funscript_set: FunscriptSet) -> ProstateSource:
+    """Decide what to feed the Haptic 2 dongle for this scene.
+
+    Priority: prostate funscript pair > sibling `<stem>.prostate.wav` > none.
+    Always returns a `ProstateSource` — never raises. Caller picks fallback
+    behavior on `kind=="none"` from `Preferences.haptic2_fallback`.
+
+    The audio-file detection looks in the same directory as the main
+    funscript file (or, if no main, the parent of any channel file). If
+    `funscript_set` somehow has neither a main path nor any channel paths
+    (shouldn't happen in practice — it'd be an empty set), we return
+    `none` and the caller falls through cleanly.
+    """
+    has_alpha_prostate = "alpha-prostate" in funscript_set.channels
+    has_beta_prostate = "beta-prostate" in funscript_set.channels
+
+    if has_alpha_prostate and has_beta_prostate:
+        return ProstateSource(kind="funscripts")
+
+    # Audio file fallback. Look next to the main funscript (or any channel
+    # file if there's no main) for `<base_stem>.prostate.wav`.
+    base_dir: Path | None = None
+    if funscript_set.main_path:
+        base_dir = Path(funscript_set.main_path).parent
+    elif funscript_set.channels:
+        base_dir = Path(next(iter(funscript_set.channels.values()))).parent
+
+    if base_dir is not None:
+        candidate = base_dir / f"{funscript_set.base_stem}.prostate.wav"
+        if candidate.exists() and candidate.is_file():
+            return ProstateSource(kind="audio_file", audio_path=candidate)
+
+    return ProstateSource(kind="none")
+
+
+@dataclass(frozen=True)
 class FunscriptActions:
     """Sparse action samples loaded from a single .funscript file.
 

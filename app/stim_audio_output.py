@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -321,6 +322,144 @@ class _TimeSmoother:
         # a step at the block boundary.
         offset_ramp = np.linspace(prev_offset, self.offset, n, endpoint=False)
         return steady_clock + offset_ramp
+
+
+class AudioFilePlaybackSource:
+    """Pre-rendered audio-file source compatible with StimAudioStream.
+
+    Mirrors StimSynth's interface — exposes a `sample_rate` attribute and
+    a `generate_block_with_clocks(steady_clock, system_time_estimate)`
+    method — so a `<stem>.prostate.wav` can drive the same audio output
+    pipeline as live synthesis. No new StimAudioStream variant needed;
+    pass an instance of this class where you'd pass a `StimSynth`.
+
+    Loads the file once at construction. Playback is read-only and
+    thread-safe across audio callbacks (the underlying numpy array is
+    immutable after `__init__`).
+
+    Sample-rate handling is **option B (require, don't resample)**:
+    we raise on mismatch with a clear "re-export at <rate> Hz" message.
+    Resampling is out of scope for v0.0.3 — pre-rendered prostate WAVs
+    are rare (forgegen-family doesn't yet emit them; we may be the
+    first tool consuming them). Adding `librosa.resample` is a future
+    enhancement if real-world usage shows frequent mismatches.
+
+    Format constraints (stdlib `wave` module):
+      - Container: RIFF/WAV
+      - Encoding: PCM (8/16/24/32-bit signed integer; 8-bit unsigned)
+      - Channels: 1 (auto-tiled to stereo) or 2 (used as-is); 3+ takes L/R only
+      - Float WAV is rejected by `wave.open` and surfaces as a clear error
+    """
+
+    # sounddevice can report the device default rate as e.g. 44099.999 vs
+    # 44100; allow a tiny tolerance so off-by-rounding doesn't reject
+    # legitimately-matched files.
+    SAMPLE_RATE_TOLERANCE_HZ = 1
+
+    def __init__(self, file_path: Path, target_sample_rate: int) -> None:
+        # stdlib `wave` — narrow but no extra dep. Force lazy import so
+        # this module loads cleanly even on environments that have a
+        # broken `wave` shim (rare but possible in some embedded builds).
+        import wave  # noqa: PLC0415
+
+        with wave.open(str(file_path), "rb") as wf:
+            file_rate = wf.getframerate()
+            n_channels = wf.getnchannels()
+            sample_width = wf.getsampwidth()  # bytes per sample
+            n_frames = wf.getnframes()
+            raw = wf.readframes(n_frames)
+
+        if abs(file_rate - target_sample_rate) > self.SAMPLE_RATE_TOLERANCE_HZ:
+            raise ValueError(
+                f"Audio file sample-rate mismatch: {file_path.name} is "
+                f"{file_rate} Hz, Haptic 2 device wants {target_sample_rate} Hz. "
+                f"Re-export the file at {target_sample_rate} Hz to use it on "
+                f"this device."
+            )
+
+        # Decode PCM → float32 in [-1, 1]. wave module guarantees PCM
+        # encoding (raises on float-WAV at open time) so the only branches
+        # are integer widths.
+        if sample_width == 1:
+            # 8-bit PCM is unsigned with bias 128 (per WAV spec).
+            arr = np.frombuffer(raw, dtype=np.uint8).astype(np.float32)
+            arr = (arr - 128.0) / 128.0
+        elif sample_width == 2:
+            arr = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        elif sample_width == 3:
+            # 24-bit PCM — packed as 3 bytes/sample, little-endian, signed.
+            # numpy doesn't have a native int24 dtype; expand to int32.
+            packed = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3)
+            int32 = (
+                packed[:, 0].astype(np.int32)
+                | (packed[:, 1].astype(np.int32) << 8)
+                | (packed[:, 2].astype(np.int32) << 16)
+            )
+            # Sign-extend bit 23 → bit 31.
+            int32 = np.where(int32 & 0x800000, int32 | ~0xFFFFFF, int32)
+            arr = int32.astype(np.float32) / float(1 << 23)
+        elif sample_width == 4:
+            arr = np.frombuffer(raw, dtype=np.int32).astype(np.float32)
+            arr /= float(1 << 31)
+        else:
+            raise ValueError(
+                f"Unsupported sample width: {sample_width} bytes. "
+                f"{file_path.name} must be 8/16/24/32-bit PCM."
+            )
+
+        # Reshape interleaved samples to (n_frames, n_channels).
+        arr = arr.reshape(-1, n_channels)
+
+        # Mono → stereo: duplicate to L+R. Multi-channel (5.1, 7.1) takes
+        # the first two channels rather than refusing the file.
+        if n_channels == 1:
+            arr = np.tile(arr, (1, 2))
+        elif n_channels >= 3:
+            arr = np.ascontiguousarray(arr[:, :2])
+
+        # Force C-contiguous so the audio callback's slice is zero-copy.
+        self._audio: np.ndarray = np.ascontiguousarray(arr, dtype=np.float32)
+        self.sample_rate: int = file_rate
+        # Stand-in for StimSynth's `waveform` attribute used in DebugLog —
+        # marks this source in logs as a non-synth playback path.
+        self.waveform: str = "audio_file"
+
+    def generate_block_with_clocks(
+        self,
+        steady_clock: np.ndarray,
+        system_time_estimate: np.ndarray,
+    ) -> np.ndarray:
+        """Read `frames` of stereo PCM from the loaded file at the
+        media-time position dictated by `system_time_estimate[0]`.
+
+        Same shape contract as `StimSynth.generate_block_with_clocks` —
+        returns `(frames, 2)` float32. Past end of file returns silence
+        (matches the synth's behavior at end-of-funscript). Pause is
+        handled outside this class by `StimAudioStream`'s fade gate.
+        """
+        frames = int(steady_clock.shape[0])
+        if frames == 0:
+            return np.zeros((0, 2), dtype=np.float32)
+
+        # Use start-of-block media time. Within-block jitter / smoothing
+        # would matter for synthesis (carrier phase) but pre-rendered
+        # audio plays at its native rate — sample-accurate seek per block
+        # is good enough.
+        start_t = float(system_time_estimate[0])
+        start_sample = max(0, int(start_t * self.sample_rate))
+
+        if start_sample >= len(self._audio):
+            return np.zeros((frames, 2), dtype=np.float32)
+
+        end_sample = start_sample + frames
+        block = self._audio[start_sample:end_sample]
+
+        if block.shape[0] < frames:
+            # File ends mid-block — pad with silence.
+            pad = np.zeros((frames - block.shape[0], 2), dtype=np.float32)
+            block = np.concatenate([block, pad], axis=0)
+
+        return np.ascontiguousarray(block, dtype=np.float32)
 
 
 class StimAudioStream:
