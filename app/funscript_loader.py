@@ -53,61 +53,59 @@ class ProstateSource:
 
     `kind`:
       - `"audio_file"` — sibling `<stem>.prostate.wav` exists; use the
-        file-playback path. `audio_path` is the absolute path. **This
-        is the preferred source** when both forms are present.
+        file-playback path. `audio_path` is the absolute path.
       - `"funscripts"` — `alpha-prostate` is present (beta-prostate and
         volume-prostate are optional). Use the synth path
         (`load_stim_channels(prostate=True)`); when beta-prostate is
         absent, beta is synthesized as zeros (single-pair signal).
-      - `"none"` — no prostate source; caller falls through to the
-        H1-mirror tier of the cascade.
+      - `"none"` — no prostate source; caller's per-port resolution
+        falls through to mirroring Haptic 1.
 
-    Audio files win over funscripts when both are present. Rationale: a
-    pre-rendered file goes through the mature decoder/PortAudio resync
-    path which handles seek-without-clicks robustly; the live synth path
-    has a known residual click rate (~7% in v0.0.2 dogfood) from steep
-    modulation edges intersecting fade windows. Pre-rendered prostate
-    WAVs are rare in the wild, so this priority flip mostly only matters
-    for scenes that ship both — and for those, the WAV is almost always
-    cleaner. See `docs/architecture/audio-routing.md` for the full
-    rationale.
+    When **both** an audio file and funscripts are available for the
+    same destination, the user's `content_preference` Setup pref
+    decides which wins (sound = audio file; funscript = synth). When
+    only one form is present, that form plays regardless of preference
+    (preference is a tie-breaker, never a filter). See
+    `docs/architecture/audio-routing.md` for the full rationale.
     """
     kind: Literal["funscripts", "audio_file", "none"]
     audio_path: Path | None = None
 
 
-def detect_prostate_source(funscript_set: FunscriptSet) -> ProstateSource:
+def detect_prostate_source(
+    funscript_set: FunscriptSet,
+    content_preference: Literal["sound", "funscript"] = "sound",
+) -> ProstateSource:
     """Decide what to feed the Haptic 2 dongle for this scene.
 
-    Priority: sibling `<stem>.prostate.wav` > `alpha-prostate` funscript
-    > none. Always returns a `ProstateSource` — never raises. Caller
-    falls through to the H1-mirror tier of the cascade on `kind=="none"`.
+    Per-port resolution rule (replaces v0.0.3's hard-coded "audio over
+    synth" cascade):
 
-    Audio files take priority over funscripts because the decoder-side
-    seek/buffer logic (mpv / PortAudio) is more mature than the live
-    synth's modulation handling, which has a known residual click rate
-    on seek and at fade-window boundaries. When a scene ships a
-    pre-rendered `<stem>.prostate.wav` somebody has already done the
-    work of producing a clean signal; we play it as-is rather than
-    re-synthesizing from the funscript at runtime.
+      1. Detect what's available for the prostate destination:
+         - audio_available  = sibling `<stem>.prostate.wav` exists
+         - funscript_available = `alpha-prostate` channel present
+      2. If both are available, the `content_preference` pref decides:
+         "sound" → audio_file; "funscript" → funscripts.
+      3. If only one is available, return that one regardless of pref.
+      4. If neither, return kind="none" — the caller falls through to
+         mirroring Haptic 1 (or silent if H1 has no content either).
 
     Real prostate funscripts in the wild ship `alpha-prostate` alone
     (Euphoria, Zer0 Game) or with optional `volume-prostate`. The pair
     `alpha-prostate` + `beta-prostate` is rare. We gate the funscript
-    branch solely on `alpha-prostate` so that single-channel prostate
-    scripts produce audible Haptic 2 output instead of falling silent.
-    When `beta-prostate` is absent the beta carrier is zero — correct
-    for single-pair prostate hardware.
+    branch solely on `alpha-prostate` so single-channel prostate scripts
+    produce audible Haptic 2 output. Beta defaults to zeros when absent.
 
     The audio-file detection looks in the same directory as the main
     funscript file (or, if no main, the parent of any channel file). If
     `funscript_set` somehow has neither a main path nor any channel paths
-    (shouldn't happen in practice — it'd be an empty set), the audio
-    file branch is skipped and we fall through to the funscript branch.
+    (shouldn't happen in practice), the audio branch is skipped.
+
+    Always returns a `ProstateSource` — never raises.
     """
-    # Audio file first (highest priority). Look next to the main
-    # funscript (or any channel file if there's no main) for
-    # `<base_stem>.prostate.wav`.
+    # Probe both forms first; decide by content_preference once we know
+    # what's actually available.
+    audio_path: Path | None = None
     base_dir: Path | None = None
     if funscript_set.main_path:
         base_dir = Path(funscript_set.main_path).parent
@@ -117,10 +115,20 @@ def detect_prostate_source(funscript_set: FunscriptSet) -> ProstateSource:
     if base_dir is not None:
         candidate = base_dir / f"{funscript_set.base_stem}.prostate.wav"
         if candidate.exists() and candidate.is_file():
-            return ProstateSource(kind="audio_file", audio_path=candidate)
+            audio_path = candidate
 
-    # Funscript fallback. alpha-prostate alone is sufficient.
-    if "alpha-prostate" in funscript_set.channels:
+    funscript_available = "alpha-prostate" in funscript_set.channels
+
+    # Both available → preference is the tie-breaker.
+    if audio_path is not None and funscript_available:
+        if content_preference == "funscript":
+            return ProstateSource(kind="funscripts")
+        return ProstateSource(kind="audio_file", audio_path=audio_path)
+
+    # Only one available → play it regardless of preference.
+    if audio_path is not None:
+        return ProstateSource(kind="audio_file", audio_path=audio_path)
+    if funscript_available:
         return ProstateSource(kind="funscripts")
 
     return ProstateSource(kind="none")

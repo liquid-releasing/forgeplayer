@@ -2356,51 +2356,55 @@ class ControlWindow(QMainWindow):
     ) -> None:
         """Spawn the Haptic 2 auxiliary audio stream when configured.
 
-        Source-detection cascade (per scene, no user preference involved
-        — the cascade is the policy):
+        Per-port resolution (replaces v0.0.3's hard-coded 4-tier cascade):
 
-          1. **Prostate WAV** — sibling `<stem>.prostate.wav` exists →
-             AudioFilePlaybackSource. Wins over funscripts when both
-             present: decoder-side resync handles seek-without-clicks
-             far better than the live synth's modulation, which has a
-             known residual click rate. See
-             `docs/architecture/audio-routing.md` for the full rationale.
-          2. **Prostate funscripts** — `alpha-prostate` present
-             (beta-prostate optional; volume-prostate optional) → second
-             StimSynth with prostate channels. Beta defaults to zeros
-             when absent (matches single-pair prostate hardware).
-          3. **Mirror Haptic 1** — neither prostate source available →
-             second StimSynth with the SAME primary channels. Haptic 2
-             plays exactly what Haptic 1 plays. Two synth instances
-             rather than sharing one — the vendored restim algorithms
-             aren't documented as thread-safe under concurrent
-             generate_audio() calls, so we pay the doubled-CPU cost for
-             correctness.
-          4. **Silent** — no second sound card configured (early-return
-             at the top of this method) OR Haptic 2 device matches
-             Haptic 1.
+          1. **Prostate-specific content** — sibling `<stem>.prostate.wav`
+             and/or `alpha-prostate` funscript channel. When both exist,
+             the user's Setup `content_preference` picks (sound vs
+             funscript). When only one exists, it plays regardless.
+          2. **Mirror Haptic 1** — no prostate-specific content → a
+             second StimSynth instance fed the SAME primary channels as
+             Haptic 1. Two synth instances (not shared) since the
+             vendored restim algorithms aren't documented as thread-safe
+             under concurrent `generate_audio()` calls.
+          3. **Silent** — Haptic 2 device unconfigured in Setup, or H2
+             device matches H1 (refuse to open twice on the same
+             exclusive handle). The Live tab's Output panel surfaces
+             this state with a `(silent — no source for this port)`
+             message; `slot_data["aux_silent_reason"]` carries the
+             human-readable explanation.
 
         All failures inside this method are logged and swallowed —
         Haptic 2 is auxiliary; primary stim must keep working.
         """
+        # Reset any prior session's state so the Live UI doesn't show
+        # stale source/silent info from a previous scene.
+        slot_data.pop("aux_resolved_source", None)
+        slot_data.pop("aux_silent_reason", None)
+
         h2_device = self._prefs.haptic2_audio_device
         if not h2_device:
-            # Tier 4 silent: no second sound card configured.
+            slot_data["aux_silent_reason"] = (
+                "Haptic 2 device not configured in Setup"
+            )
             DebugLog.record(
                 "stim.aux_resolved",
-                slot=slot_idx, tier=4, source_kind="silent",
-                reason="no Haptic 2 device configured in Setup",
+                slot=slot_idx, source_kind="silent",
+                reason=slot_data["aux_silent_reason"],
             )
             return
 
         # Refuse to open the same device twice — would conflict with
-        # primary stream's exclusive output handle. Tier 4 silent.
+        # primary stream's exclusive output handle.
         h1_device = self._prefs.haptic1_audio_device
         if h1_device and h1_device == h2_device:
+            slot_data["aux_silent_reason"] = (
+                "Haptic 2 device matches Haptic 1 — refusing to open twice"
+            )
             DebugLog.record(
                 "stim.aux_resolved",
-                slot=slot_idx, tier=4, source_kind="silent", device=h2_device,
-                reason="Haptic 2 picker matches Haptic 1 — refusing to open twice",
+                slot=slot_idx, source_kind="silent", device=h2_device,
+                reason=slot_data["aux_silent_reason"],
             )
             return
 
@@ -2445,15 +2449,19 @@ class ControlWindow(QMainWindow):
                      "Haptic 1 for tight sync.",
             )
 
-        src = detect_prostate_source(funscript_set)
+        src = detect_prostate_source(
+            funscript_set, self._prefs.content_preference,
+        )
 
-        # Build the source object based on the detection result. Tier
-        # numbers below mirror the cascade in this method's docstring —
-        # the resolved tier ships in the `stim.aux_resolved` event so
-        # diagnostics show exactly why Haptic 2 ended up where it did.
+        # Build the source object based on the resolved detection. The
+        # resolved kind ships in the `stim.aux_resolved` event AND lands
+        # on slot_data so the Live Output panel can label what's
+        # playing on this port (or display "(silent)" / "(mirror H1)").
         aux_source = None
         aux_kind: str = ""
-        aux_tier: int = 0
+        # Human-readable label for the Live Output panel. Empty for
+        # mirror_h1 (caller fills in from primary channels' source).
+        resolved_label: str = ""
 
         if src.kind == "audio_file":
             try:
@@ -2462,9 +2470,12 @@ class ControlWindow(QMainWindow):
                 )
             except (ValueError, OSError) as exc:
                 # Sample-rate mismatch, unsupported format, file IO
-                # error — surface for debugging, fall through to mirror
-                # rather than guessing at a recovery path (the user
-                # explicitly placed this file).
+                # error — surface for debugging. We don't auto-fall to
+                # mirror because the user explicitly placed this file;
+                # silently routing around it would mask the bug.
+                slot_data["aux_silent_reason"] = (
+                    f"Failed to open prostate audio file: {exc}"
+                )
                 DebugLog.record(
                     "stim.aux_audio_file_failed",
                     slot=slot_idx,
@@ -2473,12 +2484,15 @@ class ControlWindow(QMainWindow):
                 )
                 return
             aux_kind = "audio_file"
-            aux_tier = 1
+            resolved_label = src.audio_path.name if src.audio_path else ""
 
         elif src.kind == "funscripts":
             try:
                 prostate_channels = load_stim_channels(funscript_set, prostate=True)
             except ValueError as exc:
+                slot_data["aux_silent_reason"] = (
+                    f"Failed to load prostate funscript: {exc}"
+                )
                 DebugLog.record(
                     "stim.aux_prostate_load_failed",
                     slot=slot_idx, error=repr(exc),
@@ -2487,6 +2501,9 @@ class ControlWindow(QMainWindow):
             if prostate_channels is None:
                 # Shouldn't happen — detect_prostate_source already
                 # confirmed alpha-prostate exists. Defensive guard.
+                slot_data["aux_silent_reason"] = (
+                    "Prostate funscript loaded as empty (unexpected)"
+                )
                 DebugLog.record(
                     "stim.aux_prostate_unexpected_none", slot=slot_idx,
                 )
@@ -2536,23 +2553,39 @@ class ControlWindow(QMainWindow):
                 sample_rate=h2_rate,
             )
             aux_kind = "prostate_synth"
-            aux_tier = 2
+            # Funscript label uses the base stem with the prostate suffix
+            # so the Live Output panel reads `magik-prostate.funscript`.
+            resolved_label = f"{funscript_set.base_stem}-prostate.funscript"
 
         else:
-            # Tier 3: mirror Haptic 1. No user preference involved — the
-            # cascade is the policy. If primary stim is running on H1,
-            # H2 plays the same signal. Two synth instances (not shared)
-            # for thread safety.
+            # No prostate-specific content → mirror Haptic 1. Same
+            # primary channels, fresh StimSynth (the vendored restim
+            # algorithms aren't documented as thread-safe under
+            # concurrent generate_audio() calls, so we pay the
+            # doubled-CPU cost rather than share state).
             aux_source = StimSynth(
                 primary_channels, media_sync,
                 waveform=self._prefs.audio_algorithm,
                 sample_rate=h2_rate,
             )
             aux_kind = "mirror_h1"
-            aux_tier = 3
+            resolved_label = f"{funscript_set.base_stem}.funscript (mirror H1)"
 
         if aux_source is None:
             return
+
+        # Hand the resolved source up to slot_data so the Live Output
+        # panel can render it without re-running detection.
+        slot_data["aux_resolved_source"] = {
+            "kind": aux_kind,
+            "label": resolved_label,
+        }
+        DebugLog.record(
+            "stim.aux_resolved",
+            slot=slot_idx, source_kind=aux_kind,
+            resolved_label=resolved_label,
+            content_preference=self._prefs.content_preference,
+        )
 
         # Synth-output proof: pull blocks from the source before opening
         # the stream and log their amplitude. This is the "is restim
@@ -2583,8 +2616,8 @@ class ControlWindow(QMainWindow):
                 DebugLog.record(
                     "stim.aux_source_probe",
                     slot=slot_idx,
-                    tier=aux_tier,
                     source_kind=aux_kind,
+                    resolved_label=resolved_label,
                     probe_at=_probe_label,
                     media_time_s=_probe_t0,
                     shape=list(_block_arr.shape),
@@ -2597,7 +2630,8 @@ class ControlWindow(QMainWindow):
             except Exception as _exc:  # noqa: BLE001
                 DebugLog.record(
                     "stim.aux_source_probe_failed",
-                    slot=slot_idx, tier=aux_tier, source_kind=aux_kind,
+                    slot=slot_idx, source_kind=aux_kind,
+                    resolved_label=resolved_label,
                     probe_at=_probe_label,
                     error=repr(_exc),
                 )
@@ -2612,6 +2646,14 @@ class ControlWindow(QMainWindow):
         try:
             aux_stream.start()
         except Exception as exc:
+            slot_data["aux_silent_reason"] = (
+                f"Haptic 2 stream failed to open: {exc}"
+            )
+            # Detection succeeded but the device wouldn't open — clear
+            # the resolved-source so the UI shows the silent reason
+            # instead of "playing magik-prostate.funscript" (which it
+            # isn't).
+            slot_data.pop("aux_resolved_source", None)
             DebugLog.record(
                 "stim.aux_stream_open_failed",
                 slot=slot_idx, source_kind=aux_kind, device=h2_device,
@@ -2623,8 +2665,8 @@ class ControlWindow(QMainWindow):
         DebugLog.record(
             "stim.aux_stream_opened",
             slot=slot_idx,
-            tier=aux_tier,
             source_kind=aux_kind,
+            resolved_label=resolved_label,
             device=aux_stream.device_name or "(default)",
             sample_rate=h2_rate,
         )

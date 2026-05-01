@@ -12,6 +12,7 @@ import pytest
 from app.funscript_loader import (
     FunscriptActions,
     StimChannels,
+    detect_prostate_source,
     load_funscript,
     load_stim_channels,
     radial_1d_to_2d,
@@ -501,3 +502,79 @@ class TestLoadStimChannelsProstate:
         assert ch.source == "native_stereostim"
         np.testing.assert_array_equal(ch.beta, np.zeros_like(ch.alpha))
         np.testing.assert_array_almost_equal(ch.volume.p, [0.7, 0.7])
+
+
+class TestDetectProstateSourcePerPortResolution:
+    """v0.0.4: per-port resolution replaces v0.0.3's hard-coded `.wav over
+    .funscript` cascade. When both a sibling `<stem>.prostate.wav` AND
+    an `alpha-prostate` funscript channel exist, the user's content
+    preference is the tie-breaker. When only one exists, it plays
+    regardless of preference. When neither, kind="none".
+    """
+
+    def _make_prostate_set(
+        self,
+        tmp_path: Path,
+        *,
+        with_audio: bool,
+        with_funscript: bool,
+    ) -> FunscriptSet:
+        ap_path = None
+        channels: dict[str, str] = {}
+        main_path: str | None = None
+        if with_funscript:
+            ap = tmp_path / "scene.alpha-prostate.funscript"
+            _write_funscript(ap, [(0, 0), (1000, 100)])
+            channels["alpha-prostate"] = str(ap)
+            ap_path = ap
+        if with_audio:
+            wav = tmp_path / "scene.prostate.wav"
+            # Header-only; detect_prostate_source only checks existence.
+            wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+        if not channels:
+            # detect_prostate_source needs base_dir derivable from
+            # main_path or any channel path. With audio-only we still
+            # need a hint about which directory to look in — supply
+            # main_path pointing at a file we don't actually load.
+            main = tmp_path / "scene.funscript"
+            _write_funscript(main, [(0, 0)])
+            main_path = str(main)
+        return FunscriptSet(
+            base_stem="scene",
+            main_path=main_path,
+            channels=channels,
+        )
+
+    def test_audio_only_plays_audio_regardless_of_pref(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=False)
+        assert detect_prostate_source(fs, "sound").kind == "audio_file"
+        assert detect_prostate_source(fs, "funscript").kind == "audio_file"
+
+    def test_funscript_only_plays_funscript_regardless_of_pref(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=False, with_funscript=True)
+        assert detect_prostate_source(fs, "sound").kind == "funscripts"
+        assert detect_prostate_source(fs, "funscript").kind == "funscripts"
+
+    def test_both_available_sound_pref_picks_audio(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=True)
+        result = detect_prostate_source(fs, "sound")
+        assert result.kind == "audio_file"
+        assert result.audio_path is not None
+        assert result.audio_path.name == "scene.prostate.wav"
+
+    def test_both_available_funscript_pref_picks_funscripts(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=True)
+        assert detect_prostate_source(fs, "funscript").kind == "funscripts"
+
+    def test_neither_returns_none(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=False, with_funscript=False)
+        assert detect_prostate_source(fs, "sound").kind == "none"
+        assert detect_prostate_source(fs, "funscript").kind == "none"
+
+    def test_default_pref_is_sound(self, tmp_path: Path):
+        """The function signature defaults to content_preference='sound'.
+        Calling without the argument should match the v0.0.3 cascade
+        behavior (audio over funscript) for backwards compatibility.
+        """
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=True)
+        assert detect_prostate_source(fs).kind == "audio_file"
