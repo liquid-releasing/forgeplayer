@@ -579,8 +579,19 @@ class ControlWindow(QMainWindow):
         'Unable to set geometry' warnings when the sizeHint slightly
         exceeds the screen's work area. Using ``move()`` with the layout's
         sizeHint lets the layout own the size and avoids the fight.
+
+        Also: realize the QWindow before moving so the migration to a
+        non-primary screen takes. Same pattern as PlayerWindow's
+        place_on_screen — without create()+windowHandle().setScreen(),
+        Qt creates the native window on primary at show()-time and
+        ignores our move(), leaving the control panel on the wrong
+        monitor regardless of the Setup-tab pref.
         """
         self.ensurePolished()
+        self.create()
+        handle = self.windowHandle()
+        if handle is not None and handle.screen() is not screen:
+            handle.setScreen(screen)
         hint = self.sizeHint()
         geo = screen.availableGeometry()
         x = geo.x() + max(0, (geo.width() - hint.width())) // 2
@@ -1276,6 +1287,25 @@ class ControlWindow(QMainWindow):
         self._populate_monitor_combo(monitor_combo, default_index=index)
         vb.addWidget(monitor_combo)
 
+        # Fill checkbox: crop the video to fill the monitor (panscan=1.0)
+        # rather than letterboxing. For 16:9 content on a 32:9 ultrawide
+        # this keeps the picture full-height and crops left/right; for
+        # 16:9-on-16:9 it's a no-op visually. Lives next to the monitor
+        # combo because aspect-handling is a per-monitor decision in
+        # spirit (each physical screen has its own native aspect),
+        # though we expose it per-slot so users can A/B fit vs fill on
+        # the same monitor without reconfiguring Setup.
+        fill_check = QCheckBox("Fill screen (crop to monitor aspect)")
+        fill_check.setChecked(False)
+        # Log toggle events so we can distinguish "user didn't tick the
+        # box" from "tick was registered but launch didn't read it."
+        fill_check.toggled.connect(
+            lambda checked, slot_idx=index: DebugLog.record(
+                "ui.fill_toggled", slot=slot_idx, checked=bool(checked),
+            )
+        )
+        vb.addWidget(fill_check)
+
         layout.addWidget(video_block)
 
         # ── Scene Audio block ───────────────────────────────────────────
@@ -1306,6 +1336,7 @@ class ControlWindow(QMainWindow):
             audio_combo=audio_combo,
             volume_slider=volume_slider,
             vol_lbl=vol_lbl,
+            fill_check=fill_check,
         )
 
         btn_video.clicked.connect(lambda _, d=slot_data: self._on_browse_video(d))
@@ -1380,6 +1411,8 @@ class ControlWindow(QMainWindow):
         video_label = self._build_hidden_label(box)
         monitor_combo = self._build_hidden_monitor_combo(box)
         volume_slider, vol_lbl = self._build_hidden_volume(box, default=100)
+        fill_check = QCheckBox(box)
+        fill_check.setVisible(False)
 
         slot_data = self._make_slot_data(
             video_label=video_label,
@@ -1388,6 +1421,7 @@ class ControlWindow(QMainWindow):
             audio_combo=audio_combo,
             volume_slider=volume_slider,
             vol_lbl=vol_lbl,
+            fill_check=fill_check,
         )
 
         btn_funscript.clicked.connect(lambda _, d=slot_data: self._on_browse_audio(d))
@@ -1422,6 +1456,19 @@ class ControlWindow(QMainWindow):
         self._populate_monitor_combo(monitor_combo, default_index=index)
         mb.addWidget(monitor_combo)
 
+        # Fill checkbox — see _build_video_slot for rationale. Lives in
+        # the mirror slot too so the user can A/B fit vs fill on the
+        # ultrawide (e.g. set both Slot 0 and Slot 2 to the Odyssey,
+        # one filling, the other letterboxed, to compare).
+        fill_check = QCheckBox("Fill screen (crop to monitor aspect)")
+        fill_check.setChecked(False)
+        fill_check.toggled.connect(
+            lambda checked, slot_idx=index: DebugLog.record(
+                "ui.fill_toggled", slot=slot_idx, checked=bool(checked),
+            )
+        )
+        mb.addWidget(fill_check)
+
         layout.addWidget(monitor_block)
         layout.addStretch(1)
 
@@ -1442,6 +1489,7 @@ class ControlWindow(QMainWindow):
             audio_combo=audio_combo,
             volume_slider=volume_slider,
             vol_lbl=vol_lbl,
+            fill_check=fill_check,
         )
 
         box._slot_data = slot_data  # type: ignore[attr-defined]
@@ -1452,7 +1500,7 @@ class ControlWindow(QMainWindow):
     @staticmethod
     def _make_slot_data(
         *, video_label, audio_label, monitor_combo, audio_combo,
-        volume_slider, vol_lbl,
+        volume_slider, vol_lbl, fill_check,
     ) -> dict:
         return {
             "video_label":    video_label,
@@ -1476,6 +1524,13 @@ class ControlWindow(QMainWindow):
             "audio_combo":    audio_combo,
             "volume_slider":  volume_slider,
             "vol_lbl":        vol_lbl,
+            # Per-slot Fill checkbox. When checked, mpv panscan=1.0
+            # crops the video to fill the viewport — the answer for
+            # 16:9 content on a 32:9 ultrawide monitor when you'd rather
+            # crop top/bottom than see big black bars on the sides.
+            # Stim slot keeps a hidden checkbox so slot_data shape
+            # stays uniform across builders.
+            "fill_check":     fill_check,
         }
 
     @staticmethod
@@ -2582,7 +2637,19 @@ class ControlWindow(QMainWindow):
             self._player_windows[i] = pw
 
             # Init mpv AFTER show() so the native window handle is valid
-            self._engine.init_player(i, pw.native_wid(), audio_device)
+            fill = bool(data["fill_check"].isChecked())
+            self._engine.init_player(
+                i, pw.native_wid(), audio_device, fill=fill,
+            )
+            DebugLog.record(
+                "player.fill_mode",
+                slot=i,
+                fill=fill,
+                screen_name=screen.name(),
+                screen_geometry={
+                    "w": target_geo.width(), "h": target_geo.height(),
+                },
+            )
             # Load video (or audio-only file)
             media_path = video_path or audio_path
             self._engine.load_file(i, media_path)

@@ -31,8 +31,23 @@ class SyncEngine:
 
     # ── Player lifecycle ──────────────────────────────────────────────────────
 
-    def init_player(self, slot: int, wid: int, audio_device: str = "") -> mpv.MPV:
-        """Create an mpv instance embedded in *wid* (native window handle)."""
+    def init_player(
+        self,
+        slot: int,
+        wid: int,
+        audio_device: str = "",
+        *,
+        fill: bool = False,
+    ) -> mpv.MPV:
+        """Create an mpv instance embedded in *wid* (native window handle).
+
+        ``fill=True`` engages mpv's panscan to fill the viewport entirely
+        — the video is scaled up and cropped (top/bottom for a
+        16:9-on-32:9 case) rather than letterboxed. Useful for ultrawide
+        monitors (e.g. 5120×1440 Odyssey) where 16:9 4K content would
+        otherwise leave large black bars on each side. ``fill=False``
+        is the default fit (preserve aspect with letterbox/pillarbox).
+        """
         with self._lock:
             if self._players[slot]:
                 self._players[slot].terminate()  # type: ignore[union-attr]
@@ -46,6 +61,12 @@ class SyncEngine:
             }
             if audio_device:
                 kwargs["audio_device"] = audio_device
+            if fill:
+                # mpv panscan: 0.0 = letterbox (default), 1.0 = fully
+                # fill the viewport via crop. Using a string for the
+                # config kwarg keeps mpv happy across versions where
+                # numeric vs string handling has varied.
+                kwargs["panscan"] = "1.0"
             p = mpv.MPV(**kwargs)
             self._players[slot] = p
             return p
