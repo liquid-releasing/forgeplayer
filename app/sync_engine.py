@@ -16,7 +16,7 @@ class SyncEngine:
     player in a tight loop so they stay frame-accurate.
     """
 
-    MAX_SLOTS = 3
+    MAX_SLOTS = 4
 
     def __init__(self) -> None:
         self._players: list[Optional[mpv.MPV]] = [None] * self.MAX_SLOTS

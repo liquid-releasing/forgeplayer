@@ -7,6 +7,14 @@ import json
 import os
 from dataclasses import dataclass, field, asdict
 
+from app.sync_engine import SyncEngine
+
+# Number of slots in a session — kept in sync with SyncEngine.MAX_SLOTS
+# and control_window's _SLOT_LABELS so adding a slot only requires
+# editing one constant at the engine level. Older session files saved
+# under a smaller MAX_SLOTS pad with defaults on load.
+_NUM_SLOTS = SyncEngine.MAX_SLOTS
+
 
 @dataclass
 class SlotConfig:
@@ -27,7 +35,7 @@ class Session:
     version: int = 1
     name: str = "Untitled Session"
     slots: list[SlotConfig] = field(
-        default_factory=lambda: [SlotConfig() for _ in range(3)]
+        default_factory=lambda: [SlotConfig() for _ in range(_NUM_SLOTS)]
     )
 
     # ── Serialisation ──────────────────────────────────────────────────────────
@@ -46,12 +54,15 @@ class Session:
         for raw in raw_slots:
             # Tolerate missing keys from older versions
             slots.append(SlotConfig(**{k: v for k, v in raw.items() if k in SlotConfig.__dataclass_fields__}))
-        while len(slots) < 3:
+        # Pad / truncate to the current slot count so older session
+        # files (saved when MAX_SLOTS was 3) still load and a fourth
+        # slot config slides in with defaults.
+        while len(slots) < _NUM_SLOTS:
             slots.append(SlotConfig())
         return cls(
             version=data.get("version", 1),
             name=data.get("name", "Untitled Session"),
-            slots=slots[:3],
+            slots=slots[:_NUM_SLOTS],
         )
 
     def save(self, path: str) -> None:

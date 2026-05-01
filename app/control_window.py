@@ -29,8 +29,12 @@ from app.preferences import Preferences
 from app.audio_test import play_tone_on_device
 from app.stim_preview import play_test_clip as play_haptic_test_clip
 
-_SLOT_LABELS = ["▶ Video", "⚡ Stim", "▶ Video 2"]
-_SLOT_ROLES = ["video", "stim", "mirror"]
+_SLOT_LABELS = ["▶ Video", "⚡ Stim", "▶ Video 2", "▶ Video 3"]
+_SLOT_ROLES = ["video", "stim", "mirror", "mirror"]
+# Single source of truth for slot count — also drives sync_engine's
+# MAX_SLOTS. Iteration loops use this rather than hardcoded literals so
+# adding more mirror slots later is just a label/role list edit.
+_NUM_SLOTS = len(_SLOT_LABELS)
 _POLL_MS = 100
 _MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.avi *.webm *.mp3 *.m4a *.wav *.flac *.ogg);;"
@@ -67,7 +71,7 @@ class ControlWindow(QMainWindow):
         self.setMinimumWidth(980)
 
         self._engine = SyncEngine()
-        self._player_windows: list[PlayerWindow | None] = [None, None, None]
+        self._player_windows: list[PlayerWindow | None] = [None] * _NUM_SLOTS
         self._seek_dragging = False
         self._session_path: str = ""
 
@@ -143,7 +147,7 @@ class ControlWindow(QMainWindow):
         slots_row = QHBoxLayout()
         slots_row.setSpacing(8)
         self._slot_widgets: list[QGroupBox] = []
-        for i in range(3):
+        for i in range(_NUM_SLOTS):
             w = self._build_slot(i)
             self._slot_widgets.append(w)
             slots_row.addWidget(w)
@@ -929,11 +933,13 @@ class ControlWindow(QMainWindow):
         slot1 = self._slot_data(0)
         slot2 = self._slot_data(1)
         slot3 = self._slot_data(2)
+        slot4 = self._slot_data(3)
 
         # Mirror mode: 2+ checked playback screens + a video → same video
-        # shows on Slot 1's monitor AND Slot 3's monitor in sync, with
-        # Slot 3 muted (Slot 1 already carries the scene audio). One-screen
-        # users and audio-only scenes keep the simpler 2-slot layout.
+        # shows on Slot 1's monitor PLUS each additional playback screen
+        # via mirror slots (Slot 3 = Video 2, Slot 4 = Video 3) in sync,
+        # with each mirror muted (Slot 1 already carries the scene audio).
+        # One-screen users and audio-only scenes keep the simpler layout.
         playback_screens = self._prefs.playback_screen_indices
         mirror_video = (
             choices.video is not None
@@ -955,9 +961,24 @@ class ControlWindow(QMainWindow):
             self._select_slot_monitor(slot3, playback_screens[1])
             # Mute the mirror — Slot 1 already outputs scene audio.
             slot3["volume_slider"].setValue(0)
+            # Third playback screen → Slot 4 (Video 3). Same mirror
+            # treatment: same video file, muted, on the third allowed
+            # monitor. If only 2 playback screens are checked, Slot 4
+            # clears so it doesn't carry stale state from a prior scene.
+            if len(playback_screens) >= 3:
+                self._set_slot_media(
+                    slot4,
+                    video_path=choices.video.path,
+                    audio_path="",
+                )
+                self._select_slot_monitor(slot4, playback_screens[2])
+                slot4["volume_slider"].setValue(0)
+            else:
+                self._set_slot_media(slot4, video_path="", audio_path="")
         else:
-            # Slot 3 always clears in the non-mirror case.
+            # Slots 3 and 4 always clear in the non-mirror case.
             self._set_slot_media(slot3, video_path="", audio_path="")
+            self._set_slot_media(slot4, video_path="", audio_path="")
             if choices.video:
                 self._set_slot_media(
                     slot1,
@@ -1098,7 +1119,7 @@ class ControlWindow(QMainWindow):
     def _refresh_all_slot_monitor_combos(self) -> None:
         """Re-populate each slot's monitor dropdown after Setup changes,
         preserving the current selection when possible."""
-        for slot_idx in range(3):
+        for slot_idx in range(_NUM_SLOTS):
             data = self._slot_data(slot_idx)
             combo: QComboBox = data["monitor_combo"]
             current = combo.currentData() if combo.currentData() is not None else slot_idx
@@ -1810,7 +1831,7 @@ class ControlWindow(QMainWindow):
 
     def _current_session(self) -> Session:
         slots: list[SlotConfig] = []
-        for i in range(3):
+        for i in range(_NUM_SLOTS):
             d = self._slot_data(i)
             # Enabled state is now derived from whether the slot has media.
             # Kept on SlotConfig for backward-compat with older session files.
@@ -1934,7 +1955,7 @@ class ControlWindow(QMainWindow):
         if self._session_path:
             folder = os.path.dirname(self._session_path)
         if not folder:
-            for slot_idx in range(3):
+            for slot_idx in range(_NUM_SLOTS):
                 d = self._slot_data(slot_idx)
                 p = d.get("video_path", "") or d.get("audio_path", "")
                 if p:
@@ -1997,7 +2018,7 @@ class ControlWindow(QMainWindow):
         from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
 
         all_streams: list[tuple[int, str, object]] = []
-        for i in range(3):
+        for i in range(_NUM_SLOTS):
             data = self._slot_data(i)
             primary = data.get("stim_audio_stream")
             if primary is not None:
@@ -2029,13 +2050,13 @@ class ControlWindow(QMainWindow):
                         )
 
         # Clear references after all threads have completed.
-        for i in range(3):
+        for i in range(_NUM_SLOTS):
             data = self._slot_data(i)
             data["stim_audio_stream"] = None
             data["aux_audio_streams"] = []
         # Terminate every engine slot — including audio-only slots that
         # don't have a PlayerWindow — so no mpv instances leak.
-        for i in range(3):
+        for i in range(_NUM_SLOTS):
             w = self._player_windows[i]
             if w:
                 # Mark the window so its closeEvent doesn't re-enter our
@@ -2562,7 +2583,7 @@ class ControlWindow(QMainWindow):
         self._close_players()
 
         launched = False
-        for i in range(3):
+        for i in range(_NUM_SLOTS):
             data = self._slot_data(i)
             video_path: str = data["video_path"]
             audio_path: str = data["audio_path"]
