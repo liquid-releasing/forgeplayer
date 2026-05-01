@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QSlider, QComboBox, QFileDialog,
     QGroupBox, QCheckBox, QSizePolicy, QLineEdit, QSpacerItem,
     QMenu, QToolBar, QFrame, QTabWidget, QMessageBox, QScrollArea,
-    QRadioButton, QButtonGroup, QSpinBox,
+    QRadioButton, QButtonGroup, QDoubleSpinBox,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QScreen, QAction
@@ -332,7 +332,6 @@ class ControlWindow(QMainWindow):
         ))
 
         root.addWidget(role_box)
-        root.addWidget(self._build_setup_haptic2_fallback_box())
         root.addStretch()
 
         scroll.setWidget(inner)
@@ -411,16 +410,21 @@ class ControlWindow(QMainWindow):
         layout.addSpacing(4)
 
         offset_row = QHBoxLayout()
-        offset_label = QLabel("Haptic offset (ms)")
+        offset_label = QLabel("Haptic offset (s)")
         of = offset_label.font(); of.setBold(True); offset_label.setFont(of)
         offset_row.addWidget(offset_label)
 
-        self._setup_offset_spin = QSpinBox()
-        self._setup_offset_spin.setRange(-500, 500)
-        self._setup_offset_spin.setSingleStep(5)
-        self._setup_offset_spin.setSuffix(" ms")
+        # Surfaced in seconds with half-second granularity — milliseconds
+        # confused users in early dogfooding ("is 200 a lot or a little?").
+        # Storage stays in ms (haptic_offset_ms) so the synth path and
+        # preferences.json don't churn; only the spinbox UI is in seconds.
+        self._setup_offset_spin = QDoubleSpinBox()
+        self._setup_offset_spin.setRange(-0.5, 0.5)
+        self._setup_offset_spin.setSingleStep(0.5)
+        self._setup_offset_spin.setDecimals(1)
+        self._setup_offset_spin.setSuffix(" s")
         self._setup_offset_spin.setFixedWidth(110)
-        self._setup_offset_spin.setValue(int(self._prefs.haptic_offset_ms))
+        self._setup_offset_spin.setValue(self._prefs.haptic_offset_ms / 1000.0)
         self._setup_offset_spin.valueChanged.connect(
             lambda _v: self._on_setup_changed()
         )
@@ -432,65 +436,6 @@ class ControlWindow(QMainWindow):
             "Shift the stim signal relative to video. Positive = stim "
             "leads; negative = stim lags. Compensates for USB / driver "
             "latency."
-        ))
-
-        return box
-
-    def _build_setup_haptic2_fallback_box(self) -> QGroupBox:
-        """Picker for what Haptic 2 plays when the scene has no prostate
-        source (no `alpha-prostate`/`beta-prostate` funscripts and no
-        sibling `<stem>.prostate.wav`).
-
-        Lives next to the Haptic 2 device picker because it modifies
-        that device's behavior. Will migrate to the planned Preferences
-        tab during the Library / Live / Settings / Preferences reorder.
-        """
-        box = QGroupBox("Haptic 2 — no prostate source")
-        layout = QVBoxLayout(box)
-        layout.setSpacing(8)
-
-        layout.addWidget(self._make_help_label(
-            "If a scene has no prostate funscripts and no "
-            "<stem>.prostate.wav file, what should the Haptic 2 device "
-            "play?"
-        ))
-
-        self._setup_h2fb_group = QButtonGroup(self)
-        self._setup_h2fb_silent = QRadioButton("Silent (default)")
-        self._setup_h2fb_mirror = QRadioButton("Mirror Haptic 1")
-        self._setup_h2fb_video = QRadioButton("Video soundtrack")
-        self._setup_h2fb_group.addButton(self._setup_h2fb_silent, 0)
-        self._setup_h2fb_group.addButton(self._setup_h2fb_mirror, 1)
-        self._setup_h2fb_group.addButton(self._setup_h2fb_video, 2)
-
-        fb = self._prefs.haptic2_fallback
-        if fb == "mirror_h1":
-            self._setup_h2fb_mirror.setChecked(True)
-        elif fb == "video_soundtrack":
-            self._setup_h2fb_video.setChecked(True)
-        else:
-            self._setup_h2fb_silent.setChecked(True)
-
-        self._setup_h2fb_group.idToggled.connect(
-            lambda _id, checked: self._on_setup_changed() if checked else None
-        )
-
-        layout.addWidget(self._setup_h2fb_silent)
-        layout.addWidget(self._make_help_label(
-            "Haptic 2 stays silent unless the scene provides prostate content."
-        ))
-        layout.addSpacing(2)
-        layout.addWidget(self._setup_h2fb_mirror)
-        layout.addWidget(self._make_help_label(
-            "Haptic 2 plays the same stim signal as Haptic 1 — identical "
-            "synthesis on a second dongle."
-        ))
-        layout.addSpacing(2)
-        layout.addWidget(self._setup_h2fb_video)
-        layout.addWidget(self._make_help_label(
-            "Reserved — mpv audio fan-out is not implemented yet. "
-            "Currently behaves the same as 'Silent'; the value persists "
-            "across versions for when the feature lands."
         ))
 
         return box
@@ -841,13 +786,7 @@ class ControlWindow(QMainWindow):
             self._prefs.audio_algorithm = "pulse"
         else:
             self._prefs.audio_algorithm = "continuous"
-        if self._setup_h2fb_mirror.isChecked():
-            self._prefs.haptic2_fallback = "mirror_h1"
-        elif self._setup_h2fb_video.isChecked():
-            self._prefs.haptic2_fallback = "video_soundtrack"
-        else:
-            self._prefs.haptic2_fallback = "silent"
-        self._prefs.haptic_offset_ms = int(self._setup_offset_spin.value())
+        self._prefs.haptic_offset_ms = int(round(self._setup_offset_spin.value() * 1000))
         self._prefs.save()
         DebugLog.record(
             "setup.prefs_saved",
@@ -855,7 +794,6 @@ class ControlWindow(QMainWindow):
             haptic1=bool(self._prefs.haptic1_audio_device),
             haptic2=bool(self._prefs.haptic2_audio_device),
             algo=self._prefs.audio_algorithm,
-            haptic2_fallback=self._prefs.haptic2_fallback,
             offset_ms=self._prefs.haptic_offset_ms,
         )
         self._setup_status.setText(f"Saved to {Preferences.path()}")
@@ -1100,6 +1038,11 @@ class ControlWindow(QMainWindow):
 
         # Switch to Live tab and launch (paused — user still hits Play).
         self._tabs.setCurrentIndex(0)
+        # Diagnostic bracket: if this event lands but no `players.launch_request`
+        # follows, _on_launch is the failure site. If this event is missing,
+        # something between `library.activate` and here returned early or
+        # threw silently. Helps triage the "re-activate doesn't launch" bug.
+        DebugLog.record("library.activate.launching", scene=entry.name)
         self._on_launch()
 
     def _select_slot_monitor(self, slot_data: dict, screen_index: int) -> None:
@@ -2098,6 +2041,36 @@ class ControlWindow(QMainWindow):
             )
             return False
 
+        # Mirror of the aux prostate-channel diagnostic for the primary
+        # path. Logging both side-by-side lets us compare H1 (audible)
+        # vs H2 (silent) channel shapes — particularly useful if the
+        # main `volume.funscript` curve looks meaningfully different
+        # from `volume-prostate.funscript` (the dominant hypothesis for
+        # the H2-silent bug as of 2026-05-01).
+        import numpy as _np  # noqa: PLC0415
+        _vol_main = channels.volume
+        _vol_main_min = float(_np.min(_vol_main.p)) if _vol_main is not None else None
+        _vol_main_max = float(_np.max(_vol_main.p)) if _vol_main is not None else None
+        _vol_main_mean = float(_np.mean(_vol_main.p)) if _vol_main is not None else None
+        _vol_main_first = float(_vol_main.p[0]) if _vol_main is not None and _vol_main.p.size else None
+        DebugLog.record(
+            "stim.primary_channels",
+            slot=slot_idx,
+            samples=int(channels.t.size),
+            alpha_min=float(_np.min(channels.alpha)),
+            alpha_max=float(_np.max(channels.alpha)),
+            alpha_mean=float(_np.mean(channels.alpha)),
+            beta_min=float(_np.min(channels.beta)),
+            beta_max=float(_np.max(channels.beta)),
+            beta_mean=float(_np.mean(channels.beta)),
+            volume_present=_vol_main is not None,
+            volume_min=_vol_main_min,
+            volume_max=_vol_main_max,
+            volume_mean=_vol_main_mean,
+            volume_first=_vol_main_first,
+            source=channels.source,
+        )
+
         # Media sync stays always-true: synth generates non-silent audio
         # at all times. Pause/play gating happens in StimAudioStream via
         # a 5 ms fade envelope (a synth-internal step from full carrier
@@ -2220,35 +2193,50 @@ class ControlWindow(QMainWindow):
     ) -> None:
         """Spawn the Haptic 2 auxiliary audio stream when configured.
 
-        Source-detection cascade (per scene):
+        Source-detection cascade (per scene, no user preference involved
+        — the cascade is the policy):
 
-          1. Prostate funscripts (`alpha-prostate` + `beta-prostate`) →
-             second StimSynth with `prostate=True` channels.
-          2. Sibling `<stem>.prostate.wav` → AudioFilePlaybackSource
-             (option B: requires matching device sample rate, fails clean).
-          3. Neither present → user-selected `haptic2_fallback` preference:
-               - `silent`         : no aux stream
-               - `mirror_h1`      : second StimSynth with the SAME primary
-                                    channels (Haptic 2 plays exactly what
-                                    Haptic 1 plays — identical math, no
-                                    state sharing for thread safety)
-               - `video_soundtrack`: deferred (mpv fan-out not implemented
-                                    yet); falls through to silent.
+          1. **Prostate WAV** — sibling `<stem>.prostate.wav` exists →
+             AudioFilePlaybackSource. Wins over funscripts when both
+             present: decoder-side resync handles seek-without-clicks
+             far better than the live synth's modulation, which has a
+             known residual click rate. See
+             `docs/architecture/audio-routing.md` for the full rationale.
+          2. **Prostate funscripts** — `alpha-prostate` present
+             (beta-prostate optional; volume-prostate optional) → second
+             StimSynth with prostate channels. Beta defaults to zeros
+             when absent (matches single-pair prostate hardware).
+          3. **Mirror Haptic 1** — neither prostate source available →
+             second StimSynth with the SAME primary channels. Haptic 2
+             plays exactly what Haptic 1 plays. Two synth instances
+             rather than sharing one — the vendored restim algorithms
+             aren't documented as thread-safe under concurrent
+             generate_audio() calls, so we pay the doubled-CPU cost for
+             correctness.
+          4. **Silent** — no second sound card configured (early-return
+             at the top of this method) OR Haptic 2 device matches
+             Haptic 1.
 
         All failures inside this method are logged and swallowed —
         Haptic 2 is auxiliary; primary stim must keep working.
         """
         h2_device = self._prefs.haptic2_audio_device
         if not h2_device:
-            return  # User hasn't configured a Haptic 2 device.
+            # Tier 4 silent: no second sound card configured.
+            DebugLog.record(
+                "stim.aux_resolved",
+                slot=slot_idx, tier=4, source_kind="silent",
+                reason="no Haptic 2 device configured in Setup",
+            )
+            return
 
         # Refuse to open the same device twice — would conflict with
-        # primary stream's exclusive output handle.
+        # primary stream's exclusive output handle. Tier 4 silent.
         h1_device = self._prefs.haptic1_audio_device
         if h1_device and h1_device == h2_device:
             DebugLog.record(
-                "stim.aux_skip_same_device",
-                slot=slot_idx, device=h2_device,
+                "stim.aux_resolved",
+                slot=slot_idx, tier=4, source_kind="silent", device=h2_device,
                 reason="Haptic 2 picker matches Haptic 1 — refusing to open twice",
             )
             return
@@ -2270,6 +2258,21 @@ class ControlWindow(QMainWindow):
         # weirdness, not a crash.
         h2_handle = resolve_audio_device(h2_device, mpv_devices)
         h2_rate = query_device_sample_rate(h2_handle)
+        # Routing diagnostic: prefs hold mpv-style "wasapi/{guid}" device
+        # strings; the synth actually opens the device via PortAudio,
+        # which uses numeric indices. resolve_audio_device() bridges the
+        # two — if it picks the wrong index, the aux stream opens on
+        # some entirely different sound card (or a disabled output),
+        # which is silent without erroring. Logging the resolved handle
+        # alongside the requested string distinguishes "synth produces
+        # silence" from "synth audible but going to wrong device".
+        DebugLog.record(
+            "stim.aux_device_resolved",
+            slot=slot_idx,
+            requested=h2_device,
+            resolved_handle=repr(h2_handle),
+            resolved_rate=h2_rate,
+        )
         if primary_sample_rate != h2_rate:
             DebugLog.record(
                 "stim.aux_rate_mismatch",
@@ -2281,29 +2284,35 @@ class ControlWindow(QMainWindow):
 
         src = detect_prostate_source(funscript_set)
 
-        # Diagnostic: defense-in-depth log for partial prostate. Edger's
-        # tool emits both alpha-prostate AND beta-prostate; if we ever
-        # see a scene with only one, surface it so the user knows why
-        # Haptic 2 isn't synthing prostate.
-        if src.kind == "none":
-            has_alpha_p = "alpha-prostate" in funscript_set.channels
-            has_beta_p = "beta-prostate" in funscript_set.channels
-            if has_alpha_p ^ has_beta_p:
-                DebugLog.record(
-                    "stim.partial_prostate",
-                    slot=slot_idx,
-                    base_stem=funscript_set.base_stem,
-                    has_alpha_prostate=has_alpha_p,
-                    has_beta_prostate=has_beta_p,
-                    note="ForgePlayer requires both alpha-prostate and "
-                         "beta-prostate funscripts for the prostate synth path.",
-                )
-
-        # Build the source object based on the detection result.
+        # Build the source object based on the detection result. Tier
+        # numbers below mirror the cascade in this method's docstring —
+        # the resolved tier ships in the `stim.aux_resolved` event so
+        # diagnostics show exactly why Haptic 2 ended up where it did.
         aux_source = None
         aux_kind: str = ""
+        aux_tier: int = 0
 
-        if src.kind == "funscripts":
+        if src.kind == "audio_file":
+            try:
+                aux_source = AudioFilePlaybackSource(
+                    src.audio_path, h2_rate,
+                )
+            except (ValueError, OSError) as exc:
+                # Sample-rate mismatch, unsupported format, file IO
+                # error — surface for debugging, fall through to mirror
+                # rather than guessing at a recovery path (the user
+                # explicitly placed this file).
+                DebugLog.record(
+                    "stim.aux_audio_file_failed",
+                    slot=slot_idx,
+                    path=str(src.audio_path),
+                    error=repr(exc),
+                )
+                return
+            aux_kind = "audio_file"
+            aux_tier = 1
+
+        elif src.kind == "funscripts":
             try:
                 prostate_channels = load_stim_channels(funscript_set, prostate=True)
             except ValueError as exc:
@@ -2314,63 +2323,121 @@ class ControlWindow(QMainWindow):
                 return
             if prostate_channels is None:
                 # Shouldn't happen — detect_prostate_source already
-                # confirmed both files exist. Defensive guard.
+                # confirmed alpha-prostate exists. Defensive guard.
                 DebugLog.record(
                     "stim.aux_prostate_unexpected_none", slot=slot_idx,
                 )
                 return
+            # Channel-summary diagnostic: surfaces whether what we're
+            # feeding restim's threephase math is actually sensible. If
+            # alpha is constant or near-zero, restim won't produce
+            # audible signal regardless of device routing — and we'd
+            # know to look upstream (funscript loader) rather than
+            # downstream (audio device). Beta=zeros is expected for
+            # alpha-only prostate scripts; alpha should span its full
+            # range across the scene.
+            import numpy as _np  # noqa: PLC0415
+            # Surface volume curve stats too — "volume_present" alone is
+            # ambiguous (is the channel loaded? at what amplitude?).
+            # Stim scripts often ramp volume from zero at scene start,
+            # which would zero-multiply the synth output even though the
+            # alpha/beta position is varying correctly. Logging the
+            # min/max/first-sample distinguishes "volume curve runs at 0
+            # the whole scene" (malformed) from "volume curve starts at
+            # 0 and ramps up" (probe at t=0 sees silence; later media
+            # times are audible).
+            _vol = prostate_channels.volume
+            _vol_min = float(_np.min(_vol.p)) if _vol is not None else None
+            _vol_max = float(_np.max(_vol.p)) if _vol is not None else None
+            _vol_mean = float(_np.mean(_vol.p)) if _vol is not None else None
+            _vol_first = float(_vol.p[0]) if _vol is not None and _vol.p.size else None
+            DebugLog.record(
+                "stim.aux_prostate_channels",
+                slot=slot_idx,
+                samples=int(prostate_channels.t.size),
+                alpha_min=float(_np.min(prostate_channels.alpha)),
+                alpha_max=float(_np.max(prostate_channels.alpha)),
+                alpha_mean=float(_np.mean(prostate_channels.alpha)),
+                beta_min=float(_np.min(prostate_channels.beta)),
+                beta_max=float(_np.max(prostate_channels.beta)),
+                volume_present=_vol is not None,
+                volume_min=_vol_min,
+                volume_max=_vol_max,
+                volume_mean=_vol_mean,
+                volume_first=_vol_first,
+                source=prostate_channels.source,
+            )
             aux_source = StimSynth(
                 prostate_channels, media_sync,
                 waveform=self._prefs.audio_algorithm,
                 sample_rate=h2_rate,
             )
             aux_kind = "prostate_synth"
-
-        elif src.kind == "audio_file":
-            try:
-                aux_source = AudioFilePlaybackSource(
-                    src.audio_path, h2_rate,
-                )
-            except (ValueError, OSError) as exc:
-                # Sample-rate mismatch, unsupported format, file IO
-                # error — surface for debugging, fall through to silent
-                # rather than guessing at a fallback (the user
-                # explicitly placed this file).
-                DebugLog.record(
-                    "stim.aux_audio_file_failed",
-                    slot=slot_idx,
-                    path=str(src.audio_path),
-                    error=repr(exc),
-                )
-                return
-            aux_kind = "audio_file"
+            aux_tier = 2
 
         else:
-            # No prostate source — fall back to user pref.
-            fallback = self._prefs.haptic2_fallback
-            if fallback == "mirror_h1":
-                # Spawn a SECOND StimSynth with the primary channels.
-                # Two synth instances rather than sharing one — vendored
-                # restim algorithms aren't documented as thread-safe
-                # under concurrent generate_audio() calls, so we pay
-                # the doubled-CPU cost for correctness.
-                aux_source = StimSynth(
-                    primary_channels, media_sync,
-                    waveform=self._prefs.audio_algorithm,
-                    sample_rate=h2_rate,
-                )
-                aux_kind = "mirror_h1"
-            else:
-                # silent (default) or video_soundtrack (deferred).
-                DebugLog.record(
-                    "stim.aux_silent",
-                    slot=slot_idx, fallback=fallback,
-                    reason="no prostate source and fallback resolves to silent",
-                )
-                return
+            # Tier 3: mirror Haptic 1. No user preference involved — the
+            # cascade is the policy. If primary stim is running on H1,
+            # H2 plays the same signal. Two synth instances (not shared)
+            # for thread safety.
+            aux_source = StimSynth(
+                primary_channels, media_sync,
+                waveform=self._prefs.audio_algorithm,
+                sample_rate=h2_rate,
+            )
+            aux_kind = "mirror_h1"
+            aux_tier = 3
 
         if aux_source is None:
             return
+
+        # Synth-output proof: pull blocks from the source before opening
+        # the stream and log their amplitude. This is the "is restim
+        # actually generating audio?" check — it answers whether silence
+        # is coming from the synth (zero amplitude in the block) or from
+        # somewhere downstream (synth produces audio but the device
+        # routing / OS stack drops it). Running this consumes a small
+        # amount of internal source state, accepted as debug-time cost.
+        #
+        # Probe at TWO media times: t=0 (scene start) and t=30s. Stim
+        # scripts often ramp volume from zero at scene start; if the
+        # synth is silent at t=0 but audible at t=30s, the silence is a
+        # volume-ramp artifact and the synth itself is fine. If both
+        # are silent, the issue is in the position math (e.g.,
+        # beta-constant-zero hitting a threephase edge case) or
+        # elsewhere downstream.
+        for _probe_label, _probe_t0 in (("t=0", 0.0), ("t=30s", 30.0)):
+            try:
+                import numpy as _np  # noqa: PLC0415
+                _test_frames = 1024
+                _dt = 1.0 / float(h2_rate)
+                _steady = _np.arange(_test_frames, dtype=_np.float64) * _dt + _probe_t0
+                _sys_time = _steady.copy()
+                _block = aux_source.generate_block_with_clocks(_steady, _sys_time)
+                _block_arr = _np.asarray(_block, dtype=_np.float32)
+                _peak = float(_np.max(_np.abs(_block_arr))) if _block_arr.size else 0.0
+                _rms = float(_np.sqrt(_np.mean(_block_arr.astype(_np.float64) ** 2))) if _block_arr.size else 0.0
+                DebugLog.record(
+                    "stim.aux_source_probe",
+                    slot=slot_idx,
+                    tier=aux_tier,
+                    source_kind=aux_kind,
+                    probe_at=_probe_label,
+                    media_time_s=_probe_t0,
+                    shape=list(_block_arr.shape),
+                    dtype=str(_block_arr.dtype),
+                    peak=_peak,
+                    rms=_rms,
+                    contains_nan=bool(_np.isnan(_block_arr).any()),
+                    contains_inf=bool(_np.isinf(_block_arr).any()),
+                )
+            except Exception as _exc:  # noqa: BLE001
+                DebugLog.record(
+                    "stim.aux_source_probe_failed",
+                    slot=slot_idx, tier=aux_tier, source_kind=aux_kind,
+                    probe_at=_probe_label,
+                    error=repr(_exc),
+                )
 
         aux_stream = StimAudioStream(
             synth=aux_source,
@@ -2384,7 +2451,7 @@ class ControlWindow(QMainWindow):
         except Exception as exc:
             DebugLog.record(
                 "stim.aux_stream_open_failed",
-                slot=slot_idx, kind=aux_kind, device=h2_device,
+                slot=slot_idx, source_kind=aux_kind, device=h2_device,
                 error=repr(exc),
             )
             return
@@ -2393,13 +2460,50 @@ class ControlWindow(QMainWindow):
         DebugLog.record(
             "stim.aux_stream_opened",
             slot=slot_idx,
-            kind=aux_kind,
+            tier=aux_tier,
+            source_kind=aux_kind,
             device=aux_stream.device_name or "(default)",
             sample_rate=h2_rate,
         )
 
     def _on_launch(self) -> None:
-        DebugLog.record("players.launch_request")
+        # Snapshot every screen Qt currently knows about. Multi-monitor
+        # placement bugs almost always trace back to either (a) Qt not
+        # reporting the secondary screen, or (b) the screen reporting
+        # geometry at (0,0) when it should be virtual-desktop offset.
+        # Capturing both up front lets us split those hypotheses without
+        # a second test run.
+        from PySide6.QtGui import QGuiApplication  # noqa: PLC0415
+        # Refresh the screen list from Qt every launch. self._screens is
+        # cached at __init__ via screen().virtualSiblings(); if a monitor
+        # is reconfigured (sleep/wake, topology change, or even certain
+        # internal Qt events between the first launch and a subsequent
+        # one) Qt deletes the underlying C++ QScreen objects while we
+        # still hold dangling Python references — the next .geometry()
+        # call raises libshiboken "Internal C++ object already deleted",
+        # the exception is swallowed by Qt's slot dispatcher, and Launch
+        # silently no-ops. Pulling fresh QScreen pointers each call
+        # sidesteps the dangling-ref class entirely.
+        self._screens = list(QGuiApplication.screens())
+        primary = QGuiApplication.primaryScreen()
+        screens_snapshot = []
+        for j, s in enumerate(self._screens):
+            g = s.geometry()
+            screens_snapshot.append({
+                "index": j,
+                "name": s.name(),
+                "geometry": {
+                    "x": g.x(), "y": g.y(),
+                    "w": g.width(), "h": g.height(),
+                },
+                "is_primary": s is primary,
+                "device_pixel_ratio": float(s.devicePixelRatio()),
+            })
+        DebugLog.record(
+            "players.launch_request",
+            screen_count=len(self._screens),
+            screens=screens_snapshot,
+        )
         self._close_players()
 
         launched = False
@@ -2433,12 +2537,19 @@ class ControlWindow(QMainWindow):
                 launched = True
                 continue
 
-            screen_idx: int = data["monitor_combo"].currentData()
-            screen = (
-                self._screens[screen_idx]
-                if screen_idx < len(self._screens)
-                else self._screens[0]
-            )
+            requested_screen_idx = data["monitor_combo"].currentData()
+            # Defensive fallback if the saved/selected index is out of
+            # range — we want to log when this happens so we can tell
+            # "user picked Screen 2 but we silently substituted Screen 1"
+            # apart from "user picked Screen 1 directly".
+            if requested_screen_idx is None or requested_screen_idx >= len(self._screens):
+                screen_idx = 0
+                fell_back_to_primary = True
+            else:
+                screen_idx = requested_screen_idx
+                fell_back_to_primary = False
+            screen = self._screens[screen_idx]
+            target_geo = screen.geometry()
 
             DebugLog.record(
                 "players.launch_slot",
@@ -2446,6 +2557,18 @@ class ControlWindow(QMainWindow):
                 mode="video",
                 has_audio_override=bool(audio_path),
                 fullscreen=self._fullscreen_toggle.isChecked(),
+                # Monitor resolution chain — every step recorded so we
+                # can see exactly where multi-monitor placement falls
+                # apart on the user's setup.
+                requested_screen_idx=requested_screen_idx,
+                resolved_screen_idx=screen_idx,
+                fell_back_to_primary=fell_back_to_primary,
+                screen_name=screen.name(),
+                screen_geometry={
+                    "x": target_geo.x(), "y": target_geo.y(),
+                    "w": target_geo.width(), "h": target_geo.height(),
+                },
+                monitor_combo_count=data["monitor_combo"].count(),
             )
 
             pw = PlayerWindow(i, self._engine)

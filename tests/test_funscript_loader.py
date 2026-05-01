@@ -439,8 +439,8 @@ class TestLoadStimChannelsProstate:
 
     def test_prostate_has_no_1d_fallback(self, tmp_path: Path):
         """Even with a main .funscript, prostate=True returns None if
-        there's no alpha-prostate/beta-prostate — the main 1D is for the
-        primary pair, not the prostate pair.
+        there's no alpha-prostate — the main 1D is for the primary pair,
+        not the prostate pair.
         """
         main = tmp_path / "scene.funscript"
         _write_funscript(main, [(0, 0), (1000, 100)])
@@ -452,3 +452,52 @@ class TestLoadStimChannelsProstate:
         )
 
         assert load_stim_channels(fs, prostate=True) is None
+
+    def test_prostate_alpha_only_synthesizes_beta_zeros(self, tmp_path: Path):
+        """Real prostate funscripts in the wild ship `alpha-prostate`
+        alone (Euphoria, Zer0 Game). The cascade gates the prostate
+        synth on alpha-prostate; beta is synthesized as zeros — correct
+        for single-pair prostate hardware where one electrode pair is
+        driven and the other is unused.
+        """
+        ap = tmp_path / "scene.alpha-prostate.funscript"
+        _write_funscript(ap, [(0, 0), (1000, 100)])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=None,
+            channels={"alpha-prostate": str(ap)},
+        )
+
+        ch = load_stim_channels(fs, prostate=True)
+
+        assert ch is not None
+        assert ch.source == "native_stereostim"
+        np.testing.assert_array_equal(ch.beta, np.zeros_like(ch.alpha))
+        assert ch.alpha.size == ch.beta.size
+
+    def test_prostate_alpha_plus_volume_no_beta(self, tmp_path: Path):
+        """Euphoria's actual layout: alpha-prostate + volume-prostate,
+        no beta-prostate. Should produce a synth with beta=zeros and the
+        volume channel populated.
+        """
+        ap = tmp_path / "scene.alpha-prostate.funscript"
+        vp = tmp_path / "scene.volume-prostate.funscript"
+        _write_funscript(ap, [(0, 0), (1000, 100)])
+        _write_funscript(vp, [(0, 70), (1000, 70)])
+
+        fs = FunscriptSet(
+            base_stem="scene",
+            main_path=None,
+            channels={
+                "alpha-prostate": str(ap),
+                "volume-prostate": str(vp),
+            },
+        )
+
+        ch = load_stim_channels(fs, prostate=True)
+
+        assert ch is not None
+        assert ch.source == "native_stereostim"
+        np.testing.assert_array_equal(ch.beta, np.zeros_like(ch.alpha))
+        np.testing.assert_array_almost_equal(ch.volume.p, [0.7, 0.7])

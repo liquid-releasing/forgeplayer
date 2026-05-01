@@ -214,15 +214,87 @@ class PlayerWindow(QWidget):
         configuration). fullscreen=False — the v0.0.1-alpha default — places
         a sensibly-sized, frame-decorated window centered on the target
         monitor so a user with 2 screens can still see their desktop.
+
+        Emits two debug events bracketing Qt's show + setGeometry chain:
+        ``player.placement_target`` (what we asked for) and
+        ``player.placement_actual`` (where Qt actually put it). Compare
+        the two when diagnosing multi-monitor placement bugs — Qt and
+        the Windows DWM sometimes silently snap windows back to the
+        primary screen, and only the diff between target and actual
+        reveals it.
         """
         geo: QRect = screen.geometry()
         if fullscreen:
-            self.setGeometry(geo)
-            self.showFullScreen()
+            target_x, target_y = geo.x(), geo.y()
+            target_w, target_h = geo.width(), geo.height()
         else:
             target_w = min(1280, int(geo.width() * 0.9))
             target_h = min(720 + _CTRL_HEIGHT, int(geo.height() * 0.9))
-            x = geo.x() + (geo.width() - target_w) // 2
-            y = geo.y() + (geo.height() - target_h) // 2
-            self.setGeometry(x, y, target_w, target_h)
+            target_x = geo.x() + (geo.width() - target_w) // 2
+            target_y = geo.y() + (geo.height() - target_h) // 2
+
+        # Force the native window to exist before we try to migrate it to
+        # the target screen. Without this, windowHandle() is None and Qt
+        # creates the native window on the primary screen at show()-time,
+        # at which point DWM clamps any negative-X coordinates back onto
+        # the primary monitor. Calling create() realizes the QWindow
+        # eagerly so we can setScreen() on it.
+        self.create()
+        handle = self.windowHandle()
+        pre_show_screen = handle.screen() if handle is not None else None
+        if handle is not None and pre_show_screen is not screen:
+            handle.setScreen(screen)
+
+        DebugLog.record(
+            "player.placement_target",
+            slot=self.slot_index,
+            fullscreen=fullscreen,
+            target_screen_name=screen.name(),
+            target_screen_geometry={
+                "x": geo.x(), "y": geo.y(),
+                "w": geo.width(), "h": geo.height(),
+            },
+            target_window_geometry={
+                "x": target_x, "y": target_y,
+                "w": target_w, "h": target_h,
+            },
+            pre_show_screen_name=pre_show_screen.name() if pre_show_screen is not None else None,
+        )
+
+        self.setGeometry(target_x, target_y, target_w, target_h)
+        if fullscreen:
+            # showFullScreen() recomputes the fullscreen rect using
+            # QWidget::screen() — the widget's *internal* screen association,
+            # which on Windows lags behind the QWindow handle screen we
+            # just migrated via setScreen(). The result: fullscreen lands
+            # on the primary monitor regardless of our setScreen call,
+            # stacking slot 2's window on top of slot 0's. Showing
+            # windowed first realizes the QWidget on the migrated screen,
+            # so the subsequent showFullScreen() resolves to the correct
+            # monitor. The brief windowed flash is the cost of correctness.
             self.showNormal()
+            self.showFullScreen()
+        else:
+            self.showNormal()
+
+        # Read back where the window actually landed. Qt may have
+        # respected our setGeometry(), or it may have moved the window
+        # to fit the primary screen due to DPI/DWM quirks. Capture both
+        # the window's own geometry and which screen Qt now associates
+        # the window with (via windowHandle().screen()).
+        actual_geo = self.frameGeometry()
+        handle = self.windowHandle()
+        actual_screen = handle.screen() if handle is not None else None
+        DebugLog.record(
+            "player.placement_actual",
+            slot=self.slot_index,
+            fullscreen=fullscreen,
+            actual_window_geometry={
+                "x": actual_geo.x(), "y": actual_geo.y(),
+                "w": actual_geo.width(), "h": actual_geo.height(),
+            },
+            actual_screen_name=actual_screen.name() if actual_screen is not None else None,
+            actual_screen_matches_target=(
+                actual_screen is screen if actual_screen is not None else False
+            ),
+        )

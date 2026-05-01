@@ -92,28 +92,78 @@ existing `StimAudioStream` plumbing without touching it.
 ## Source-detection cascade
 
 Per slot launch, the control window decides which source to instantiate
-for each destination. The pattern (currently in
-`_maybe_launch_haptic2_aux`):
+for each destination. The Haptic 2 cascade (`_maybe_launch_haptic2_aux`)
+is the canonical pattern; the cascade itself **is** the policy — there
+is no user-configurable fallback preference (the v0.0.2
+`Preferences.haptic2_fallback` field has been removed).
 
-1. **Preferred source first** — explicit content the user/scene provides
-   (prostate funscripts).
-2. **Fallback source** — alternative content the user/scene provides
-   (prostate `.wav` file).
-3. **User preference** when no scene content matches — what should this
-   destination play instead? (`silent` / `mirror_h1` /
-   `video_soundtrack`). Stored in `Preferences.haptic2_fallback`.
+### Haptic 2 cascade — current ordering (decided 2026-05-01)
+
+1. **Prostate WAV** — sibling `<stem>.prostate.wav` exists →
+   `AudioFilePlaybackSource`. **Wins over funscripts when both are
+   present.** See "Audio over synth" below for the rationale.
+2. **Prostate funscripts** — `alpha-prostate` channel present
+   (`beta-prostate` and `volume-prostate` optional) → second `StimSynth`
+   with `prostate=True` channels. When `beta-prostate` is missing, the
+   beta carrier is synthesized as zeros — correct for single-pair
+   prostate hardware. Real prostate scripts in the wild ship
+   `alpha-prostate` alone (Euphoria, Zer0 Game), so this branch is the
+   common case.
+3. **Mirror Haptic 1** — neither prostate source available → second
+   `StimSynth` with the same primary channels Haptic 1 is playing.
+   Two independent synth instances (not shared state) for thread
+   safety; the doubled CPU cost is acceptable.
+4. **Silent** — early-returns when no Haptic 2 device is configured in
+   Setup, or when the H2 device picker matches H1 (would conflict on
+   the exclusive output handle).
+
+### Audio over synth: why pre-rendered files win when both exist
+
+Pre-rendered `.wav` files produce cleaner output than the live synth
+under the conditions our users actually hit:
+
+- **Seek behavior.** mpv / PortAudio's decoder-side resync logic is
+  decades old and well-tuned for seek-without-clicks. The synth path
+  recomputes modulation per-buffer; when a seek lands inside a fade
+  window, the alpha/beta values that drive the carrier flip
+  discontinuously. v0.0.2 dogfood measured a residual ~7% audible click
+  rate on synth playback ([`BACKLOG.md`](../../BACKLOG.md) v0.0.3
+  polish item). Files don't have that math at runtime — they're already
+  flat PCM samples.
+- **Pre-render quality.** A `<stem>.prostate.wav` only exists because
+  someone deliberately rendered it. They could tune the algorithm,
+  smooth the edges, and audition the result before shipping. A
+  funscript played live gives us no opportunity to do that.
+- **Tunability tradeoff.** The synth path lets users switch algorithm
+  (continuous ↔ pulse) and adjust offset live. Files freeze those
+  decisions at render time. We accept the tradeoff because the rare
+  scene that ships both forms presumably had its WAV rendered with the
+  right algorithm choice for the content.
+
+The practical impact of this priority is small: pre-rendered prostate
+WAVs are uncommon in the wild, and most scenes end up at tier 2
+(funscript synth) regardless. But for the subset of scenes that do
+ship a WAV, the user gets the cleaner playback path automatically.
+
+The bigger leverage is **fixing the synth's pop behavior itself** —
+that's the BACKLOG v0.0.3 item, and it benefits every alpha-only scene
+(the common case) plus the mirror-H1 tier.
+
+### Extending to new destinations
 
 When extending to a new destination (e.g., shaker array):
 
 - Add a destination preference field to `Preferences`
-  (`shaker_audio_device: str`).
-- Add a fallback preference if there's a "what when no source?" question
-  (`shaker_fallback: ShakerFallback`).
+  (`shaker_audio_device: str`). **Don't** add a per-destination
+  fallback enum — the cascade itself should be the policy. Adding a
+  user-pick field re-introduces the configuration-mismatch bugs the
+  cascade rewrite was designed to remove.
 - Add a detection helper in `funscript_loader.py` (or wherever the
   source-class implementation lives) returning a tagged result.
 - Add a `_maybe_launch_<destination>_aux` method following the same
   shape as `_maybe_launch_haptic2_aux`, called from the appropriate
-  launch path.
+  launch path. Order tiers so that pre-rendered files beat live synth
+  when both are present, mirroring the Haptic 2 cascade.
 - The aux stream is appended to the slot's `aux_audio_streams` list so
   `_close_players` cleans it up automatically.
 
