@@ -295,10 +295,12 @@ class ControlWindow(QMainWindow):
         root.setSpacing(12)
 
         subtitle = self._column_subtitle(
-            "Pick which physical audio device handles each role. Library clicks "
-            "use these to route automatically — you only set this once."
+            "Which physical port carries each role, and what to play when a "
+            "scene ships both a sound file and a funscript."
         )
         root.addWidget(subtitle)
+
+        root.addWidget(self._build_setup_content_pref_box())
 
         role_box = QGroupBox("Audio device roles")
         rl = QVBoxLayout(role_box)
@@ -340,6 +342,61 @@ class ControlWindow(QMainWindow):
 
         scroll.setWidget(inner)
         return scroll
+
+    def _build_setup_content_pref_box(self) -> QGroupBox:
+        """Content preference — sound vs funscript tie-breaker.
+
+        Per-port resolution rule: when a scene ships BOTH a sound file
+        and a funscript for the same destination, this preference picks
+        the winner. When only one form exists, it plays regardless of
+        preference. See `app/preferences.py` ContentPreference for the
+        full rationale (sound default; funscript path is opt-in).
+        """
+        box = QGroupBox("Content preference")
+        layout = QVBoxLayout(box)
+        layout.setSpacing(6)
+
+        self._setup_content_pref_group = QButtonGroup(self)
+        self._setup_content_pref_sound = QRadioButton("Sound files (.wav / .mp3)")
+        self._setup_content_pref_funscript = QRadioButton("Funscripts (live synth)")
+        self._setup_content_pref_group.addButton(self._setup_content_pref_sound, 0)
+        self._setup_content_pref_group.addButton(self._setup_content_pref_funscript, 1)
+        if self._prefs.content_preference == "funscript":
+            self._setup_content_pref_funscript.setChecked(True)
+        else:
+            self._setup_content_pref_sound.setChecked(True)
+        self._setup_content_pref_group.idToggled.connect(
+            lambda _id, checked: self._on_content_preference_changed() if checked else None
+        )
+
+        layout.addWidget(self._setup_content_pref_sound)
+        layout.addWidget(self._make_help_label(
+            "Pre-rendered files. No synth pops, no algorithm choice. "
+            "Default — most stereo-stim scenes ship a sound file."
+        ))
+        layout.addSpacing(2)
+        layout.addWidget(self._setup_content_pref_funscript)
+        layout.addWidget(self._make_help_label(
+            "Live synthesis from .funscript curves. Pick this if your "
+            "library is mostly funscripts and you want the algorithm "
+            "controls below to apply."
+        ))
+        layout.addWidget(self._make_help_label(
+            "When a scene has only one form, it plays regardless of "
+            "this choice. Tie-breaker only."
+        ))
+
+        return box
+
+    def _on_content_preference_changed(self) -> None:
+        pref = "funscript" if self._setup_content_pref_funscript.isChecked() else "sound"
+        if pref == self._prefs.content_preference:
+            return
+        self._prefs.content_preference = pref
+        self._prefs.save()
+        DebugLog.record("setup.content_preference", value=pref)
+        self._setup_status.setText(f"Saved to {Preferences.path()}")
+        QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
 
     def _build_setup_synth_page(self) -> QWidget:
         """Audio-synthesis column: algorithm picker + latency offset."""
@@ -538,23 +595,40 @@ class ControlWindow(QMainWindow):
         ml.addWidget(pb_label)
 
         pb_helper = QLabel(
-            "Check the monitors you use for video. Slot monitor pickers will "
-            "only offer these screens. Leave all unchecked to allow any screen."
+            "Check the monitors you use for video. Leave all unchecked to "
+            "allow any screen. Fill = crop video to fill the monitor "
+            "(useful on ultrawide); off = letterbox to preserve aspect."
         )
         pb_helper.setStyleSheet("color: #6b7280; font-size: 11px;")
         pb_helper.setWordWrap(True)
         ml.addWidget(pb_helper)
 
         self._setup_playback_checkboxes: list[QCheckBox] = []
+        self._setup_fill_checkboxes: list[QCheckBox] = []
         for idx, s in enumerate(self._screens):
             geo = s.geometry()
+            row = QHBoxLayout()
+            row.setSpacing(8)
+
             cb = QCheckBox(
                 f"Screen {idx + 1}  —  {geo.width()}×{geo.height()}  ({s.name()})"
             )
             cb.setChecked(idx in self._prefs.playback_screen_indices)
             cb.toggled.connect(self._on_playback_screens_changed)
-            ml.addWidget(cb)
             self._setup_playback_checkboxes.append(cb)
+            row.addWidget(cb, 1)
+
+            fill_cb = QCheckBox("Fill")
+            fill_cb.setChecked(idx in self._prefs.fill_screen_indices)
+            fill_cb.setToolTip(
+                "Crop video to fill the monitor (panscan). Useful for 16:9 "
+                "content on a 32:9 ultrawide. Off = letterbox / pillarbox."
+            )
+            fill_cb.toggled.connect(self._on_fill_screens_changed)
+            self._setup_fill_checkboxes.append(fill_cb)
+            row.addWidget(fill_cb)
+
+            ml.addLayout(row)
 
         root.addWidget(monitor_box)
         root.addStretch()
@@ -613,6 +687,19 @@ class ControlWindow(QMainWindow):
         QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
         # Refresh slot monitor combos so they reflect the new allowed set.
         self._refresh_all_slot_monitor_combos()
+
+    def _on_fill_screens_changed(self) -> None:
+        """Persist the per-screen Fill (crop-to-fit) toggles. The launch
+        flow reads `_prefs.fill_screen_indices` to decide whether mpv
+        opens with panscan=1.0 for each playback screen."""
+        indices = [
+            i for i, cb in enumerate(self._setup_fill_checkboxes) if cb.isChecked()
+        ]
+        self._prefs.fill_screen_indices = indices
+        self._prefs.save()
+        DebugLog.record("setup.fill_screens", indices=indices)
+        self._setup_status.setText(f"Saved to {Preferences.path()}")
+        QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
 
     @staticmethod
     def _disambiguate_audio_descriptions(
