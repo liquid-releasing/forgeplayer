@@ -36,6 +36,37 @@ _SLOT_ROLES = ["video", "stim", "mirror", "mirror"]
 # adding more mirror slots later is just a label/role list edit.
 _NUM_SLOTS = len(_SLOT_LABELS)
 _POLL_MS = 100
+
+# Bigger, brighter checkboxes — the default Qt indicator is ~13px and
+# is nearly invisible on the dark panel/background colors used in
+# Setup and Live. Touchscreen + dark theme = needs bumping. Used for
+# Fullscreen, per-screen Playback / Fill, and any other panel
+# checkbox where visibility matters more than space.
+_CHECKBOX_VISIBLE_STYLE = """
+QCheckBox {
+    color: #cbd1e0;
+    font-size: 13px;
+    spacing: 8px;
+}
+QCheckBox::indicator {
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid #6b7280;
+    border-radius: 3px;
+    background: #1a1d27;
+}
+QCheckBox::indicator:hover {
+    border-color: #9ba3c4;
+}
+QCheckBox::indicator:checked {
+    background: #2d6a4f;
+    border-color: #4ade80;
+    image: url();
+}
+QCheckBox::indicator:checked:hover {
+    background: #3a8862;
+}
+"""
 _MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.avi *.webm *.mp3 *.m4a *.wav *.flac *.ogg);;"
     "All files (*)"
@@ -323,7 +354,12 @@ class ControlWindow(QMainWindow):
             "When off (default), windowed players let you keep your desktop visible.\n"
             "Press F11 inside a player to toggle fullscreen at any time."
         )
-        self._fullscreen_toggle.setStyleSheet("color: #9ba3c4; font-size: 12px;")
+        # Visible indicator on the dark panel background. Default Qt
+        # checkbox is ~13px and renders nearly invisible on dark themes;
+        # bumping to 20px + a brighter unchecked border makes the state
+        # readable from a glance, which matters for a touch-target
+        # control. Same treatment is reused on the Setup Fill rows.
+        self._fullscreen_toggle.setStyleSheet(_CHECKBOX_VISIBLE_STYLE)
         layout.addWidget(self._fullscreen_toggle)
 
         return box
@@ -959,6 +995,7 @@ class ControlWindow(QMainWindow):
             )
             cb.setChecked(idx in self._prefs.playback_screen_indices)
             cb.toggled.connect(self._on_playback_screens_changed)
+            cb.setStyleSheet(_CHECKBOX_VISIBLE_STYLE)
             self._setup_playback_checkboxes.append(cb)
             row.addWidget(cb, 1)
 
@@ -969,6 +1006,7 @@ class ControlWindow(QMainWindow):
                 "content on a 32:9 ultrawide. Off = letterbox / pillarbox."
             )
             fill_cb.toggled.connect(self._on_fill_screens_changed)
+            fill_cb.setStyleSheet(_CHECKBOX_VISIBLE_STYLE)
             self._setup_fill_checkboxes.append(fill_cb)
             row.addWidget(fill_cb)
 
