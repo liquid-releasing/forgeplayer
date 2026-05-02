@@ -489,6 +489,20 @@ class ControlWindow(QMainWindow):
         slot_data + prefs. Called after any state change (scene
         activation, Setup change, file clear, launch).
         """
+        # Refresh the cached QScreen list from Qt — same dangling-ref
+        # protection as `_on_launch`. After player windows tear down
+        # (Close Players), Qt invalidates the underlying C++ QScreen
+        # objects while our Python references stay live; the next
+        # `s.geometry()` call raises libshiboken "Internal C++ object
+        # already deleted" and the exception kills the calling slot
+        # mid-execution. _apply_scene_choices's downstream funscript-
+        # dispatch then never runs, so a scene picked AFTER closing
+        # players appears to load (panels switch, debug log records
+        # `library.activate`) but `funscript_set` never lands on the
+        # stim slot — calibrate buttons stay disabled.
+        from PySide6.QtGui import QGuiApplication  # noqa: PLC0415
+        self._screens = list(QGuiApplication.screens())
+
         # ── Video panel ─────────────────────────────────────────────
         slot0 = self._slots[0]
         video_path: str = slot0.get("video_path", "")
