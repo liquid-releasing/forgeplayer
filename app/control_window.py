@@ -496,14 +496,23 @@ class ControlWindow(QMainWindow):
     # ── Prefs lookup helpers ────────────────────────────────────────────────
 
     def _audio_device_label(self, device_id: str) -> str:
-        """Display string for an mpv audio-device id, falling back to
-        the raw id when no description is registered."""
+        """Display string for an mpv audio-device id.
+
+        Fallback chain:
+          - empty id → "(not set)"
+          - id resolves in the current device list → its description
+          - id set but not in the current list → "(unavailable —
+            reselect in Setup)". Hits when the saved device was
+            unplugged, or was filtered out by a later
+            `_is_display_audio` rule change. Showing the raw
+            wasapi/{GUID} string is just confusing for users.
+        """
         if not device_id:
             return "(not set)"
         for name, desc in self._audio_devices:
             if name == device_id:
                 return desc
-        return device_id
+        return "(unavailable — reselect in Setup)"
 
     def _audio_device_for_slot(self, slot_idx: int) -> str:
         """Setup-defined device for a given slot's role."""
