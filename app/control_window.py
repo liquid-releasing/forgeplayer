@@ -308,11 +308,55 @@ class ControlWindow(QMainWindow):
         # Content preference on the right. Both have room to grow as
         # haptic features arrive — algorithm column can host pulse-shape
         # controls; content column can host per-port content overrides.
-        columns.addWidget(self._build_setup_synth_page(), 1)
+        columns.addWidget(self._build_preferences_synth_page(), 1)
         columns.addWidget(self._build_preferences_content_page(), 1)
+        # Stretch=1 plus no trailing addStretch lets the columns claim
+        # all leftover vertical space, so the synth and content-pref
+        # boxes grow into the room rather than huddling at the top of
+        # the tab on a tall window.
         outer.addLayout(columns, 1)
-        outer.addStretch(1)
         return container
+
+    def _build_preferences_synth_page(self) -> QWidget:
+        """Audio-synthesis column for the Preferences tab — algorithm
+        picker + latency offset. Wraps `_build_setup_synth_box` (which
+        builds the actual box) in scroll-area chrome and a subtitle so
+        proportions match the Content Preference column next to it.
+
+        Note: kept the `_build_setup_synth_box` name despite the box's
+        new home on Preferences because the box itself is unchanged —
+        renaming would just churn diff lines.
+        """
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        inner = QWidget()
+        root = QVBoxLayout(inner)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        subtitle = self._column_subtitle(
+            "How the haptic signal is synthesized. The default works for "
+            "most users — flip Pulse-based only if you have modern "
+            "stereostim hardware."
+        )
+        root.addWidget(subtitle)
+
+        # Box claims the leftover vertical space so it fills the tab
+        # (large screens have lots of headroom we don't need to leave
+        # blank). No trailing addStretch — it'd compete with the box's
+        # Expanding policy and trap whitespace at the bottom.
+        box = self._build_setup_synth_box()
+        box.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.MinimumExpanding,
+        )
+        root.addWidget(box, 1)
+
+        scroll.setWidget(inner)
+        return scroll
 
     def _build_preferences_content_page(self) -> QWidget:
         """Wraps the Content Preference box in the same scroll-area
@@ -336,8 +380,14 @@ class ControlWindow(QMainWindow):
         )
         root.addWidget(subtitle)
 
-        root.addWidget(self._build_setup_content_pref_box())
-        root.addStretch()
+        # Same Expanding policy as the synth column so the two boxes
+        # match heights on a tall window.
+        box = self._build_setup_content_pref_box()
+        box.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.MinimumExpanding,
+        )
+        root.addWidget(box, 1)
 
         scroll.setWidget(inner)
         return scroll
@@ -454,31 +504,6 @@ class ControlWindow(QMainWindow):
         DebugLog.record("setup.content_preference", value=pref)
         self._setup_status.setText(f"Saved to {Preferences.path()}")
         QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
-
-    def _build_setup_synth_page(self) -> QWidget:
-        """Audio-synthesis column: algorithm picker + latency offset."""
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        inner = QWidget()
-        root = QVBoxLayout(inner)
-        root.setContentsMargins(20, 16, 20, 16)
-        root.setSpacing(12)
-
-        subtitle = self._column_subtitle(
-            "How the haptic signal is synthesized. The default works for "
-            "most users — flip Pulse-based only if you have modern "
-            "stereostim hardware."
-        )
-        root.addWidget(subtitle)
-
-        root.addWidget(self._build_setup_synth_box())
-        root.addStretch()
-
-        scroll.setWidget(inner)
-        return scroll
 
     def _build_setup_synth_box(self) -> QGroupBox:
         """Audio synthesis settings — algorithm picker + latency offset.
