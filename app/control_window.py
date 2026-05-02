@@ -109,6 +109,17 @@ class ControlWindow(QMainWindow):
             self._make_slot_data() for _ in range(_NUM_SLOTS)
         ]
 
+        # Calibration streams — one per haptic port. None means no
+        # active calibration. See _update_calibrate_buttons_enabled.
+        self._calib_h1 = None  # type: object | None
+        self._calib_h2 = None  # type: object | None
+        # Whether Play has been hit at least once since the last Launch.
+        # Calibrate is locked between first Play and Close — per spec,
+        # the launched stim streams own the haptic devices once playback
+        # has started. Resets on Close. Calibrate IS allowed during the
+        # post-Launch / pre-Play window (windows up but paused).
+        self._has_played_since_launch: bool = False
+
         self._build_ui()
 
         # Apply the saved control-panel-screen preference BEFORE show()
@@ -265,6 +276,75 @@ class ControlWindow(QMainWindow):
         transport.addStretch()
         vbox.addLayout(transport)
 
+        # ── Calibrate row ──
+        # Pre-flight tool: tap Calibrate H1 / H2 to loop the funscript's
+        # peak-intensity window through the matching haptic dongle so
+        # the user can dial in a comfortable knob setting before hitting
+        # Play. Tap-toggle (tap to start, tap again to stop). Locked
+        # once Launch fires (until Close) so calibration doesn't fight
+        # the launched stream for the same exclusive device handle.
+        # The 5s ramp checkbox fades the audio from silence to peak over
+        # five seconds — useful when the dongle's volume is set high.
+        calib_row = QHBoxLayout()
+        calib_row.setSpacing(8)
+        calib_row.addStretch()
+        calib_label = QLabel("Pre-flight funscript:")
+        calib_label.setStyleSheet("color: #9ba3c4; font-size: 13px;")
+        calib_row.addWidget(calib_label)
+
+        # `:checked` styling makes the active state unmistakable — Qt's
+        # default pressed-look on a dark theme reads as "still idle" to
+        # users mid-dogfood. Red background + bold matches the Play
+        # button's "currently doing this thing" convention.
+        _calib_style = (
+            "QPushButton { font-size: 13px; }"
+            "QPushButton:checked { background: #ff4b4b; color: white; "
+            "font-weight: bold; border-radius: 6px; }"
+        )
+
+        self._btn_calibrate_h1 = QPushButton("Calibrate H1")
+        self._btn_calibrate_h1.setFixedHeight(44)
+        self._btn_calibrate_h1.setMinimumWidth(120)
+        self._btn_calibrate_h1.setCheckable(True)
+        self._btn_calibrate_h1.setStyleSheet(_calib_style)
+        self._btn_calibrate_h1.clicked.connect(self._on_calibrate_h1)
+        calib_row.addWidget(self._btn_calibrate_h1)
+
+        self._btn_calibrate_h2 = QPushButton("Calibrate H2")
+        self._btn_calibrate_h2.setFixedHeight(44)
+        self._btn_calibrate_h2.setMinimumWidth(120)
+        self._btn_calibrate_h2.setCheckable(True)
+        self._btn_calibrate_h2.setStyleSheet(_calib_style)
+        self._btn_calibrate_h2.clicked.connect(self._on_calibrate_h2)
+        calib_row.addWidget(self._btn_calibrate_h2)
+        # Tooltips explain why a button might be disabled — Qt's
+        # default disabled rendering on this dark stylesheet is subtle
+        # and reads as "broken click" without a hint.
+        self._btn_calibrate_h1.setToolTip(
+            "Loop the scene's haptic peak through the Haptic 1 device. "
+            "Tap to start, tap again to stop. Available pre-Launch and "
+            "post-Launch (paused). Locked once Play has been hit — "
+            "close players to re-enable."
+        )
+        self._btn_calibrate_h2.setToolTip(
+            "Loop the scene's haptic peak through the Haptic 2 device. "
+            "Tap to start, tap again to stop. Available pre-Launch and "
+            "post-Launch (paused). Locked once Play has been hit — "
+            "close players to re-enable."
+        )
+
+        self._chk_calibrate_ramp = QCheckBox("5s ramp")
+        self._chk_calibrate_ramp.setStyleSheet(_CHECKBOX_ON_DARK_STYLE)
+        self._chk_calibrate_ramp.setToolTip(
+            "Fade calibration audio from silence to peak intensity over "
+            "five seconds. Safer when dialing in dongle volume from a "
+            "high knob setting."
+        )
+        calib_row.addWidget(self._chk_calibrate_ramp)
+
+        calib_row.addStretch()
+        vbox.addLayout(calib_row)
+
         # ── Launch / Close buttons ──
         action_row = QHBoxLayout()
         action_row.addStretch()
@@ -293,6 +373,9 @@ class ControlWindow(QMainWindow):
         # port labels rather than the empty placeholders the panel
         # builders left behind.
         self._refresh_live_panels()
+        # Initial calibrate-button enable state based on currently loaded
+        # scene + Setup prefs.
+        self._update_calibrate_buttons_enabled()
 
         return tab
 
@@ -1269,6 +1352,9 @@ class ControlWindow(QMainWindow):
         # Live's Output panel reads from these prefs — refresh so the
         # port labels update without waiting for a tab switch.
         self._refresh_live_panels()
+        # Calibrate buttons depend on haptic1/haptic2 device prefs being
+        # set; flip enable state if the user just (un)configured a port.
+        self._update_calibrate_buttons_enabled()
 
     def _on_scene_activated(
         self, entry: SceneCatalogEntry, *, force_picker: bool = False,
@@ -1467,6 +1553,9 @@ class ControlWindow(QMainWindow):
         # but at that time slot2["funscript_set"] still held the prior
         # scene's value. Re-render after the assignment.
         self._refresh_live_panels()
+        # Calibrate buttons gate on funscript_set presence; refresh now
+        # that the new scene's content has been applied.
+        self._update_calibrate_buttons_enabled()
 
         if not (choices.video or choices.audio):
             QMessageBox.information(
@@ -1505,14 +1594,15 @@ class ControlWindow(QMainWindow):
         if primary:
             self._maybe_autofill_session_name(primary)
 
-        # Switch to Live tab and launch (paused — user still hits Play).
+        # Switch to Live tab and stop here — DON'T auto-launch. The
+        # user needs a window between scene-pick and player-windows-up
+        # to run pre-flight calibration (the launched stim stream
+        # claims the haptic device handle exclusively, so calibrate
+        # has to happen first). Live now shows the loaded scene's
+        # video + output mapping; the user explicitly hits Launch
+        # Players when ready.
         self._tabs.setCurrentIndex(0)
-        # Diagnostic bracket: if this event lands but no `players.launch_request`
-        # follows, _on_launch is the failure site. If this event is missing,
-        # something between `library.activate` and here returned early or
-        # threw silently. Helps triage the "re-activate doesn't launch" bug.
-        DebugLog.record("library.activate.launching", scene=entry.name)
-        self._on_launch()
+        DebugLog.record("library.activate.loaded", scene=entry.name)
 
     # _select_slot_monitor / _populate_monitor_combo / _apply_setup_roles_to_slots
     # are gone in v0.0.4 — all device + monitor routing now reads directly
@@ -1952,9 +2042,227 @@ class ControlWindow(QMainWindow):
         self._seek_bar.setValue(0)
         self._time_label.setText("0:00")
         self._dur_label.setText("0:00")
+        # Reset the play-since-launch flag — calibrate is unlocked
+        # again after Close.
+        self._has_played_since_launch = False
         # Re-render the Output panel — H2 should drop back to its
         # pre-launch summary now that there's no resolved source.
         self._refresh_live_panels()
+        # Calibrate is locked while playing; closing unlocks the
+        # buttons (subject to scene + device availability).
+        self._update_calibrate_buttons_enabled()
+
+    # ── Calibrate ──────────────────────────────────────────────────────────────
+
+    def _on_calibrate_h1(self) -> None:
+        self._toggle_calibrate(port="h1")
+
+    def _on_calibrate_h2(self) -> None:
+        self._toggle_calibrate(port="h2")
+
+    def _toggle_calibrate(self, port: str) -> None:
+        """Tap-toggle one calibrate session for `port` ("h1" or "h2").
+
+        First tap on an idle port: build a CalibrationStream against the
+        loaded scene's funscripts and the matching haptic device, then
+        start it. Second tap (or any tap on a port whose stream is
+        running): stop and clear.
+
+        Errors (missing scene, missing device, audio open failure)
+        surface via QMessageBox; the launch path is unaffected. The
+        toggle button's checked state is kept in lockstep with the
+        actual stream so a failed start doesn't leave the button stuck
+        ON.
+        """
+        # Always log the click — gives us a paper trail when the user
+        # reports "click did nothing" (most often: button was disabled
+        # because players are launched, but that doesn't fire any
+        # other event).
+        DebugLog.record(
+            "calibrate.click", port=port,
+            running=(self._calib_h1 if port == "h1" else self._calib_h2) is not None,
+            players_active=self._engine.has_active_players(),
+            funscript_loaded=self._slot_data(1).get("funscript_set") is not None,
+        )
+
+        if port == "h1":
+            current = self._calib_h1
+            btn = self._btn_calibrate_h1
+            device_id = self._prefs.haptic1_audio_device
+            port_label = "Haptic 1"
+        else:
+            current = self._calib_h2
+            btn = self._btn_calibrate_h2
+            device_id = self._prefs.haptic2_audio_device
+            port_label = "Haptic 2"
+
+        # Already running on this port → stop and clear. Idempotent on
+        # the stream side; the button check state is reset regardless.
+        if current is not None:
+            try:
+                current.stop()
+            finally:
+                if port == "h1":
+                    self._calib_h1 = None
+                else:
+                    self._calib_h2 = None
+                btn.setChecked(False)
+            DebugLog.record("calibrate.stop", port=port)
+            return
+
+        # Pre-flight checks — surface a friendly message rather than
+        # raising into the click handler.
+        funscript_set = self._slot_data(1).get("funscript_set")
+        if funscript_set is None:
+            btn.setChecked(False)
+            QMessageBox.information(
+                self, "No haptic content loaded",
+                "Pick a scene with a .funscript from the Library tab "
+                "before calibrating.\n\n"
+                "Note: opening a saved session restores the video and "
+                "audio paths but not the haptic content yet — re-pick "
+                "the scene from Library to load its funscripts.",
+            )
+            return
+        if not device_id:
+            btn.setChecked(False)
+            QMessageBox.information(
+                self, f"{port_label} device not configured",
+                f"Set the {port_label} audio device in Setup before "
+                f"calibrating.",
+            )
+            return
+
+        from app.funscript_loader import load_stim_channels  # noqa: PLC0415
+        from app.stim_calibrate import CalibrationStream  # noqa: PLC0415
+
+        try:
+            if port == "h2":
+                # Try prostate channels first; fall back to the main
+                # channels (mirror H1) when alpha-prostate isn't present.
+                # Audio-file calibrate is a future enhancement — when
+                # H2 resolves to an audio file, the user falls back to
+                # mirroring main funscripts.
+                channels = load_stim_channels(funscript_set, prostate=True)
+                if channels is None:
+                    channels = load_stim_channels(funscript_set, prostate=False)
+            else:
+                channels = load_stim_channels(funscript_set, prostate=False)
+        except ValueError as exc:
+            btn.setChecked(False)
+            DebugLog.record(
+                "calibrate.load_failed", port=port, error=repr(exc),
+                base_stem=funscript_set.base_stem,
+            )
+            QMessageBox.warning(
+                self, "Calibration failed",
+                f"Could not load haptic content for {port_label}:\n{exc}",
+            )
+            return
+        if channels is None:
+            btn.setChecked(False)
+            QMessageBox.information(
+                self, "No haptic content for this port",
+                f"This scene has no playable funscript for {port_label}.",
+            )
+            return
+
+        try:
+            mpv_devices = SyncEngine.list_audio_devices(include_hdmi=True)
+        except Exception:
+            mpv_devices = None
+
+        ramp_seconds = 5.0 if self._chk_calibrate_ramp.isChecked() else 0.0
+        try:
+            stream = CalibrationStream(
+                channels, device_id,
+                mpv_devices=mpv_devices,
+                waveform=self._prefs.audio_algorithm,
+                ramp_seconds=ramp_seconds,
+            )
+            stream.start()
+        except Exception as exc:
+            btn.setChecked(False)
+            DebugLog.record(
+                "calibrate.start_failed", port=port,
+                device=device_id, error=repr(exc),
+            )
+            QMessageBox.warning(
+                self, "Calibration failed",
+                f"Could not open {port_label} audio device for "
+                f"calibration:\n{exc}\n\n"
+                f"Verify the {port_label} device in Setup.",
+            )
+            return
+
+        if port == "h1":
+            self._calib_h1 = stream
+        else:
+            self._calib_h2 = stream
+        btn.setChecked(True)
+        DebugLog.record(
+            "calibrate.start", port=port, device=device_id,
+            base_stem=funscript_set.base_stem,
+            peak_start_s=stream.peak_start_s,
+            peak_duration_s=stream.peak_duration_s,
+            ramp_seconds=stream.ramp_seconds,
+            sample_rate=stream.device_rate,
+        )
+
+    def _update_calibrate_buttons_enabled(self) -> None:
+        """Sync the Calibrate button state to current scene + Setup +
+        engine state.
+
+        Calibrate is a pre-flight tool: locked between the first Play
+        and Close (the launched stim streams own the haptic devices
+        once playback has started; calibrate would fight them for the
+        same handle). Allowed pre-Launch, allowed in the post-Launch /
+        pre-first-Play window so the user can Calibrate after opening
+        the player windows but before starting the scene.
+
+        Called at __init__-time, on launch, on close, on play, on
+        scene change, and on Setup change. Cheap; safe to call
+        redundantly.
+        """
+        # Built lazily — _build_live_tab may not have run yet during
+        # very-early __init__ wiring. After build the attrs always exist.
+        if not hasattr(self, "_btn_calibrate_h1"):
+            return
+
+        if self._engine.has_active_players() and self._has_played_since_launch:
+            # Once Play has been hit, hard-stop any in-flight calibrate
+            # — the launched stim stream is now driving the device.
+            for slot, stream in (
+                ("h1", self._calib_h1), ("h2", self._calib_h2),
+            ):
+                if stream is not None:
+                    try:
+                        stream.stop()
+                    except Exception as exc:
+                        DebugLog.record(
+                            "calibrate.stop_at_play_failed",
+                            port=slot, error=repr(exc),
+                        )
+            self._calib_h1 = None
+            self._calib_h2 = None
+            self._btn_calibrate_h1.setChecked(False)
+            self._btn_calibrate_h2.setChecked(False)
+            self._btn_calibrate_h1.setEnabled(False)
+            self._btn_calibrate_h2.setEnabled(False)
+            return
+
+        # Pre-launch: enable iff the matching device is set. We DON'T
+        # also gate on funscript_set presence — silently disabling a
+        # button when a scene has no funscripts looked like a bug to
+        # the user mid-dogfood. Instead, _toggle_calibrate's click
+        # handler surfaces an explicit "Pick a scene with a .funscript"
+        # message when the user taps and there's nothing to play.
+        self._btn_calibrate_h1.setEnabled(
+            bool(self._prefs.haptic1_audio_device)
+        )
+        self._btn_calibrate_h2.setEnabled(
+            bool(self._prefs.haptic2_audio_device)
+        )
 
     def _launch_stim_synth(
         self,
@@ -2470,6 +2778,13 @@ class ControlWindow(QMainWindow):
         )
 
     def _on_launch(self) -> None:
+        # Reset the "has played" flag — calibrate is allowed in the
+        # post-Launch / pre-first-Play window so the user can verify
+        # haptic dongle levels with the player windows already up.
+        # Calibrate streams from before launch survive into this
+        # window and continue running; the next Play will stop them.
+        self._has_played_since_launch = False
+
         # Snapshot every screen Qt currently knows about. Multi-monitor
         # placement bugs almost always trace back to either (a) Qt not
         # reporting the secondary screen, or (b) the screen reporting
@@ -2631,6 +2946,10 @@ class ControlWindow(QMainWindow):
         # Re-render the Live panels so the Output panel picks up
         # aux_resolved_source / aux_silent_reason set during launch.
         self._refresh_live_panels()
+        # Calibrate is locked while players are active — disable both
+        # buttons (and the helper hard-stops any stream that survived
+        # the explicit stop above, defensively).
+        self._update_calibrate_buttons_enabled()
 
     # ── Transport ──────────────────────────────────────────────────────────────
 
@@ -2641,6 +2960,11 @@ class ControlWindow(QMainWindow):
             return
         if self._engine.is_paused():
             DebugLog.record("transport.play", active=active_count)
+            # Lock calibrate from this point until Close. The launched
+            # stim streams are about to drive the haptic devices; we
+            # can't have calibrate fighting for the same handle.
+            self._has_played_since_launch = True
+            self._update_calibrate_buttons_enabled()
             self._engine.play_all()
             self._btn_play.setText("⏸  Pause")
         else:
@@ -2686,6 +3010,17 @@ class ControlWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._timer.stop()
+        # Stop any running calibrate streams so the audio thread
+        # finishes its fade-out before the device is torn down — without
+        # this the user gets a pop on app close mid-calibration.
+        for port_attr in ("_calib_h1", "_calib_h2"):
+            stream = getattr(self, port_attr, None)
+            if stream is not None:
+                try:
+                    stream.stop()
+                except Exception:
+                    pass
+                setattr(self, port_attr, None)
         # Auto-export captured debug events. Saves the user from the
         # "did I click Export before closing?" friction that's bitten
         # multiple dogfood sessions. Best-effort — if export fails for
