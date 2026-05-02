@@ -86,6 +86,14 @@ class ControlWindow(QMainWindow):
         # Load persisted device-role preferences (Scene / Haptic 1 / Haptic 2).
         self._prefs = Preferences.load()
 
+        # Slot data — per-mpv-player media + stream state. The 4-slot
+        # grid UI is gone in v0.0.4; slots remain as the SyncEngine's
+        # internal index. Populated here so _build_live_tab can wire
+        # _refresh_live_panels against an initialized list.
+        self._slots: list[dict] = [
+            self._make_slot_data() for _ in range(_NUM_SLOTS)
+        ]
+
         self._build_ui()
 
         # Apply the saved control-panel-screen preference BEFORE show()
@@ -143,21 +151,30 @@ class ControlWindow(QMainWindow):
         self._tabs.setCurrentWidget(self._library_panel)
 
     def _build_live_tab(self) -> QWidget:
-        """The existing prototype's slot/seek/transport UI, wrapped as a tab."""
+        """Live — the cockpit tab. Pure read-only display (Video panel +
+        Output panel) plus the editable runtime controls (transport,
+        Launch / Close, Fullscreen toggle). All routing decisions live
+        in Setup; Live just shows what's resolved.
+
+        Slots remain as an internal data model (the SyncEngine still
+        addresses 4 mpv players by index) but the slot grid UI is gone.
+        Slot data lives in `self._slots` and is rendered by
+        `_refresh_live_panels()` whenever scene/setup state changes.
+        """
         tab = QWidget()
         vbox = QVBoxLayout(tab)
         vbox.setSpacing(10)
-        vbox.setContentsMargins(6, 6, 6, 6)
+        vbox.setContentsMargins(10, 10, 10, 10)
 
-        # ── Slot panels ──
-        slots_row = QHBoxLayout()
-        slots_row.setSpacing(8)
-        self._slot_widgets: list[QGroupBox] = []
-        for i in range(_NUM_SLOTS):
-            w = self._build_slot(i)
-            self._slot_widgets.append(w)
-            slots_row.addWidget(w)
-        vbox.addLayout(slots_row)
+        # ── Video + Output panels (read-only) ──
+        # Side-by-side on the 1090×720 touchpad. Stacked at narrower
+        # widths is a future polish; for now both panels share the
+        # window width 50/50.
+        panels_row = QHBoxLayout()
+        panels_row.setSpacing(10)
+        panels_row.addWidget(self._build_video_panel(), 1)
+        panels_row.addWidget(self._build_output_panel(), 1)
+        vbox.addLayout(panels_row, 1)
 
         # ── Seek bar ──
         seek_row = QHBoxLayout()
@@ -165,6 +182,8 @@ class ControlWindow(QMainWindow):
         self._time_label.setFixedWidth(52)
         self._seek_bar = ClickableSlider(Qt.Orientation.Horizontal)
         self._seek_bar.setRange(0, 10000)
+        # Tall enough for a thumb hit on a touchscreen.
+        self._seek_bar.setMinimumHeight(40)
         self._seek_bar.sliderPressed.connect(self._on_seek_press)
         self._seek_bar.sliderReleased.connect(self._on_seek_release)
         self._dur_label = QLabel("0:00")
@@ -178,6 +197,8 @@ class ControlWindow(QMainWindow):
         vbox.addLayout(seek_row)
 
         # ── Transport controls ──
+        # Touch-friendly heights (44px). Prev/Next chapter and the
+        # Calibrate row land in the next commit.
         transport = QHBoxLayout()
         transport.setSpacing(8)
         transport.addStretch()
@@ -188,21 +209,22 @@ class ControlWindow(QMainWindow):
             ("−5s",  lambda: self._skip(-5)),
         ]:
             b = QPushButton(label)
-            b.setFixedHeight(36)
+            b.setFixedHeight(44)
             b.clicked.connect(fn)
             transport.addWidget(b)
 
         self._btn_play = QPushButton("▶  Play")
-        self._btn_play.setFixedWidth(110)
-        self._btn_play.setFixedHeight(36)
+        self._btn_play.setFixedWidth(120)
+        self._btn_play.setFixedHeight(44)
         self._btn_play.setStyleSheet(
-            "background: #ff4b4b; color: white; font-weight: bold; border-radius: 6px;"
+            "background: #ff4b4b; color: white; font-weight: bold; "
+            "font-size: 14px; border-radius: 6px;"
         )
         self._btn_play.clicked.connect(self._on_play_pause)
         transport.addWidget(self._btn_play)
 
         btn_stop = QPushButton("⏹  Stop")
-        btn_stop.setFixedHeight(36)
+        btn_stop.setFixedHeight(44)
         btn_stop.clicked.connect(self._on_stop)
         transport.addWidget(btn_stop)
 
@@ -212,14 +234,14 @@ class ControlWindow(QMainWindow):
             ("+30s", lambda: self._skip(30)),
         ]:
             b = QPushButton(label)
-            b.setFixedHeight(36)
+            b.setFixedHeight(44)
             b.clicked.connect(fn)
             transport.addWidget(b)
 
         transport.addStretch()
         vbox.addLayout(transport)
 
-        # ── Launch / Close buttons ──
+        # ── Launch / Close buttons + Fullscreen toggle ──
         action_row = QHBoxLayout()
         action_row.addStretch()
 
@@ -235,15 +257,16 @@ class ControlWindow(QMainWindow):
         action_row.addSpacing(12)
 
         btn_close_players = QPushButton("Close Players")
-        btn_close_players.setFixedHeight(40)
+        btn_close_players.setFixedHeight(48)
         btn_close_players.clicked.connect(self._close_players)
         action_row.addWidget(btn_close_players)
 
         btn_launch = QPushButton("Launch Players")
-        btn_launch.setFixedHeight(40)
-        btn_launch.setFixedWidth(160)
+        btn_launch.setFixedHeight(48)
+        btn_launch.setFixedWidth(180)
         btn_launch.setStyleSheet(
-            "background: #2d6a4f; color: white; font-weight: bold; border-radius: 6px;"
+            "background: #2d6a4f; color: white; font-weight: bold; "
+            "font-size: 14px; border-radius: 6px;"
         )
         btn_launch.clicked.connect(self._on_launch)
         action_row.addWidget(btn_launch)
@@ -251,7 +274,253 @@ class ControlWindow(QMainWindow):
         action_row.addStretch()
         vbox.addLayout(action_row)
 
+        # Initial panel paint — show "(no scene loaded)" + Setup-derived
+        # port labels rather than the empty placeholders the panel
+        # builders left behind.
+        self._refresh_live_panels()
+
         return tab
+
+    # ── Live panel builders ─────────────────────────────────────────────────
+
+    def _build_video_panel(self) -> QGroupBox:
+        """Read-only Video panel. Shows: scene file (if loaded), the
+        list of monitors video will play on (read from Setup's
+        playback_screen_indices), and per-monitor fill mode (read from
+        Setup's fill_screen_indices). No editable controls — user
+        manages routing in Setup.
+        """
+        box = QGroupBox("Video")
+        layout = QVBoxLayout(box)
+        layout.setSpacing(6)
+        layout.setContentsMargins(14, 14, 14, 14)
+
+        self._video_file_label = QLabel("(no scene loaded)")
+        self._video_file_label.setStyleSheet("font-size: 13px;")
+        self._video_file_label.setWordWrap(True)
+        layout.addWidget(self._video_file_label)
+
+        # Monitors block — populated by _refresh_live_panels.
+        self._video_monitors_label = QLabel("")
+        self._video_monitors_label.setStyleSheet("color: #9ba3c4; font-size: 12px;")
+        self._video_monitors_label.setWordWrap(True)
+        layout.addWidget(self._video_monitors_label)
+
+        layout.addStretch(1)
+        return box
+
+    def _build_output_panel(self) -> QGroupBox:
+        """Read-only Output panel. One row per audio destination
+        (Scene / Haptic 1 / Haptic 2). Each row shows:
+          → <Role>: <Port> (set in Setup)
+              <filename> or `(silent — <reason>)`
+        """
+        box = QGroupBox("Output")
+        layout = QVBoxLayout(box)
+        layout.setSpacing(10)
+        layout.setContentsMargins(14, 14, 14, 14)
+
+        # Each row is a (port_label, source_label) pair so refresh can
+        # update the source line independently of the port assignment.
+        self._output_scene_port = self._make_port_label()
+        self._output_scene_source = self._make_source_label()
+        layout.addLayout(self._make_output_row(
+            self._output_scene_port, self._output_scene_source,
+        ))
+
+        self._output_h1_port = self._make_port_label()
+        self._output_h1_source = self._make_source_label()
+        layout.addLayout(self._make_output_row(
+            self._output_h1_port, self._output_h1_source,
+        ))
+
+        self._output_h2_port = self._make_port_label()
+        self._output_h2_source = self._make_source_label()
+        layout.addLayout(self._make_output_row(
+            self._output_h2_port, self._output_h2_source,
+        ))
+
+        layout.addStretch(1)
+        return box
+
+    @staticmethod
+    def _make_port_label() -> QLabel:
+        lbl = QLabel("")
+        lbl.setStyleSheet("font-size: 13px; font-weight: bold;")
+        lbl.setWordWrap(True)
+        return lbl
+
+    @staticmethod
+    def _make_source_label() -> QLabel:
+        lbl = QLabel("")
+        lbl.setStyleSheet("color: #9ba3c4; font-size: 12px;")
+        lbl.setWordWrap(True)
+        lbl.setContentsMargins(16, 0, 0, 0)
+        return lbl
+
+    @staticmethod
+    def _make_output_row(port_label: QLabel, source_label: QLabel) -> QVBoxLayout:
+        row = QVBoxLayout()
+        row.setSpacing(2)
+        row.addWidget(port_label)
+        row.addWidget(source_label)
+        return row
+
+    def _refresh_live_panels(self) -> None:
+        """Re-render the Video and Output panel labels from current
+        slot_data + prefs. Called after any state change (scene
+        activation, Setup change, file clear, launch).
+        """
+        # ── Video panel ─────────────────────────────────────────────
+        slot0 = self._slots[0]
+        video_path: str = slot0.get("video_path", "")
+        if video_path:
+            self._video_file_label.setText(os.path.basename(video_path))
+            self._video_file_label.setToolTip(video_path)
+        else:
+            self._video_file_label.setText("(no scene loaded)")
+            self._video_file_label.setToolTip("")
+
+        # Monitor list reads from Setup's playback_screen_indices. If
+        # empty, fall back to "any monitor" wording.
+        playback = self._prefs.playback_screen_indices
+        fill = set(self._prefs.fill_screen_indices)
+        if playback:
+            lines: list[str] = []
+            for screen_idx in playback:
+                if 0 <= screen_idx < len(self._screens):
+                    s = self._screens[screen_idx]
+                    geo = s.geometry()
+                    aspect = "fill" if screen_idx in fill else "letterbox"
+                    lines.append(
+                        f"→ Screen {screen_idx + 1}  ·  "
+                        f"{geo.width()}×{geo.height()}  ·  {aspect}"
+                    )
+                else:
+                    lines.append(f"→ Screen {screen_idx + 1}  (not detected)")
+            self._video_monitors_label.setText("\n".join(lines))
+        else:
+            self._video_monitors_label.setText(
+                "→ Any available monitor (set playback screens in Setup)"
+            )
+
+        # ── Output panel ────────────────────────────────────────────
+        # Scene Audio (slot 0)
+        scene_device = self._prefs.scene_audio_device
+        self._output_scene_port.setText(
+            f"→ Scene Audio: {self._audio_device_label(scene_device)}"
+        )
+        if not scene_device:
+            self._output_scene_source.setText("(no device — set in Setup)")
+        elif video_path:
+            self._output_scene_source.setText(f"{os.path.basename(video_path)}  (embedded)")
+        else:
+            self._output_scene_source.setText("(no scene loaded)")
+
+        # Haptic 1 (slot 1)
+        h1_device = self._prefs.haptic1_audio_device
+        self._output_h1_port.setText(
+            f"→ Haptic 1: {self._audio_device_label(h1_device)}"
+        )
+        slot1 = self._slots[1]
+        h1_label = self._h1_source_label(slot1)
+        if not h1_device:
+            self._output_h1_source.setText("(silent — no device set in Setup)")
+        else:
+            self._output_h1_source.setText(h1_label)
+
+        # Haptic 2 — uses slot 1's aux_resolved_source / aux_silent_reason
+        # populated by _maybe_launch_haptic2_aux. Pre-launch we fall back
+        # to a simple device-set / device-unset summary.
+        h2_device = self._prefs.haptic2_audio_device
+        self._output_h2_port.setText(
+            f"→ Haptic 2: {self._audio_device_label(h2_device)}"
+        )
+        h2_text = self._h2_source_label(slot1)
+        self._output_h2_source.setText(h2_text)
+
+    def _h1_source_label(self, slot1_data: dict) -> str:
+        fs = slot1_data.get("funscript_set")
+        ap = slot1_data.get("audio_path", "")
+        if fs is not None and getattr(fs, "main_path", None):
+            return os.path.basename(fs.main_path)
+        if fs is not None and getattr(fs, "channels", {}):
+            # Native stereostim — name from the first channel file.
+            first_path = next(iter(fs.channels.values()))
+            return os.path.basename(first_path)
+        if ap:
+            return os.path.basename(ap)
+        return "(no source loaded)"
+
+    def _h2_source_label(self, slot1_data: dict) -> str:
+        """Render Haptic 2's resolved-or-silent state for the Output
+        panel. Reads `aux_resolved_source` / `aux_silent_reason` set by
+        the routing code; falls back to a Setup-summary wording when
+        neither is set (pre-launch state).
+        """
+        h2_device = self._prefs.haptic2_audio_device
+        if not h2_device:
+            return "(silent — no device set in Setup)"
+        if h2_device == self._prefs.haptic1_audio_device:
+            return "(silent — same device as Haptic 1)"
+        resolved = slot1_data.get("aux_resolved_source")
+        silent_reason = slot1_data.get("aux_silent_reason")
+        if silent_reason:
+            return f"(silent — {silent_reason})"
+        if resolved:
+            return resolved.get("label", "(resolved)")
+        # Pre-launch: nothing has resolved yet.
+        if slot1_data.get("funscript_set") or slot1_data.get("audio_path"):
+            return "(resolves at launch)"
+        return "(no source loaded)"
+
+    # ── Prefs lookup helpers ────────────────────────────────────────────────
+
+    def _audio_device_label(self, device_id: str) -> str:
+        """Display string for an mpv audio-device id, falling back to
+        the raw id when no description is registered."""
+        if not device_id:
+            return "(not set)"
+        for name, desc in self._audio_devices:
+            if name == device_id:
+                return desc
+        return device_id
+
+    def _audio_device_for_slot(self, slot_idx: int) -> str:
+        """Setup-defined device for a given slot's role."""
+        role = _SLOT_ROLES[slot_idx]
+        if role == "video":
+            return self._prefs.scene_audio_device
+        if role == "stim":
+            return self._prefs.haptic1_audio_device
+        # Mirror slots are muted — no device.
+        return ""
+
+    def _screen_index_for_slot(self, slot_idx: int) -> int | None:
+        """Setup-defined screen index for a video/mirror slot's
+        position. Stim slot has no screen."""
+        role = _SLOT_ROLES[slot_idx]
+        if role == "stim":
+            return None
+        playback = self._prefs.playback_screen_indices
+        # Map slot index to position in the playback list. Slot 0 is
+        # always the first checked screen; mirrors get subsequent
+        # screens in checked order.
+        video_position = 0
+        for idx in range(slot_idx):
+            if _SLOT_ROLES[idx] != "stim":
+                video_position += 1
+        if playback and video_position < len(playback):
+            return playback[video_position]
+        # Fallback: any screen, defaulting to slot index.
+        if not playback and slot_idx < len(self._screens):
+            return slot_idx
+        return None
+
+    def _fill_for_screen_index(self, screen_idx: int | None) -> bool:
+        if screen_idx is None:
+            return False
+        return screen_idx in self._prefs.fill_screen_indices
 
     def _build_setup_tab(self) -> QWidget:
         """Setup — the wiring tab. Two columns side-by-side: Audio device
@@ -767,8 +1036,8 @@ class ControlWindow(QMainWindow):
         DebugLog.record("setup.playback_screens", indices=indices)
         self._setup_status.setText(f"Saved to {Preferences.path()}")
         QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
-        # Refresh slot monitor combos so they reflect the new allowed set.
-        self._refresh_all_slot_monitor_combos()
+        # Re-render Live's Video panel — its monitor list reads from prefs.
+        self._refresh_live_panels()
 
     def _on_fill_screens_changed(self) -> None:
         """Persist the per-screen Fill (crop-to-fit) toggles. The launch
@@ -782,6 +1051,9 @@ class ControlWindow(QMainWindow):
         DebugLog.record("setup.fill_screens", indices=indices)
         self._setup_status.setText(f"Saved to {Preferences.path()}")
         QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
+        # Re-render Live's Video panel so the per-monitor `fill/letterbox`
+        # marker reflects the change.
+        self._refresh_live_panels()
 
     @staticmethod
     def _disambiguate_audio_descriptions(
@@ -982,6 +1254,9 @@ class ControlWindow(QMainWindow):
         )
         self._setup_status.setText(f"Saved to {Preferences.path()}")
         QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
+        # Live's Output panel reads from these prefs — refresh so the
+        # port labels update without waiting for a tab switch.
+        self._refresh_live_panels()
 
     def _on_scene_activated(
         self, entry: SceneCatalogEntry, *, force_picker: bool = False,
@@ -1117,31 +1392,18 @@ class ControlWindow(QMainWindow):
 
         if mirror_video:
             self._set_slot_media(
-                slot1,
-                video_path=choices.video.path,
-                audio_path="",
+                slot1, video_path=choices.video.path, audio_path="",
             )
-            self._select_slot_monitor(slot1, playback_screens[0])
             self._set_slot_media(
-                slot3,
-                video_path=choices.video.path,
-                audio_path="",
+                slot3, video_path=choices.video.path, audio_path="",
             )
-            self._select_slot_monitor(slot3, playback_screens[1])
-            # Mute the mirror — Slot 1 already outputs scene audio.
-            slot3["volume_slider"].setValue(0)
-            # Third playback screen → Slot 4 (Video 3). Same mirror
-            # treatment: same video file, muted, on the third allowed
-            # monitor. If only 2 playback screens are checked, Slot 4
-            # clears so it doesn't carry stale state from a prior scene.
+            # Slot 4 (Video 3) only mirrors if 3+ playback screens are
+            # checked. Otherwise clear it so stale state from a prior
+            # scene doesn't carry over.
             if len(playback_screens) >= 3:
                 self._set_slot_media(
-                    slot4,
-                    video_path=choices.video.path,
-                    audio_path="",
+                    slot4, video_path=choices.video.path, audio_path="",
                 )
-                self._select_slot_monitor(slot4, playback_screens[2])
-                slot4["volume_slider"].setValue(0)
             else:
                 self._set_slot_media(slot4, video_path="", audio_path="")
         else:
@@ -1150,12 +1412,8 @@ class ControlWindow(QMainWindow):
             self._set_slot_media(slot4, video_path="", audio_path="")
             if choices.video:
                 self._set_slot_media(
-                    slot1,
-                    video_path=choices.video.path,
-                    audio_path="",
+                    slot1, video_path=choices.video.path, audio_path="",
                 )
-                if playback_screens:
-                    self._select_slot_monitor(slot1, playback_screens[0])
             else:
                 self._set_slot_media(slot1, video_path="", audio_path="")
 
@@ -1193,11 +1451,10 @@ class ControlWindow(QMainWindow):
         else:
             self._set_slot_media(slot2, video_path="", audio_path="")
             slot2["funscript_set"] = None
-        # _set_slot_media already ran _refresh_audio_label, but at that
-        # point slot2["funscript_set"] still held the PREVIOUS scene's
-        # value. Re-run after the assignment so the UI reflects whatever
-        # this scene actually has (or doesn't have).
-        self._refresh_audio_label(slot2)
+        # Final refresh — _set_slot_media already updated the panels
+        # but at that time slot2["funscript_set"] still held the prior
+        # scene's value. Re-render after the assignment.
+        self._refresh_live_panels()
 
         if not (choices.video or choices.audio):
             QMessageBox.information(
@@ -1206,10 +1463,9 @@ class ControlWindow(QMainWindow):
             )
             return
 
-        # Apply Setup's device roles to the slots. Scene audio → Slot 1,
-        # Haptic 1 → Slot 2. Users who haven't configured Setup yet keep
-        # whatever device the slot's combo is currently showing.
-        self._apply_setup_roles_to_slots()
+        # Setup owns audio device roles + monitor assignments + fill.
+        # The launch flow reads from `_prefs` directly; no per-slot
+        # state to apply here.
 
         # Library activation always starts a fresh unsaved session. Without
         # this, clicking a different scene while a loaded session file was
@@ -1246,72 +1502,10 @@ class ControlWindow(QMainWindow):
         DebugLog.record("library.activate.launching", scene=entry.name)
         self._on_launch()
 
-    def _select_slot_monitor(self, slot_data: dict, screen_index: int) -> None:
-        """Pick a specific screen for a slot's monitor dropdown (used by
-        library routing / mirror mode). Silently no-ops if the screen isn't
-        in the slot's current combo — typically because Setup filtered it
-        out of the playback pool."""
-        combo: QComboBox = slot_data["monitor_combo"]
-        for idx in range(combo.count()):
-            if combo.itemData(idx) == screen_index:
-                combo.setCurrentIndex(idx)
-                return
-
-    def _populate_monitor_combo(
-        self, combo: QComboBox, *, default_index: int,
-    ) -> None:
-        """Fill a slot's monitor dropdown with the screens allowed for
-        playback (per Setup's playback-screens checkboxes). Falls back to
-        all screens when Setup hasn't explicitly opted in to filtering."""
-        allowed = set(self._prefs.playback_screen_indices)
-        combo.clear()
-        first_added_index = -1
-        for j, s in enumerate(self._screens):
-            if allowed and j not in allowed:
-                continue
-            geo = s.geometry()
-            combo.addItem(
-                f"Screen {j + 1}  —  {geo.width()}×{geo.height()}  ({s.name()})",
-                j,
-            )
-            if first_added_index < 0:
-                first_added_index = j
-        # Try to match the requested default; otherwise first allowed screen.
-        want = default_index
-        if allowed and want not in allowed and first_added_index >= 0:
-            want = first_added_index
-        for idx in range(combo.count()):
-            if combo.itemData(idx) == want:
-                combo.setCurrentIndex(idx)
-                break
-
-    def _refresh_all_slot_monitor_combos(self) -> None:
-        """Re-populate each slot's monitor dropdown after Setup changes,
-        preserving the current selection when possible."""
-        for slot_idx in range(_NUM_SLOTS):
-            data = self._slot_data(slot_idx)
-            combo: QComboBox = data["monitor_combo"]
-            current = combo.currentData() if combo.currentData() is not None else slot_idx
-            self._populate_monitor_combo(combo, default_index=int(current))
-
-    def _apply_setup_roles_to_slots(self) -> None:
-        """Set Slot 1 and Slot 2's audio-output combos from Setup's roles.
-        No-op for a role that isn't configured yet — the slot keeps whatever
-        was there, so a partial Setup (only Haptic 1 configured, for example)
-        still helps without clobbering the Scene slot."""
-        role_to_slot = (
-            (self._prefs.scene_audio_device, 0),
-            (self._prefs.haptic1_audio_device, 1),
-        )
-        for device_id, slot_idx in role_to_slot:
-            if not device_id:
-                continue
-            data = self._slot_data(slot_idx)
-            combo: QComboBox = data["audio_combo"]
-            for idx in range(combo.count()):
-                if combo.itemData(idx) == device_id:
-                    combo.setCurrentIndex(idx)
-                    break
+    # _select_slot_monitor / _populate_monitor_combo / _apply_setup_roles_to_slots
+    # are gone in v0.0.4 — all device + monitor routing now reads directly
+    # from `_prefs` at launch time. See `_audio_device_for_slot`,
+    # `_screen_index_for_slot`, `_fill_for_screen_index`.
 
     def _set_slot_media(
         self,
@@ -1320,42 +1514,16 @@ class ControlWindow(QMainWindow):
         video_path: str | None = None,
         audio_path: str | None = None,
     ) -> None:
-        """Set video/audio paths on a slot's data dict + refresh labels.
-        `None` means 'leave unchanged'; empty string means 'clear'."""
+        """Set video/audio paths on a slot's data dict and trigger a
+        Live-panel refresh. `None` means 'leave unchanged'; empty
+        string means 'clear'. v0.0.4: no per-slot UI to update — the
+        Video/Output panels read from slot_data on refresh.
+        """
         if video_path is not None:
             data["video_path"] = video_path
-            data["video_label"].setText(
-                os.path.basename(video_path) if video_path else "No file selected"
-            )
-            data["video_label"].setToolTip(video_path)
         if audio_path is not None:
             data["audio_path"] = audio_path
-            data["audio_label"].setToolTip(audio_path)
-        self._refresh_audio_label(data)
-        self._refresh_monitor_state(data)
-
-    @staticmethod
-    def _refresh_audio_label(data: dict) -> None:
-        """Render the Audio-override label from whichever of (native
-        funscript, override audio, embedded video audio, nothing) is
-        currently in effect.
-
-        When no override is set, we show ``(from <video filename>)`` so
-        the user sees WHICH source the slot is actually playing — more
-        informative than the old ``(uses video audio)`` placeholder.
-        """
-        fs = data.get("funscript_set")
-        audio = data.get("audio_path", "")
-        video = data.get("video_path", "")
-        if fs is not None:
-            text = f"⚡ {fs.base_stem} (live synth)"
-        elif audio:
-            text = os.path.basename(audio)
-        elif video:
-            text = f"(from {os.path.basename(video)})"
-        else:
-            text = "(no audio)"
-        data["audio_label"].setText(text)
+        self._refresh_live_panels()
 
     def _build_session_bar(self) -> QWidget:
         """Top bar: session-name label + Debug dogfood cluster.
@@ -1420,443 +1588,49 @@ class ControlWindow(QMainWindow):
 
         return bar
 
-    def _build_slot(self, index: int) -> QGroupBox:
-        """Dispatch to the role-specific builder.
-
-        v0.0.2 slot cards are role-specific, not uniform:
-        - index 0 → Video slot (video file + monitor + scene audio)
-        - index 1 → Stim slot (funscript + Haptic 1 device; no video, no monitor)
-        - index 2 → Video 2 mirror slot (monitor picker only; inherits video
-          from the Video slot at launch)
-
-        Each builder returns a QGroupBox with a `_slot_data` attribute of
-        the same shape (shared keys), so downstream callers
-        (`_apply_scene_choices`, `_current_session`, `_launch_players`,
-        etc.) keep working without knowing the role. Keys that a role
-        doesn't expose in the UI are still present in the dict — they
-        point at hidden widgets so `d["audio_combo"].currentData()` never
-        raises KeyError.
-        """
-        role = _SLOT_ROLES[index]
-        if role == "video":
-            return self._build_video_slot(index)
-        if role == "stim":
-            return self._build_stim_slot(index)
-        if role == "mirror":
-            return self._build_mirror_slot(index)
-        raise ValueError(f"Unknown slot role: {role!r}")
-
-    # ── Role-specific slot builders ───────────────────────────────────────
-
-    def _build_video_slot(self, index: int) -> QGroupBox:
-        """Video slot: main video + scene audio output. No picked-audio
-        override — the mp4's embedded audio IS the scene audio, routed
-        through the configured audio device."""
-        box = QGroupBox(_SLOT_LABELS[index])
-        layout = QVBoxLayout(box)
-        layout.setSpacing(10)
-
-        # ── Video block ──────────────────────────────────────────────────
-        video_block = self._build_block_frame()
-        vb = QVBoxLayout(video_block)
-        vb.setContentsMargins(10, 8, 10, 10)
-        vb.setSpacing(4)
-        vb.addWidget(self._block_heading("Video"))
-
-        video_label = self._build_path_label("No file selected")
-        vb.addWidget(video_label)
-
-        video_row, btn_video, btn_clear_video = self._build_file_picker_row(
-            "Browse Video…",
-            clear_tooltip="Clear video (also disables the slot if audio is also empty)",
-        )
-        vb.addLayout(video_row)
-
-        vb.addWidget(self._sub_label("Monitor"))
-        monitor_combo = QComboBox()
-        self._populate_monitor_combo(monitor_combo, default_index=index)
-        vb.addWidget(monitor_combo)
-
-        # Fill checkbox: crop the video to fill the monitor (panscan=1.0)
-        # rather than letterboxing. For 16:9 content on a 32:9 ultrawide
-        # this keeps the picture full-height and crops left/right; for
-        # 16:9-on-16:9 it's a no-op visually. Lives next to the monitor
-        # combo because aspect-handling is a per-monitor decision in
-        # spirit (each physical screen has its own native aspect),
-        # though we expose it per-slot so users can A/B fit vs fill on
-        # the same monitor without reconfiguring Setup.
-        fill_check = QCheckBox("Fill screen (crop to monitor aspect)")
-        fill_check.setChecked(False)
-        # Log toggle events so we can distinguish "user didn't tick the
-        # box" from "tick was registered but launch didn't read it."
-        fill_check.toggled.connect(
-            lambda checked, slot_idx=index: DebugLog.record(
-                "ui.fill_toggled", slot=slot_idx, checked=bool(checked),
-            )
-        )
-        vb.addWidget(fill_check)
-
-        layout.addWidget(video_block)
-
-        # ── Scene Audio block ───────────────────────────────────────────
-        scene_audio_block = self._build_block_frame()
-        sb = QVBoxLayout(scene_audio_block)
-        sb.setContentsMargins(10, 8, 10, 10)
-        sb.setSpacing(4)
-        sb.addWidget(self._block_heading("Scene Audio"))
-
-        sb.addWidget(self._sub_label("Device"))
-        audio_combo = self._build_audio_device_combo()
-        sb.addWidget(audio_combo)
-
-        vol_row, volume_slider, vol_lbl = self._build_volume_row()
-        sb.addLayout(vol_row)
-
-        layout.addWidget(scene_audio_block)
-
-        # Hidden widgets that keep slot_data shape stable for downstream
-        # callers. The Video slot has no picked-audio override, so
-        # audio_label/audio_path exist as placeholders only.
-        audio_label = self._build_hidden_label(box)
-
-        slot_data = self._make_slot_data(
-            video_label=video_label,
-            audio_label=audio_label,
-            monitor_combo=monitor_combo,
-            audio_combo=audio_combo,
-            volume_slider=volume_slider,
-            vol_lbl=vol_lbl,
-            fill_check=fill_check,
-        )
-
-        btn_video.clicked.connect(lambda _, d=slot_data: self._on_browse_video(d))
-        btn_clear_video.clicked.connect(lambda _, d=slot_data: self._on_clear_video(d))
-        volume_slider.valueChanged.connect(
-            lambda v, idx=index, lbl=vol_lbl: self._on_volume_changed(idx, v, lbl)
-        )
-
-        box._slot_data = slot_data  # type: ignore[attr-defined]
-        return box
-
-    def _build_stim_slot(self, index: int) -> QGroupBox:
-        """Stim slot: funscript (or pre-rendered audio fallback) + Haptic 1
-        device picker. No video, no monitor, no software volume — estim
-        intensity is set on the hardware device, and Calibrate (v0.0.2
-        item #5) is the UX for dialing it in before playback."""
-        box = QGroupBox(_SLOT_LABELS[index])
-        layout = QVBoxLayout(box)
-        layout.setSpacing(10)
-
-        # ── Funscript block (replaces the v0.0.1 "Audio override") ──────
-        funscript_block = self._build_block_frame()
-        fb = QVBoxLayout(funscript_block)
-        fb.setContentsMargins(10, 8, 10, 10)
-        fb.setSpacing(4)
-        fb.addWidget(self._block_heading("Funscript"))
-
-        audio_label = self._build_path_label("(no funscript)")
-        fb.addWidget(audio_label)
-
-        fs_row, btn_funscript, btn_clear_funscript = self._build_file_picker_row(
-            "Browse Funscript…",
-            clear_tooltip="Clear funscript / audio track",
-        )
-        fb.addLayout(fs_row)
-
-        fb.addWidget(self._sub_label(
-            "Primary: .funscript (real-time synthesis). "
-            "Fallback: pre-rendered .mp3 / .wav."
-        ))
-
-        layout.addWidget(funscript_block)
-
-        # ── Haptic 1 block (main estim channel) ─────────────────────────
-        haptic1_block = self._build_block_frame()
-        hb = QVBoxLayout(haptic1_block)
-        hb.setContentsMargins(10, 8, 10, 10)
-        hb.setSpacing(4)
-        hb.addWidget(self._block_heading("Haptic 1 (main)"))
-
-        hb.addWidget(self._sub_label("Device"))
-        audio_combo = self._build_audio_device_combo()
-        hb.addWidget(audio_combo)
-
-        hb.addWidget(self._sub_label(
-            "Intensity is set on the device itself — use Calibrate "
-            "before starting the scene."
-        ))
-
-        layout.addWidget(haptic1_block)
-
-        # '+ Add second channel' expander is wired up in a later PR
-        # (project_forgeplayer_v002_slot_cards.md item 3). Kept out of the
-        # UI until it actually does something, so users don't click an
-        # inert button.
-
-        layout.addStretch(1)
-
-        # Hidden widgets — Stim slot carries no video, no monitor,
-        # no software volume. Widgets exist so slot_data shape stays
-        # compatible with the Video slot.
-        video_label = self._build_hidden_label(box)
-        monitor_combo = self._build_hidden_monitor_combo(box)
-        volume_slider, vol_lbl = self._build_hidden_volume(box, default=100)
-        fill_check = QCheckBox(box)
-        fill_check.setVisible(False)
-
-        slot_data = self._make_slot_data(
-            video_label=video_label,
-            audio_label=audio_label,
-            monitor_combo=monitor_combo,
-            audio_combo=audio_combo,
-            volume_slider=volume_slider,
-            vol_lbl=vol_lbl,
-            fill_check=fill_check,
-        )
-
-        btn_funscript.clicked.connect(lambda _, d=slot_data: self._on_browse_audio(d))
-        btn_clear_funscript.clicked.connect(lambda _, d=slot_data: self._on_clear_audio(d))
-
-        box._slot_data = slot_data  # type: ignore[attr-defined]
-        return box
-
-    def _build_mirror_slot(self, index: int) -> QGroupBox:
-        """Video 2 mirror slot: monitor picker only. Inherits the video +
-        scene audio from the Video slot at launch time and plays muted
-        on its own monitor. In v0.0.2 phase-2, this card gets the
-        ultrawide Layout block (Crop / Letterbox / Side-by-side)."""
-        box = QGroupBox(_SLOT_LABELS[index])
-        layout = QVBoxLayout(box)
-        layout.setSpacing(10)
-
-        # Mirror-mode explainer
-        note = QLabel("↔ Mirrors the Video slot on this monitor (muted).")
-        note.setStyleSheet("color: #9ba3c4; font-size: 11px; font-style: italic;")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-
-        # ── Monitor block (the only real control) ───────────────────────
-        monitor_block = self._build_block_frame()
-        mb = QVBoxLayout(monitor_block)
-        mb.setContentsMargins(10, 8, 10, 10)
-        mb.setSpacing(4)
-        mb.addWidget(self._block_heading("Monitor"))
-
-        monitor_combo = QComboBox()
-        self._populate_monitor_combo(monitor_combo, default_index=index)
-        mb.addWidget(monitor_combo)
-
-        # Fill checkbox — see _build_video_slot for rationale. Lives in
-        # the mirror slot too so the user can A/B fit vs fill on the
-        # ultrawide (e.g. set both Slot 0 and Slot 2 to the Odyssey,
-        # one filling, the other letterboxed, to compare).
-        fill_check = QCheckBox("Fill screen (crop to monitor aspect)")
-        fill_check.setChecked(False)
-        fill_check.toggled.connect(
-            lambda checked, slot_idx=index: DebugLog.record(
-                "ui.fill_toggled", slot=slot_idx, checked=bool(checked),
-            )
-        )
-        mb.addWidget(fill_check)
-
-        layout.addWidget(monitor_block)
-        layout.addStretch(1)
-
-        # Hidden widgets — mirror carries no file picker, no audio device,
-        # no volume (fixed-muted). Widgets exist so slot_data stays stable.
-        video_label = self._build_hidden_label(box)
-        audio_label = self._build_hidden_label(box)
-        audio_combo = QComboBox(box)
-        audio_combo.setVisible(False)
-        for name, desc in self._audio_devices:
-            audio_combo.addItem(desc, name)
-        volume_slider, vol_lbl = self._build_hidden_volume(box, default=0)
-
-        slot_data = self._make_slot_data(
-            video_label=video_label,
-            audio_label=audio_label,
-            monitor_combo=monitor_combo,
-            audio_combo=audio_combo,
-            volume_slider=volume_slider,
-            vol_lbl=vol_lbl,
-            fill_check=fill_check,
-        )
-
-        box._slot_data = slot_data  # type: ignore[attr-defined]
-        return box
-
-    # ── Small widget factories shared by the builders ─────────────────────
-
     @staticmethod
-    def _make_slot_data(
-        *, video_label, audio_label, monitor_combo, audio_combo,
-        volume_slider, vol_lbl, fill_check,
-    ) -> dict:
+    def _make_slot_data() -> dict:
+        """Per-mpv-player media + stream state. Slots remain as the
+        SyncEngine's internal index (4 mpv players addressed 0..3) but
+        the per-slot UI is gone in v0.0.4. Routing/monitor/volume now
+        read from `_prefs` at launch; only media paths and live stream
+        handles live in slot_data.
+        """
         return {
-            "video_label":    video_label,
-            "video_path":     "",
-            "audio_label":    audio_label,
-            "audio_path":     "",
-            # Native funscript playback (Stim slot only). When non-None,
-            # _on_launch routes to StimSynth instead of mpv. Populated by
-            # _apply_scene_choices when the picker yields a FunscriptSet.
-            "funscript_set":  None,
-            # Live StimAudioStream while playing — kept here so
-            # _close_players can stop it during teardown.
-            "stim_audio_stream": None,
-            # Auxiliary streams piggy-backing on this slot's launch
-            # (Haptic 2 prostate output today; future MP4-audio fan-out
-            # to e.g. headset + body-shaker arrays). Each entry is a
-            # StimAudioStream whose source is either a second StimSynth
-            # (prostate or mirror) or an AudioFilePlaybackSource.
-            "aux_audio_streams": [],
-            "monitor_combo":  monitor_combo,
-            "audio_combo":    audio_combo,
-            "volume_slider":  volume_slider,
-            "vol_lbl":        vol_lbl,
-            # Per-slot Fill checkbox. When checked, mpv panscan=1.0
-            # crops the video to fill the viewport — the answer for
-            # 16:9 content on a 32:9 ultrawide monitor when you'd rather
-            # crop top/bottom than see big black bars on the sides.
-            # Stim slot keeps a hidden checkbox so slot_data shape
-            # stays uniform across builders.
-            "fill_check":     fill_check,
+            "video_path":          "",
+            "audio_path":          "",
+            "funscript_set":       None,
+            "stim_audio_stream":   None,
+            "aux_audio_streams":   [],
+            # Populated at launch by _maybe_launch_haptic2_aux:
+            #   "aux_resolved_source": {"kind": str, "label": str}
+            #   "aux_silent_reason": str
+            # Read by _refresh_live_panels for Output-panel rendering.
         }
 
-    @staticmethod
-    def _build_path_label(placeholder: str) -> QLabel:
-        lbl = QLabel(placeholder)
-        lbl.setWordWrap(False)
-        lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        lbl.setStyleSheet("color: #9ba3c4; font-size: 11px;")
-        return lbl
-
-    @staticmethod
-    def _build_file_picker_row(
-        browse_label: str, clear_tooltip: str,
-    ) -> tuple[QHBoxLayout, QPushButton, QPushButton]:
-        row = QHBoxLayout()
-        row.setSpacing(4)
-        btn_browse = QPushButton(browse_label)
-        btn_browse.setFixedHeight(28)
-        row.addWidget(btn_browse)
-        btn_clear = QPushButton("✕")
-        btn_clear.setFixedSize(28, 28)
-        btn_clear.setToolTip(clear_tooltip)
-        row.addWidget(btn_clear)
-        return row, btn_browse, btn_clear
-
-    def _build_audio_device_combo(self) -> QComboBox:
-        combo = QComboBox()
-        for name, desc in self._audio_devices:
-            combo.addItem(desc, name)
-        return combo
-
-    def _build_volume_row(self) -> tuple[QHBoxLayout, "ClickableSlider", QLabel]:
-        row = QHBoxLayout()
-        row.addWidget(self._sub_label("Volume"))
-        slider = ClickableSlider(Qt.Orientation.Horizontal)
-        slider.setRange(0, 100)
-        slider.setValue(100)
-        slider.setFixedHeight(22)
-        row.addWidget(slider)
-        lbl = QLabel("100")
-        lbl.setFixedWidth(28)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        row.addWidget(lbl)
-        return row, slider, lbl
-
-    @staticmethod
-    def _build_hidden_label(parent) -> QLabel:
-        lbl = QLabel(parent)
-        lbl.setVisible(False)
-        return lbl
-
-    def _build_hidden_monitor_combo(self, parent) -> QComboBox:
-        combo = QComboBox(parent)
-        combo.setVisible(False)
-        self._populate_monitor_combo(combo, default_index=0)
-        return combo
-
-    @staticmethod
-    def _build_hidden_volume(parent, default: int) -> tuple["ClickableSlider", QLabel]:
-        slider = ClickableSlider(Qt.Orientation.Horizontal, parent)
-        slider.setRange(0, 100)
-        slider.setValue(default)
-        slider.setVisible(False)
-        lbl = QLabel(str(default), parent)
-        lbl.setVisible(False)
-        return slider, lbl
-
-    # ── Slot-card visual helpers ──────────────────────────────────────────
-
-    @staticmethod
-    def _build_block_frame() -> QFrame:
-        """Subtle-contrast container for the Video / Audio sub-blocks
-        inside a slot card."""
-        frame = QFrame()
-        frame.setStyleSheet(
-            "QFrame { background: #1a1d27; border: 1px solid #2d3148; "
-            "border-radius: 6px; }"
-        )
-        return frame
-
-    @staticmethod
-    def _block_heading(text: str) -> QLabel:
-        lbl = QLabel(text)
-        lbl.setStyleSheet(
-            "color: #ff6b30; font-size: 11px; font-weight: bold; "
-            "text-transform: uppercase; letter-spacing: 1px; "
-            "background: transparent; border: none;"
-        )
-        return lbl
-
-    @staticmethod
-    def _sub_label(text: str) -> QLabel:
-        lbl = QLabel(text)
-        lbl.setStyleSheet(
-            "color: #9ba3c4; font-size: 10px; "
-            "background: transparent; border: none;"
-        )
-        return lbl
+    # The per-role slot builders + their helpers (_build_video_slot,
+    # _build_stim_slot, _build_mirror_slot, _build_audio_device_combo,
+    # _build_volume_row, _build_path_label, _build_file_picker_row,
+    # _build_block_frame, _block_heading, _sub_label,
+    # _build_hidden_*) are gone in v0.0.4. Live's per-slot UI was
+    # replaced with read-only Video and Output panels that render from
+    # slot_data + _prefs via _refresh_live_panels.
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
     def _slot_data(self, index: int) -> dict:
-        return self._slot_widgets[index]._slot_data  # type: ignore[attr-defined]
+        return self._slots[index]
 
     def _screen_sizes(self) -> list[tuple[int, int]]:
         return [(s.geometry().width(), s.geometry().height()) for s in self._screens]
 
-    # ── Browse callbacks ───────────────────────────────────────────────────────
-
-    def _on_browse_video(self, data: dict) -> None:
-        DebugLog.record("browse.video.dialog_open")
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select video file", "", _VIDEO_FILTER,
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
-        DebugLog.record("browse.video.dialog_closed", picked=bool(path))
-        if path:
-            data["video_path"] = path
-            data["video_label"].setText(os.path.basename(path))
-            data["video_label"].setToolTip(path)
-            self._refresh_monitor_state(data)
-            self._maybe_autofill_session_name(path)
-            # Apply Setup's audio-device roles so the slot's audio-output
-            # reflects the configured Scene / Haptic device instead of
-            # mpv's Autoselect fallback.
-            self._apply_setup_roles_to_slots()
-
-    def _on_clear_video(self, data: dict) -> None:
-        data["video_path"] = ""
-        data["video_label"].setText("No file selected")
-        data["video_label"].setToolTip("")
-        self._refresh_monitor_state(data)
+    # ── Session-name autofill ─────────────────────────────────────────────
 
     def _maybe_autofill_session_name(self, media_path: str) -> None:
         """Set the Session name from the picked media file if the user
-        hasn't already customized it."""
+        hasn't already customized it. Called from Library activation
+        (the only scene-load path in v0.0.4 — Browse buttons on Live
+        were dropped with the slot-card UI)."""
         current = self._session_name.text().strip()
         if current and current != "Untitled Session":
             return
@@ -1865,53 +1639,10 @@ class ControlWindow(QMainWindow):
             self._session_name.setText(stem)
             self.setWindowTitle(f"ForgePlayer — {stem}")
 
-    def _on_browse_audio(self, data: dict) -> None:
-        DebugLog.record("browse.audio.dialog_open")
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select audio file", "", _AUDIO_FILTER,
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
-        DebugLog.record("browse.audio.dialog_closed", picked=bool(path))
-        if path:
-            data["audio_path"] = path
-            # Browse-picked audio overrides any prior FunscriptSet on the
-            # slot — they're mutually exclusive sources for the haptic
-            # output. (Browse picking a `.funscript` directly is not yet
-            # wired up; users build the FunscriptSet via the Library /
-            # picker flow.)
-            data["funscript_set"] = None
-            self._refresh_audio_label(data)
-            data["audio_label"].setToolTip(path)
-            self._refresh_monitor_state(data)
-            if not data["video_path"]:
-                self._maybe_autofill_session_name(path)
-
-    def _on_clear_audio(self, data: dict) -> None:
-        data["audio_path"] = ""
-        # Clear the funscript source too — the X button means "wipe this
-        # slot's haptic source," not "only the audio-file fallback."
-        data["funscript_set"] = None
-        data["audio_label"].setToolTip("")
-        self._refresh_audio_label(data)
-        self._refresh_monitor_state(data)
-
-    def _refresh_monitor_state(self, data: dict) -> None:
-        """Dim the monitor dropdown for audio-only slots — there's no video
-        surface to route, so picking a monitor is meaningless."""
-        has_video = bool(data["video_path"])
-        combo: QComboBox = data["monitor_combo"]
-        combo.setEnabled(has_video)
-        if has_video:
-            combo.setToolTip("")
-        else:
-            combo.setToolTip(
-                "Audio-only slot — no monitor is used. "
-                "Load a video to enable monitor selection."
-            )
-
-    def _on_volume_changed(self, slot: int, value: int, lbl: QLabel) -> None:
-        lbl.setText(str(value))
-        self._engine.set_volume(slot, value)
+    # _on_browse_video / _on_clear_video / _on_browse_audio /
+    # _on_clear_audio / _refresh_monitor_state / _on_volume_changed are
+    # gone — no Browse buttons or volume sliders on Live anymore.
+    # Library is the only scene-load path; Setup owns routing.
 
     # ── Scan folder ────────────────────────────────────────────────────────────
 
@@ -1976,82 +1707,47 @@ class ControlWindow(QMainWindow):
         assignments = auto_assign(folder, self._screen_sizes())
         for i, slot in enumerate(assignments):
             data = self._slot_data(i)
-            vp = slot.get("video_path", "")
-            ap = slot.get("audio_path", "")
-            mi = slot.get("monitor_index", i)
-
-            data["video_path"] = vp
-            data["video_label"].setText(os.path.basename(vp) if vp else "No file selected")
-            data["video_label"].setToolTip(vp)
-
-            data["audio_path"] = ap
-            data["audio_label"].setToolTip(ap)
-            self._refresh_audio_label(data)
-
-            combo: QComboBox = data["monitor_combo"]
-            for idx in range(combo.count()):
-                if combo.itemData(idx) == mi:
-                    combo.setCurrentIndex(idx)
-                    break
-
-            self._refresh_monitor_state(data)
+            data["video_path"] = slot.get("video_path", "")
+            data["audio_path"] = slot.get("audio_path", "")
+        self._refresh_live_panels()
 
     # ── Session ────────────────────────────────────────────────────────────────
 
     def _current_session(self) -> Session:
+        """Save the current scene paths. v0.0.4 onwards, routing
+        (audio device / monitor / volume) is Setup-owned and not
+        round-tripped through session files. Old fields stay on
+        `SlotConfig` for backward compatibility — written as zeros.
+        """
         slots: list[SlotConfig] = []
         for i in range(_NUM_SLOTS):
             d = self._slot_data(i)
-            # Enabled state is now derived from whether the slot has media.
-            # Kept on SlotConfig for backward-compat with older session files.
             has_media = bool(d["video_path"] or d["audio_path"])
             slots.append(SlotConfig(
                 enabled=has_media,
                 video_path=d["video_path"],
                 audio_path=d["audio_path"],
-                monitor_index=d["monitor_combo"].currentData() or 0,
-                audio_device=d["audio_combo"].currentData() or "",
-                volume=d["volume_slider"].value(),
+                # Legacy fields — Setup owns these now.
+                monitor_index=0,
+                audio_device="",
+                volume=100,
             ))
         return Session(name=self._session_name.text(), slots=slots)
 
     def _apply_session(self, session: Session) -> None:
+        """Restore scene paths from a saved session. v0.0.4 ignores
+        the legacy device/monitor/volume fields — those now live in
+        Setup and Preferences."""
         self._session_name.setText(session.name)
-        for i, cfg in enumerate(session.slots[:3]):
+        for i, cfg in enumerate(session.slots[:_NUM_SLOTS]):
             d = self._slot_data(i)
-            # No explicit enabled flag in UI — cfg.enabled is derived from
-            # paths at save time; loading just trusts the paths we set below.
-
             d["video_path"] = cfg.video_path
-            d["video_label"].setText(
-                os.path.basename(cfg.video_path) if cfg.video_path else "No file selected"
-            )
-            d["video_label"].setToolTip(cfg.video_path)
-
             d["audio_path"] = cfg.audio_path
-            # Session schema doesn't yet carry funscript_set — clear any
-            # leftover from a prior in-memory scene so loading an older
-            # session can't accidentally inherit the previous scene's
-            # stim source. (TODO: extend SlotConfig to round-trip
-            # native funscript playback through saved sessions.)
+            # funscript_set isn't part of the session schema yet — clear
+            # any leftover from a prior in-memory scene so loading an
+            # old session doesn't inherit a stale stim source.
             d["funscript_set"] = None
-            d["audio_label"].setToolTip(cfg.audio_path)
-            self._refresh_audio_label(d)
-
-            combo: QComboBox = d["monitor_combo"]
-            for idx in range(combo.count()):
-                if combo.itemData(idx) == cfg.monitor_index:
-                    combo.setCurrentIndex(idx)
-                    break
-
-            a_combo: QComboBox = d["audio_combo"]
-            for idx in range(a_combo.count()):
-                if a_combo.itemData(idx) == cfg.audio_device:
-                    a_combo.setCurrentIndex(idx)
-                    break
-
-            d["volume_slider"].setValue(cfg.volume)
-            self._refresh_monitor_state(d)
+        self._refresh_live_panels()
 
     def _on_session_new(self) -> None:
         self._apply_session(Session())
@@ -2218,11 +1914,16 @@ class ControlWindow(QMainWindow):
                             resyncs=getattr(stream, "resync_count", 0),
                         )
 
-        # Clear references after all threads have completed.
+        # Clear references after all threads have completed. Also clear
+        # the per-slot resolved-source / silent-reason so the Output
+        # panel doesn't keep showing stale post-launch state after
+        # close.
         for i in range(_NUM_SLOTS):
             data = self._slot_data(i)
             data["stim_audio_stream"] = None
             data["aux_audio_streams"] = []
+            data.pop("aux_resolved_source", None)
+            data.pop("aux_silent_reason", None)
         # Terminate every engine slot — including audio-only slots that
         # don't have a PlayerWindow — so no mpv instances leak.
         for i in range(_NUM_SLOTS):
@@ -2239,6 +1940,9 @@ class ControlWindow(QMainWindow):
         self._seek_bar.setValue(0)
         self._time_label.setText("0:00")
         self._dur_label.setText("0:00")
+        # Re-render the Output panel — H2 should drop back to its
+        # pre-launch summary now that there's no resolved source.
+        self._refresh_live_panels()
 
     def _launch_stim_synth(
         self,
@@ -2803,9 +2507,12 @@ class ControlWindow(QMainWindow):
             if not (video_path or audio_path or funscript_set):
                 continue
 
-            audio_device: str = data["audio_combo"].currentData() or ""
+            # v0.0.4: routing reads directly from `_prefs`. Slot index
+            # determines role (video / stim / mirror); role determines
+            # device + screen + fill via the `_*_for_slot` helpers.
+            audio_device = self._audio_device_for_slot(i)
 
-            # Native funscript synthesis (Stim slot, v0.0.2). Bypasses mpv
+            # Native funscript synthesis (Stim slot). Bypasses mpv
             # entirely — StimSynth produces audio from the funscript and
             # streams to the slot's audio device. Time and play/pause
             # follow the SyncEngine's primary player (Slot 1's video).
@@ -2820,20 +2527,14 @@ class ControlWindow(QMainWindow):
                 DebugLog.record("players.launch_slot", slot=i, mode="audio_only")
                 self._engine.init_player_audio_only(i, audio_device)
                 self._engine.load_file(i, audio_path)
-                self._engine.set_volume(i, data["volume_slider"].value())
                 launched = True
                 continue
 
-            requested_screen_idx = data["monitor_combo"].currentData()
-            # Defensive fallback if the saved/selected index is out of
-            # range — we want to log when this happens so we can tell
-            # "user picked Screen 2 but we silently substituted Screen 1"
-            # apart from "user picked Screen 1 directly".
-            if requested_screen_idx is None or requested_screen_idx >= len(self._screens):
+            screen_idx = self._screen_index_for_slot(i)
+            if screen_idx is None or screen_idx >= len(self._screens):
                 screen_idx = 0
                 fell_back_to_primary = True
             else:
-                screen_idx = requested_screen_idx
                 fell_back_to_primary = False
             screen = self._screens[screen_idx]
             target_geo = screen.geometry()
@@ -2844,10 +2545,6 @@ class ControlWindow(QMainWindow):
                 mode="video",
                 has_audio_override=bool(audio_path),
                 fullscreen=self._fullscreen_toggle.isChecked(),
-                # Monitor resolution chain — every step recorded so we
-                # can see exactly where multi-monitor placement falls
-                # apart on the user's setup.
-                requested_screen_idx=requested_screen_idx,
                 resolved_screen_idx=screen_idx,
                 fell_back_to_primary=fell_back_to_primary,
                 screen_name=screen.name(),
@@ -2855,7 +2552,7 @@ class ControlWindow(QMainWindow):
                     "x": target_geo.x(), "y": target_geo.y(),
                     "w": target_geo.width(), "h": target_geo.height(),
                 },
-                monitor_combo_count=data["monitor_combo"].count(),
+                source="setup_prefs",
             )
 
             pw = PlayerWindow(i, self._engine)
@@ -2869,7 +2566,7 @@ class ControlWindow(QMainWindow):
             self._player_windows[i] = pw
 
             # Init mpv AFTER show() so the native window handle is valid
-            fill = bool(data["fill_check"].isChecked())
+            fill = self._fill_for_screen_index(screen_idx)
             self._engine.init_player(
                 i, pw.native_wid(), audio_device, fill=fill,
             )
@@ -2891,13 +2588,17 @@ class ControlWindow(QMainWindow):
                     self._engine._players[i].audio_files = [audio_path]  # type: ignore[index]
                 except Exception:
                     pass
-            # Apply saved volume
-            self._engine.set_volume(i, data["volume_slider"].value())
+            # Mirror slots are muted; primary video plays at default volume.
+            if _SLOT_ROLES[i] == "mirror":
+                self._engine.set_volume(i, 0)
             launched = True
 
         if launched:
             self._timer.start()
             self.raise_()
+        # Re-render the Live panels so the Output panel picks up
+        # aux_resolved_source / aux_silent_reason set during launch.
+        self._refresh_live_panels()
 
     # ── Transport ──────────────────────────────────────────────────────────────
 
