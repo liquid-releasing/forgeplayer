@@ -179,15 +179,17 @@ class ControlWindow(QMainWindow):
         # ── Seek bar ──
         seek_row = QHBoxLayout()
         self._time_label = QLabel("0:00")
-        self._time_label.setFixedWidth(52)
+        self._time_label.setFixedWidth(58)
+        self._time_label.setStyleSheet("font-size: 13px;")
         self._seek_bar = ClickableSlider(Qt.Orientation.Horizontal)
         self._seek_bar.setRange(0, 10000)
         # Tall enough for a thumb hit on a touchscreen.
-        self._seek_bar.setMinimumHeight(40)
+        self._seek_bar.setMinimumHeight(48)
         self._seek_bar.sliderPressed.connect(self._on_seek_press)
         self._seek_bar.sliderReleased.connect(self._on_seek_release)
         self._dur_label = QLabel("0:00")
-        self._dur_label.setFixedWidth(52)
+        self._dur_label.setFixedWidth(58)
+        self._dur_label.setStyleSheet("font-size: 13px;")
         self._dur_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
@@ -197,8 +199,9 @@ class ControlWindow(QMainWindow):
         vbox.addLayout(seek_row)
 
         # ── Transport controls ──
-        # Touch-friendly heights (44px). Prev/Next chapter and the
-        # Calibrate row land in the next commit.
+        # Touch-friendly heights (52px) optimized for the 1090×720
+        # touchscreen. Prev/Next chapter and the Calibrate row land in
+        # the next commit.
         transport = QHBoxLayout()
         transport.setSpacing(8)
         transport.addStretch()
@@ -209,22 +212,26 @@ class ControlWindow(QMainWindow):
             ("−5s",  lambda: self._skip(-5)),
         ]:
             b = QPushButton(label)
-            b.setFixedHeight(44)
+            b.setFixedHeight(52)
+            b.setMinimumWidth(64)
+            b.setStyleSheet("font-size: 13px;")
             b.clicked.connect(fn)
             transport.addWidget(b)
 
         self._btn_play = QPushButton("▶  Play")
-        self._btn_play.setFixedWidth(120)
-        self._btn_play.setFixedHeight(44)
+        self._btn_play.setFixedWidth(140)
+        self._btn_play.setFixedHeight(52)
         self._btn_play.setStyleSheet(
             "background: #ff4b4b; color: white; font-weight: bold; "
-            "font-size: 14px; border-radius: 6px;"
+            "font-size: 16px; border-radius: 6px;"
         )
         self._btn_play.clicked.connect(self._on_play_pause)
         transport.addWidget(self._btn_play)
 
         btn_stop = QPushButton("⏹  Stop")
-        btn_stop.setFixedHeight(44)
+        btn_stop.setFixedHeight(52)
+        btn_stop.setMinimumWidth(80)
+        btn_stop.setStyleSheet("font-size: 13px;")
         btn_stop.clicked.connect(self._on_stop)
         transport.addWidget(btn_stop)
 
@@ -234,39 +241,32 @@ class ControlWindow(QMainWindow):
             ("+30s", lambda: self._skip(30)),
         ]:
             b = QPushButton(label)
-            b.setFixedHeight(44)
+            b.setFixedHeight(52)
+            b.setMinimumWidth(64)
+            b.setStyleSheet("font-size: 13px;")
             b.clicked.connect(fn)
             transport.addWidget(b)
 
         transport.addStretch()
         vbox.addLayout(transport)
 
-        # ── Launch / Close buttons + Fullscreen toggle ──
+        # ── Launch / Close buttons ──
         action_row = QHBoxLayout()
         action_row.addStretch()
 
-        self._fullscreen_toggle = QCheckBox("Fullscreen")
-        self._fullscreen_toggle.setToolTip(
-            "When on, player windows take over their whole monitor (kiosk mode).\n"
-            "When off (default), windowed players let you keep your desktop visible.\n"
-            "Press F11 inside a player to toggle fullscreen at any time."
-        )
-        self._fullscreen_toggle.setStyleSheet("color: #9ba3c4;")
-        action_row.addWidget(self._fullscreen_toggle)
-
-        action_row.addSpacing(12)
-
         btn_close_players = QPushButton("Close Players")
-        btn_close_players.setFixedHeight(48)
+        btn_close_players.setFixedHeight(56)
+        btn_close_players.setMinimumWidth(140)
+        btn_close_players.setStyleSheet("font-size: 14px;")
         btn_close_players.clicked.connect(self._close_players)
         action_row.addWidget(btn_close_players)
 
         btn_launch = QPushButton("Launch Players")
-        btn_launch.setFixedHeight(48)
-        btn_launch.setFixedWidth(180)
+        btn_launch.setFixedHeight(56)
+        btn_launch.setFixedWidth(200)
         btn_launch.setStyleSheet(
             "background: #2d6a4f; color: white; font-weight: bold; "
-            "font-size: 14px; border-radius: 6px;"
+            "font-size: 16px; border-radius: 6px;"
         )
         btn_launch.clicked.connect(self._on_launch)
         action_row.addWidget(btn_launch)
@@ -286,27 +286,42 @@ class ControlWindow(QMainWindow):
     def _build_video_panel(self) -> QGroupBox:
         """Read-only Video panel. Shows: scene file (if loaded), the
         list of monitors video will play on (read from Setup's
-        playback_screen_indices), and per-monitor fill mode (read from
-        Setup's fill_screen_indices). No editable controls — user
-        manages routing in Setup.
+        playback_screen_indices), per-monitor fill mode (read from
+        Setup's fill_screen_indices), and the per-session Fullscreen
+        toggle (the one editable in this panel — fullscreen is a
+        right-now choice, not a routing decision).
         """
         box = QGroupBox("Video")
         layout = QVBoxLayout(box)
-        layout.setSpacing(6)
+        layout.setSpacing(8)
         layout.setContentsMargins(14, 14, 14, 14)
 
         self._video_file_label = QLabel("(no scene loaded)")
-        self._video_file_label.setStyleSheet("font-size: 13px;")
+        self._video_file_label.setStyleSheet("font-size: 14px;")
         self._video_file_label.setWordWrap(True)
         layout.addWidget(self._video_file_label)
 
         # Monitors block — populated by _refresh_live_panels.
         self._video_monitors_label = QLabel("")
-        self._video_monitors_label.setStyleSheet("color: #9ba3c4; font-size: 12px;")
+        self._video_monitors_label.setStyleSheet("color: #9ba3c4; font-size: 13px;")
         self._video_monitors_label.setWordWrap(True)
         layout.addWidget(self._video_monitors_label)
 
         layout.addStretch(1)
+
+        # Fullscreen toggle lives at the bottom of the Video panel —
+        # right under the monitor list it affects. Pre-redesign this
+        # was an action-row checkbox between Close and Launch; the
+        # video-tab home is more discoverable.
+        self._fullscreen_toggle = QCheckBox("Fullscreen players")
+        self._fullscreen_toggle.setToolTip(
+            "When on, player windows take over their whole monitor (kiosk mode).\n"
+            "When off (default), windowed players let you keep your desktop visible.\n"
+            "Press F11 inside a player to toggle fullscreen at any time."
+        )
+        self._fullscreen_toggle.setStyleSheet("color: #9ba3c4; font-size: 12px;")
+        layout.addWidget(self._fullscreen_toggle)
+
         return box
 
     def _build_output_panel(self) -> QGroupBox:
