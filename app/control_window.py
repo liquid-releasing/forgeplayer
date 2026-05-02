@@ -429,7 +429,7 @@ class ControlWindow(QMainWindow):
                 if 0 <= screen_idx < len(self._screens):
                     s = self._screens[screen_idx]
                     geo = s.geometry()
-                    aspect = "fill" if screen_idx in fill else "letterbox"
+                    aspect = "crop" if screen_idx in fill else "letterbox"
                     lines.append(
                         f"→ Screen {screen_idx + 1}  ·  "
                         f"{geo.width()}×{geo.height()}  ·  {aspect}"
@@ -959,8 +959,10 @@ class ControlWindow(QMainWindow):
 
         pb_helper = QLabel(
             "Check the monitors you use for video. Leave all unchecked to "
-            "allow any screen. Fill = crop video to fill the monitor "
-            "(useful on ultrawide); off = letterbox to preserve aspect."
+            "allow any screen. Crop = scale the video to fill this "
+            "monitor's aspect (useful on ultrawide); off = letterbox/"
+            "pillarbox to preserve the video's native aspect. "
+            "(Fullscreen on Live is a separate choice — kiosk mode on/off.)"
         )
         pb_helper.setStyleSheet("color: #6b7280; font-size: 11px;")
         pb_helper.setWordWrap(True)
@@ -981,11 +983,14 @@ class ControlWindow(QMainWindow):
             self._setup_playback_checkboxes.append(cb)
             row.addWidget(cb, 1)
 
-            fill_cb = QCheckBox("Fill")
+            fill_cb = QCheckBox("Crop")
             fill_cb.setChecked(idx in self._prefs.fill_screen_indices)
             fill_cb.setToolTip(
-                "Crop video to fill the monitor (panscan). Useful for 16:9 "
-                "content on a 32:9 ultrawide. Off = letterbox / pillarbox."
+                "Crop video to fill this monitor's aspect (mpv panscan).\n"
+                "Useful for 16:9 content on a 32:9 ultrawide.\n"
+                "Off = letterbox / pillarbox to preserve the source aspect.\n"
+                "Different from Live's Fullscreen toggle, which controls "
+                "whether the player window takes over the whole monitor."
             )
             fill_cb.toggled.connect(self._on_fill_screens_changed)
             self._setup_fill_checkboxes.append(fill_cb)
