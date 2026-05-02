@@ -69,6 +69,10 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ForgePlayer")
         self.setMinimumWidth(980)
+        # Initial size targets the 1090×720 touchpad as the spiritual
+        # minimum + a bit of breathing room. On larger displays the
+        # user can drag to resize; we don't auto-maximize.
+        self.resize(1280, 760)
 
         self._engine = SyncEngine()
         self._player_windows: list[PlayerWindow | None] = [None] * _NUM_SLOTS
@@ -603,21 +607,12 @@ class ControlWindow(QMainWindow):
 
     def _build_preferences_synth_page(self) -> QWidget:
         """Audio-synthesis column for the Preferences tab — algorithm
-        picker + latency offset. Wraps `_build_setup_synth_box` (which
-        builds the actual box) in scroll-area chrome and a subtitle so
-        proportions match the Content Preference column next to it.
-
-        Note: kept the `_build_setup_synth_box` name despite the box's
-        new home on Preferences because the box itself is unchanged —
-        renaming would just churn diff lines.
+        picker + latency offset. Box is at its natural height; trailing
+        stretch pushes it to the top so it doesn't grow into empty
+        space.
         """
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        inner = QWidget()
-        root = QVBoxLayout(inner)
+        page = QWidget()
+        root = QVBoxLayout(page)
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
@@ -627,33 +622,15 @@ class ControlWindow(QMainWindow):
             "stereostim hardware."
         )
         root.addWidget(subtitle)
-
-        # Box claims the leftover vertical space so it fills the tab
-        # (large screens have lots of headroom we don't need to leave
-        # blank). No trailing addStretch — it'd compete with the box's
-        # Expanding policy and trap whitespace at the bottom.
-        box = self._build_setup_synth_box()
-        box.setSizePolicy(
-            QSizePolicy.Policy.Preferred,
-            QSizePolicy.Policy.MinimumExpanding,
-        )
-        root.addWidget(box, 1)
-
-        scroll.setWidget(inner)
-        return scroll
+        root.addWidget(self._build_setup_synth_box())
+        root.addStretch(1)
+        return page
 
     def _build_preferences_content_page(self) -> QWidget:
-        """Wraps the Content Preference box in the same scroll-area
-        chrome the other Setup/Preferences columns use, so visual
-        proportions match across the tab.
-        """
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        inner = QWidget()
-        root = QVBoxLayout(inner)
+        """Content Preference column. Natural height — no scroll
+        wrapper, no expanding box."""
+        page = QWidget()
+        root = QVBoxLayout(page)
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
@@ -663,27 +640,20 @@ class ControlWindow(QMainWindow):
             "regardless of this setting."
         )
         root.addWidget(subtitle)
-
-        # Same Expanding policy as the synth column so the two boxes
-        # match heights on a tall window.
-        box = self._build_setup_content_pref_box()
-        box.setSizePolicy(
-            QSizePolicy.Policy.Preferred,
-            QSizePolicy.Policy.MinimumExpanding,
-        )
-        root.addWidget(box, 1)
-
-        scroll.setWidget(inner)
-        return scroll
+        root.addWidget(self._build_setup_content_pref_box())
+        root.addStretch(1)
+        return page
 
     def _build_setup_audio_page(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        inner = QWidget()
-        root = QVBoxLayout(inner)
+        """Audio-device-roles column. Natural height — no scroll
+        wrapper. Three role rows + helper text fit cleanly at the
+        1090×720 minimum. Scrolling on a Setup column is unwelcome
+        friction; if a future expansion blows past available height,
+        we'll restructure (e.g., move haptic offset / extra haptic
+        roles to Preferences) rather than reintroducing scroll.
+        """
+        page = QWidget()
+        root = QVBoxLayout(page)
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
@@ -730,9 +700,7 @@ class ControlWindow(QMainWindow):
 
         root.addWidget(role_box)
         root.addStretch()
-
-        scroll.setWidget(inner)
-        return scroll
+        return page
 
     def _build_setup_content_pref_box(self) -> QGroupBox:
         """Content preference — sound vs funscript tie-breaker.
@@ -901,13 +869,14 @@ class ControlWindow(QMainWindow):
         return lbl
 
     def _build_setup_monitors_page(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        inner = QWidget()
-        root = QVBoxLayout(inner)
+        """Monitor-roles column. Natural height — no scroll wrapper.
+        Per-screen rows scale linearly with detected screen count;
+        4-monitor rigs (the high-end target) fit comfortably at
+        720px+. If a future rig has more screens than fit, we'll
+        revisit (probably with a horizontal layout per row to halve
+        the height)."""
+        page = QWidget()
+        root = QVBoxLayout(page)
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
@@ -998,9 +967,7 @@ class ControlWindow(QMainWindow):
 
         root.addWidget(monitor_box)
         root.addStretch()
-
-        scroll.setWidget(inner)
-        return scroll
+        return page
 
     def _on_control_screen_changed(self) -> None:
         idx = self._setup_control_screen_combo.currentData()

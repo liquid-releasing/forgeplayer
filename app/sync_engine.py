@@ -232,20 +232,43 @@ class SyncEngine:
 
 
 def _is_display_audio(device: dict) -> bool:
-    """Heuristically identify HDMI/DisplayPort 'phantom' audio devices.
+    """Heuristically identify devices the user almost never wants to
+    route to: HDMI / DisplayPort phantom outputs and the openal
+    backend.
 
-    mpv's WASAPI backend exposes device descriptions like
-    'Odyssey G95NC (HD Audio Driver for Display Audio)' and names like
-    'wasapi/{...DisplayPort...}'. The monitor itself has no speakers in
-    most setups, so these devices aren't useful for Scene/Haptic routing.
+    HDMI/DP phantoms: mpv's WASAPI backend exposes devices like
+    'Odyssey G95NC (NVIDIA High Definition Audio)' or '1 - 12.3FHD
+    (AMD High Definition Audio Device)'. These are the GPU-driven
+    display audio outputs — most monitors don't have speakers, so
+    routing here ends up silent. The 'High Definition Audio' phrase
+    is the canonical Microsoft Class Driver name for HDMI/DP audio
+    paths; any device with that descriptor is overwhelmingly likely
+    to be a phantom. Real speaker devices use names like 'Speakers
+    (Realtek(R) Audio)' or 'Speakers (USB Audio Device)' — the
+    'Speakers' prefix is the tell.
+
+    openal: mpv's alternate audio backend. Higher latency than
+    WASAPI on Windows and frequently broken; we standardize on
+    WASAPI for stim routing where timing matters.
+
+    The 'auto' / 'Autoselect device' WASAPI entry stays in the list
+    — it's a legitimate "let the OS pick" option for the Scene Audio
+    role when the user hasn't decided.
     """
     desc = (device.get("description", "") or "").lower()
     name = (device.get("name", "") or "").lower()
     haystack = desc + " " + name
+
+    # OpenAL backend — different audio abstraction layer; not what we want.
+    if name.startswith("openal") or name == "openal":
+        return True
+
+    # HDMI / DisplayPort phantom audio.
     needles = (
         "display audio",
         "displayport",
         "hdmi",
         "dp audio",
+        "high definition audio",  # NVIDIA/AMD/Intel HDMI/DP class driver
     )
     return any(n in haystack for n in needles)
