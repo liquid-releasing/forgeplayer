@@ -37,18 +37,15 @@ _SLOT_ROLES = ["video", "stim", "mirror", "mirror"]
 _NUM_SLOTS = len(_SLOT_LABELS)
 _POLL_MS = 100
 
-# Minimal-touch checkbox style for the Fullscreen toggle on Live's
-# Video panel. The panel background is dark (~#1a1d27) and the default
-# Qt indicator border is a similarly-dark grey — the box was
-# effectively invisible. This style nudges only the indicator border
-# brighter so the checkbox is findable. Default size, default
-# checkmark, default everything else: matches the user's preference
-# ("black checkbox against gray, just make the line visible").
-# Reused only on Live; Setup's checkboxes sit on a lighter QGroupBox
-# interior and don't need the help.
+# Light-touch label style for the Fullscreen toggle on Live's dark
+# Video panel — default Qt indicator (preserving its built-in check
+# glyph) plus a brighter label color. Earlier attempt set
+# QCheckBox::indicator { border: ...; } to make the unchecked indicator
+# visible, but touching ANY indicator subcontrol drops Qt's default
+# check glyph: the box looked the same checked or unchecked, so users
+# thought the control was disabled. Backing off to label-only styling.
 _CHECKBOX_ON_DARK_STYLE = (
     "QCheckBox { color: #cbd1e0; font-size: 13px; spacing: 8px; }"
-    "QCheckBox::indicator { border: 1px solid #6b7280; }"
 )
 _MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.avi *.webm *.mp3 *.m4a *.wav *.flac *.ogg);;"
@@ -2512,6 +2509,22 @@ class ControlWindow(QMainWindow):
         )
         self._close_players()
 
+        # Per-slot pre-launch snapshot — diagnose "only one video
+        # showed up" by surfacing exactly which slots had media at
+        # launch time. Without this we can't tell whether the launch
+        # flow skipped a slot (no media) or tried and failed silently.
+        for i in range(_NUM_SLOTS):
+            data = self._slot_data(i)
+            DebugLog.record(
+                "players.slot_snapshot",
+                slot=i,
+                role=_SLOT_ROLES[i],
+                has_video=bool(data.get("video_path")),
+                has_audio=bool(data.get("audio_path")),
+                has_funscript=bool(data.get("funscript_set")),
+                screen_idx=self._screen_index_for_slot(i),
+            )
+
         launched = False
         for i in range(_NUM_SLOTS):
             data = self._slot_data(i)
@@ -2520,6 +2533,10 @@ class ControlWindow(QMainWindow):
             funscript_set = data.get("funscript_set")
             # Slot is "enabled" iff it has media. No separate checkbox anymore.
             if not (video_path or audio_path or funscript_set):
+                DebugLog.record(
+                    "players.slot_skipped", slot=i,
+                    reason="no media",
+                )
                 continue
 
             # v0.0.4: routing reads directly from `_prefs`. Slot index
