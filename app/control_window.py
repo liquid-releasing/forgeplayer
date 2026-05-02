@@ -37,36 +37,19 @@ _SLOT_ROLES = ["video", "stim", "mirror", "mirror"]
 _NUM_SLOTS = len(_SLOT_LABELS)
 _POLL_MS = 100
 
-# Bigger, brighter checkboxes — the default Qt indicator is ~13px and
-# is nearly invisible on the dark panel/background colors used in
-# Setup and Live. Touchscreen + dark theme = needs bumping. Used for
-# Fullscreen, per-screen Playback / Fill, and any other panel
-# checkbox where visibility matters more than space.
-_CHECKBOX_VISIBLE_STYLE = """
-QCheckBox {
-    color: #cbd1e0;
-    font-size: 13px;
-    spacing: 8px;
-}
-QCheckBox::indicator {
-    width: 20px;
-    height: 20px;
-    border: 1.5px solid #6b7280;
-    border-radius: 3px;
-    background: #1a1d27;
-}
-QCheckBox::indicator:hover {
-    border-color: #9ba3c4;
-}
-QCheckBox::indicator:checked {
-    background: #2d6a4f;
-    border-color: #4ade80;
-    image: url();
-}
-QCheckBox::indicator:checked:hover {
-    background: #3a8862;
-}
-"""
+# Minimal-touch checkbox style for the Fullscreen toggle on Live's
+# Video panel. The panel background is dark (~#1a1d27) and the default
+# Qt indicator border is a similarly-dark grey — the box was
+# effectively invisible. This style nudges only the indicator border
+# brighter so the checkbox is findable. Default size, default
+# checkmark, default everything else: matches the user's preference
+# ("black checkbox against gray, just make the line visible").
+# Reused only on Live; Setup's checkboxes sit on a lighter QGroupBox
+# interior and don't need the help.
+_CHECKBOX_ON_DARK_STYLE = (
+    "QCheckBox { color: #cbd1e0; font-size: 13px; spacing: 8px; }"
+    "QCheckBox::indicator { border: 1px solid #6b7280; }"
+)
 _MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.avi *.webm *.mp3 *.m4a *.wav *.flac *.ogg);;"
     "All files (*)"
@@ -354,12 +337,12 @@ class ControlWindow(QMainWindow):
             "When off (default), windowed players let you keep your desktop visible.\n"
             "Press F11 inside a player to toggle fullscreen at any time."
         )
-        # Visible indicator on the dark panel background. Default Qt
-        # checkbox is ~13px and renders nearly invisible on dark themes;
-        # bumping to 20px + a brighter unchecked border makes the state
-        # readable from a glance, which matters for a touch-target
-        # control. Same treatment is reused on the Setup Fill rows.
-        self._fullscreen_toggle.setStyleSheet(_CHECKBOX_VISIBLE_STYLE)
+        # The Video panel background is dark (~#1a1d27); a default Qt
+        # checkbox border is similar grey on the same shade, so the
+        # whole indicator vanishes. Just brightening the border line
+        # restores visibility without changing size or any other
+        # checkbox visuals.
+        self._fullscreen_toggle.setStyleSheet(_CHECKBOX_ON_DARK_STYLE)
         layout.addWidget(self._fullscreen_toggle)
 
         return box
@@ -995,7 +978,6 @@ class ControlWindow(QMainWindow):
             )
             cb.setChecked(idx in self._prefs.playback_screen_indices)
             cb.toggled.connect(self._on_playback_screens_changed)
-            cb.setStyleSheet(_CHECKBOX_VISIBLE_STYLE)
             self._setup_playback_checkboxes.append(cb)
             row.addWidget(cb, 1)
 
@@ -1006,7 +988,6 @@ class ControlWindow(QMainWindow):
                 "content on a 32:9 ultrawide. Off = letterbox / pillarbox."
             )
             fill_cb.toggled.connect(self._on_fill_screens_changed)
-            fill_cb.setStyleSheet(_CHECKBOX_VISIBLE_STYLE)
             self._setup_fill_checkboxes.append(fill_cb)
             row.addWidget(fill_cb)
 

@@ -233,8 +233,8 @@ class SyncEngine:
 
 def _is_display_audio(device: dict) -> bool:
     """Heuristically identify devices the user almost never wants to
-    route to: HDMI / DisplayPort phantom outputs and the openal
-    backend.
+    route to: the mpv 'auto' / 'openal' meta-entries and HDMI / DP
+    phantom outputs.
 
     HDMI/DP phantoms: mpv's WASAPI backend exposes devices like
     'Odyssey G95NC (NVIDIA High Definition Audio)' or '1 - 12.3FHD
@@ -247,17 +247,23 @@ def _is_display_audio(device: dict) -> bool:
     (Realtek(R) Audio)' or 'Speakers (USB Audio Device)' — the
     'Speakers' prefix is the tell.
 
+    'auto' (Autoselect device): mpv's "let me pick the OS default"
+    meta-entry. Redundant with our role-combo "— not set —" sentinel;
+    a user who picks Autoselect in our UI is doing the same thing
+    they'd do by leaving the role unset, just with extra confusion
+    about what the option does. Filter it.
+
     openal: mpv's alternate audio backend. Higher latency than
     WASAPI on Windows and frequently broken; we standardize on
     WASAPI for stim routing where timing matters.
-
-    The 'auto' / 'Autoselect device' WASAPI entry stays in the list
-    — it's a legitimate "let the OS pick" option for the Scene Audio
-    role when the user hasn't decided.
     """
     desc = (device.get("description", "") or "").lower()
     name = (device.get("name", "") or "").lower()
     haystack = desc + " " + name
+
+    # mpv's "auto" entry — surfaces as name='auto' description='Autoselect device'.
+    if name == "auto":
+        return True
 
     # OpenAL backend — different audio abstraction layer; not what we want.
     if name.startswith("openal") or name == "openal":
