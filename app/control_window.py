@@ -117,10 +117,13 @@ class ControlWindow(QMainWindow):
         # ── Session toolbar (common across tabs) ──
         vbox.addWidget(self._build_session_bar())
 
-        # ── Tab container (Live / Setup / Library) ──
+        # ── Tab container — Library | Live | Setup | Preferences ──
+        # Order reflects the user-flow journey: Library (pick a scene)
+        # → Live (drive playback) → Setup (one-time hardware wiring)
+        # → Preferences (rare behavior tuning). Setup and Preferences
+        # are separated so each has a focused mental model: Setup =
+        # "what I plugged in", Preferences = "how I want it to behave."
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_live_tab(), "Live")
-        self._tabs.addTab(self._build_setup_tab(), "Setup")
 
         self._library_panel = LibraryPanel()
         self._library_panel.scene_activated.connect(self._on_scene_activated)
@@ -128,6 +131,9 @@ class ControlWindow(QMainWindow):
             lambda entry: self._on_scene_activated(entry, force_picker=True)
         )
         self._tabs.addTab(self._library_panel, "Library")
+        self._tabs.addTab(self._build_live_tab(), "Live")
+        self._tabs.addTab(self._build_setup_tab(), "Setup")
+        self._tabs.addTab(self._build_preferences_tab(), "Preferences")
 
         vbox.addWidget(self._tabs, 1)
 
@@ -248,11 +254,11 @@ class ControlWindow(QMainWindow):
         return tab
 
     def _build_setup_tab(self) -> QWidget:
-        """Setup — three columns side-by-side: Audio device roles, Audio
-        synthesis, Monitor roles. Each gets equal stretch so they fit in a
-        ~1300 px control window without scrolling. The user configures all
-        three once; Library clicks then auto-route Slot 1 to Scene Audio,
-        Slot 2 to Haptic 1 with the chosen synthesis algorithm.
+        """Setup — the wiring tab. Two columns side-by-side: Audio device
+        roles, Monitor roles. The user answers "what's plugged in where?"
+        once. Behavior tuning (synth algorithm, content preference,
+        haptic offset) lives on the Preferences tab so this view stays
+        focused and never scrolls on a 1920×720 control screen.
         """
         container = QWidget()
         outer = QVBoxLayout(container)
@@ -269,19 +275,72 @@ class ControlWindow(QMainWindow):
 
         columns = QHBoxLayout()
         columns.setSpacing(16)
-        # Order: Synthesis | Audio device roles | Monitors. Synthesis first
-        # because it shapes the experience (algorithm + offset) — once you
-        # pick it, audio devices and monitors are "where it goes."
-        # Equal stretch — combo size policies (AdjustToMinimumContentsLength)
-        # let each column shrink its dropdowns; long device names and
-        # screen labels still show fully when the dropdown is opened.
-        columns.addWidget(self._build_setup_synth_page(), 1)
+        # Two equal columns. Audio device roles on the left (the more
+        # frequent reconfiguration when the user plugs in a new dongle);
+        # Monitor roles on the right.
         columns.addWidget(self._build_setup_audio_page(), 1)
         columns.addWidget(self._build_setup_monitors_page(), 1)
         outer.addLayout(columns, 1)
 
         outer.addWidget(self._setup_status)
         return container
+
+    def _build_preferences_tab(self) -> QWidget:
+        """Preferences — the behavior-tuning tab. Synthesis algorithm,
+        haptic latency offset, content preference, and (future) haptic
+        feature toggles. Distinct mental model from Setup: Setup
+        answers "what's wired"; Preferences answers "how should it
+        behave." Users touch this tab rarely after initial config, so
+        it sits last in the tab order.
+        """
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(20, 16, 20, 16)
+        outer.setSpacing(10)
+
+        title = QLabel("Preferences")
+        tf = title.font(); tf.setPointSize(18); tf.setBold(True); title.setFont(tf)
+        outer.addWidget(title)
+
+        columns = QHBoxLayout()
+        columns.setSpacing(16)
+        # Two columns: Audio synthesis (algorithm + offset) on the left,
+        # Content preference on the right. Both have room to grow as
+        # haptic features arrive — algorithm column can host pulse-shape
+        # controls; content column can host per-port content overrides.
+        columns.addWidget(self._build_setup_synth_page(), 1)
+        columns.addWidget(self._build_preferences_content_page(), 1)
+        outer.addLayout(columns, 1)
+        outer.addStretch(1)
+        return container
+
+    def _build_preferences_content_page(self) -> QWidget:
+        """Wraps the Content Preference box in the same scroll-area
+        chrome the other Setup/Preferences columns use, so visual
+        proportions match across the tab.
+        """
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        inner = QWidget()
+        root = QVBoxLayout(inner)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        subtitle = self._column_subtitle(
+            "When a scene ships both forms for the same haptic destination, "
+            "this picks the winner. With only one form available, it plays "
+            "regardless of this setting."
+        )
+        root.addWidget(subtitle)
+
+        root.addWidget(self._build_setup_content_pref_box())
+        root.addStretch()
+
+        scroll.setWidget(inner)
+        return scroll
 
     def _build_setup_audio_page(self) -> QWidget:
         scroll = QScrollArea()
@@ -295,12 +354,10 @@ class ControlWindow(QMainWindow):
         root.setSpacing(12)
 
         subtitle = self._column_subtitle(
-            "Which physical port carries each role, and what to play when a "
-            "scene ships both a sound file and a funscript."
+            "Pick which physical audio device handles each role. Library "
+            "clicks use these to route automatically — set this once."
         )
         root.addWidget(subtitle)
-
-        root.addWidget(self._build_setup_content_pref_box())
 
         role_box = QGroupBox("Audio device roles")
         rl = QVBoxLayout(role_box)
