@@ -120,6 +120,35 @@ v2
 
 ---
 
+## v0.0.4 — Post-alpha polish
+
+Items deferred during the 2026-05-03 alpha push. None block alpha.
+
+- [ ] **About page in-app** — branded splash with version, credits,
+      links to docs and the upstream projects (mpv, restim, funscript-tools).
+- [ ] **Control panel sizing on monitor change** — moving the control
+      window to a smaller secondary screen (e.g. 1280×720) leaves it
+      taller than the screen. Cosmetic but ugly.
+- [ ] **Click +10 s while stopped jumps to 0** — timeline goes back
+      to start instead of the current position; it's a transport-state
+      ordering bug.
+- [ ] **Empty-state hint on Live tab** — when no scene is loaded, the
+      Live tab is mostly blank. Add a "Click a scene in Library to get
+      started" hint.
+- [ ] **Library setup-summary strip** — surface the active picks
+      (funscript set, video variant, stim audio) as a thin bar above
+      the tile grid. Currently only visible inside the picker dialog.
+- [ ] **Arrow-key navigation in Library** — keyboard nav across tiles.
+- [ ] **Prev / Next chapter transport buttons** — for scenes with
+      chapter markers.
+- [ ] **Hardware-side pop investigation** — 2026-05-03 dogfood
+      narrowed remaining pops to outside our audio data (WAV recording
+      provably clean). WASAPI exclusive mode for stim addresses one
+      common cause; remaining dongle-side clicks may need a different
+      USB hub / cable / port to diagnose. Hold-on-fail.
+
+---
+
 ## v0.0.3 — Dogfood Polish
 
 - [ ] **White-screen-after-double-click intermittent** — reproduced ~3x in v0.0.2 dogfood; **not seen since (as of 2026-04-29)**. Library double-click → both video panes white, won't respond to Play. App restart only recovery. May have been incidentally fixed by v0.0.2-onward stim-audio / startup-timing work. Demoted from blocker to monitor — capture stderr if it recurs (`python main.py 2> mpv-err.txt`). Original suspects: mpv vs Qt window race, GL context loss from prior session, single+double-click double-fire in handler. Close after a clean v0.0.3 dogfood pass.

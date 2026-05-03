@@ -10,11 +10,18 @@ Play a video on your 4K monitor, companion view on your phone, estim audio to yo
 
 ## Status
 
-**v0.0.1-alpha — in development.** The v0.1 prototype ("eHaptic Studio
-Player") that this repo started as is being restructured around a
-**single-decoder / multiple-render-surface architecture** for same-video
-video-wall playback with a touch-first operator console. See
-[SPEC.md](./SPEC.md) for the full v0.0.1-alpha design.
+**v0.0.4 — preparing alpha (2026-05-03).** Current development branch:
+`feat/live-redesign`. Working: synchronized multi-screen video, dual-port
+stim with frame-perfect mirror or per-port prostate routing, content
+preference (sound files vs live funscript synth), seek-aware pop
+mitigation, scene library with pinned variant picks, debug instrumentation
+streamed to JSONL. Most recent dogfood (2026-05-03) confirmed the synth
+audio path is provably clean; remaining noise sources traced to Windows
+shared-mode mixer contention, addressed via WASAPI exclusive mode for
+stim streams. See [SPEC.md](./SPEC.md) for the full v0.0.1-alpha design,
+[docs/getting-started.md](./docs/getting-started.md) for first-time
+setup, and [docs/user-guide.md](./docs/user-guide.md) for the full
+feature reference.
 
 ---
 
@@ -178,27 +185,54 @@ see [BACKLOG.md](./BACKLOG.md) and [SPEC.md](./SPEC.md) for the plan.
 
 ---
 
-## Current State (v0.1 prototype)
+## Current State (v0.0.4 — preparing alpha)
 
 Working today:
-- Up to 3 synchronized video/audio slots (three independent libmpv instances)
-- Per-slot monitor and audio device assignment
-- Unified seek bar — sub-frame sync (improving to frame-perfect in alpha via single-decoder architecture)
-- Transport controls: play, pause, stop, skip ±5s/±10s/±30s
-- Dark theme
-- Session save/restore scaffolding
+- **Library** — scene browser with thumbnail tiles, pinned variant picks
+  (per-scene radio-button picker for funscript set, video variant, stim
+  audio file, subtitles), single-click to activate.
+- **Synchronized multi-screen playback** — primary video + up to two
+  mirror outputs on separate monitors via three independent libmpv
+  instances. Unified seek bar drives all in sub-frame sync.
+- **Dual-port stim with frame-perfect mirror** — Haptic 1 (main stim
+  port) + Haptic 2 (prostate port) on independent USB DACs, both
+  driven from the same media clock. H2 plays a prostate-specific
+  source (`.prostate.wav` or `alpha-prostate` funscript) when present,
+  else mirrors H1.
+- **Content preference** — Setup → "Sound files" or "Funscripts"
+  routes the H1 dispatch and the H2 prostate detection. Stim mp3
+  files (`<stem>[edit].mp3`) play through mpv on the H1 device when
+  sound is preferred; funscripts drive a vendored restim threephase
+  synth otherwise. See
+  [`docs/architecture/audio-routing.md`](./docs/architecture/audio-routing.md).
+- **Seek-aware pop mitigation** — pre-seek 500 ms ramp-down → mpv seek
+  → 200 ms settle hold → 500 ms ramp-up. Smoother frozen on stop to
+  prevent close-pop. Multi-block envelope ramp tracking.
+- **WASAPI exclusive mode** for stim streams — bypasses Windows
+  shared-mode mixer; falls back to shared mode if exclusive open
+  fails.
+- **Calibrate H1 / H2** — pre-flight hardware check with optional 5 s
+  ramp-up.
+- **Transport** — play/pause, ±5 s / ±10 s / ±30 s skip, scrubbable
+  timeline with time / duration labels above.
+- **Scene volume slider** — per-session volume for the scene audio
+  track (separate from stim).
+- **Debug instrumentation** — toggle in top bar streams every event
+  to `~/.forgeplayer/debug-stream-<timestamp>.jsonl`. ⚑ Mark button
+  records a timestamped flag for "I heard / felt / saw something
+  weird here" during dogfood.
+- **Session save/restore** scaffolding.
 
-Coming in v0.0.1-alpha (see [SPEC.md](./SPEC.md)):
-- Single-decoder / multi-render-surface for same-video walls with frame-perfect sync
-- Touch-first operator console on a wired 1920×720 secondary screen
-- Library panel with thumbnail grid, search, filters, virtualized scroll
-- Auto-monitor detection + per-monitor rendering (4K, 1080p, ultrawide with 5 crop presets)
-- Three-destination audio routing (OS default + 2 USB dongles) with friendly labels + per-destination delay
-- JSON presets at global (`~/.forgeplayer/preferences.json`) and per-video (`<stem>.forgeplayer.json`) level
-- PyInstaller bundles for Windows / macOS / Linux
-- Landing site at forgeplayer.app
-
-Later phases: pack loading, restim integration, phone remote, timestamps / favorites, AI upscaling per output, bhaptics `.tact` integration.
+Coming next:
+- About page in-app
+- Library setup-summary strip + arrow-key navigation
+- Prev/Next chapter transport buttons
+- Empty-state hint on Live tab
+- Single-decoder / multi-render-surface for true same-video walls
+  (currently three independent decoders synced via mpv time-pos)
+- Phone companion view + touch remote
+- Timestamps / favorites
+- bhaptics `.tact` integration
 
 ---
 
