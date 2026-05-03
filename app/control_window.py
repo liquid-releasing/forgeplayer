@@ -202,56 +202,62 @@ class ControlWindow(QMainWindow):
         panels_row.addWidget(self._build_output_panel(), 1)
         vbox.addLayout(panels_row, 1)
 
-        # ── Seek bar ──
-        seek_row = QHBoxLayout()
+        # ── Timeline + Scene volume row ──
+        # Side-by-side: timeline takes ~75 %, volume the right ~25 %.
+        # Each slider gets its own header label above so the two
+        # controls read as visually distinct — the user was grabbing
+        # the volume slider thinking it was the timeline before the
+        # split layout (2026-05-03 dogfood). Volume is ephemeral
+        # (per-session, default 100 %) and only touches the video
+        # slot's mpv player; the synth path is on a separate device.
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(16)
+
+        # Timeline column ─────────────────────────────────────────
+        timeline_col = QVBoxLayout()
+        timeline_col.setSpacing(4)
+
+        timeline_header = QHBoxLayout()
         self._time_label = QLabel("0:00")
-        self._time_label.setFixedWidth(58)
-        self._time_label.setStyleSheet("font-size: 13px;")
+        self._time_label.setStyleSheet("color: #9ba3c4; font-size: 12px;")
+        timeline_header.addWidget(self._time_label)
+        timeline_header.addStretch()
+        self._dur_label = QLabel("0:00")
+        self._dur_label.setStyleSheet("color: #9ba3c4; font-size: 12px;")
+        self._dur_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        timeline_header.addWidget(self._dur_label)
+        timeline_col.addLayout(timeline_header)
+
         self._seek_bar = ClickableSlider(Qt.Orientation.Horizontal)
         self._seek_bar.setRange(0, 10000)
         # Tall enough for a thumb hit on a touchscreen.
         self._seek_bar.setMinimumHeight(48)
         self._seek_bar.sliderPressed.connect(self._on_seek_press)
         self._seek_bar.sliderReleased.connect(self._on_seek_release)
-        self._dur_label = QLabel("0:00")
-        self._dur_label.setFixedWidth(58)
-        self._dur_label.setStyleSheet("font-size: 13px;")
-        self._dur_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-        seek_row.addWidget(self._time_label)
-        seek_row.addWidget(self._seek_bar)
-        seek_row.addWidget(self._dur_label)
-        vbox.addLayout(seek_row)
+        timeline_col.addWidget(self._seek_bar)
 
-        # ── Scene volume ──
-        # Ephemeral slider for the video slot's playback volume. mpv's
-        # `volume` property stacks with the OS / headset master, so this
-        # is a per-session "make it quieter / louder" knob without
-        # touching the user's system audio. Default 100 % (full); the
-        # state doesn't persist — each new scene starts at 100. Stim
-        # output is on a separate device + has its own physical knob,
-        # so this slider doesn't touch the haptic ports.
-        volume_row = QHBoxLayout()
-        volume_row.setSpacing(8)
-        vol_label = QLabel("🔊  Scene volume")
-        vol_label.setStyleSheet("color: #9ba3c4; font-size: 12px;")
-        vol_label.setFixedWidth(140)
+        # Volume column ───────────────────────────────────────────
+        volume_col = QVBoxLayout()
+        volume_col.setSpacing(4)
+
+        self._scene_volume_label = QLabel("🔊  Scene volume — 100%")
+        self._scene_volume_label.setStyleSheet(
+            "color: #9ba3c4; font-size: 12px;"
+        )
+        volume_col.addWidget(self._scene_volume_label)
+
         self._scene_volume_slider = ClickableSlider(Qt.Orientation.Horizontal)
         self._scene_volume_slider.setRange(0, 100)
         self._scene_volume_slider.setValue(100)
-        self._scene_volume_slider.setMinimumHeight(28)
+        self._scene_volume_slider.setMinimumHeight(48)
         self._scene_volume_slider.valueChanged.connect(self._on_scene_volume_changed)
-        self._scene_volume_label = QLabel("100%")
-        self._scene_volume_label.setFixedWidth(48)
-        self._scene_volume_label.setStyleSheet("font-size: 12px;")
-        self._scene_volume_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-        volume_row.addWidget(vol_label)
-        volume_row.addWidget(self._scene_volume_slider, 1)
-        volume_row.addWidget(self._scene_volume_label)
-        vbox.addLayout(volume_row)
+        volume_col.addWidget(self._scene_volume_slider)
+
+        controls_row.addLayout(timeline_col, 3)
+        controls_row.addLayout(volume_col, 1)
+        vbox.addLayout(controls_row)
 
         # ── Transport controls ──
         # Touch-friendly heights (52px) optimized for the 1090×720
@@ -3032,7 +3038,7 @@ class ControlWindow(QMainWindow):
         """Apply the slider's value to the video slot's mpv player.
         No-op pre-launch (engine has no player yet) — the launch flow
         re-applies the current slider value once the player is built."""
-        self._scene_volume_label.setText(f"{value}%")
+        self._scene_volume_label.setText(f"🔊  Scene volume — {value}%")
         # Slot 0 is the video slot carrying the scene audio. Mirror slots
         # (2/3) stay muted via _on_launch's set_volume(0). Slot 1 is the
         # synth path — separate device, untouched.
@@ -3040,16 +3046,23 @@ class ControlWindow(QMainWindow):
 
     # ── Seek with pop-fix envelope ─────────────────────────────────────────────
 
-    # Pre-seek and post-seek ramp duration. 500 ms each side — total
-    # perceived gap ~1 s. The synth recomputes alpha/beta modulation
-    # per buffer; a seek lands inside a fade window and flips the
-    # carrier discontinuously without this. Tone framing (per the
-    # locked spec): "make em wait in anticipation" — the brief silence
-    # is a feature, not a cost. Iteration history:
+    # Pre-seek and post-seek ramp duration. 500 ms each side. The synth
+    # recomputes alpha/beta modulation per buffer; a seek lands inside a
+    # fade window and flips the carrier discontinuously without this.
+    # Iteration history:
     #   - 120 ms (tried 2026-05-02): "pop on the upside" 60% of seeks
     #   - 250 ms (tried 2026-05-02): pops down but still ~1/seek
     #   - 500 ms (current): per user request "go to half second"
     _SEEK_ENVELOPE_S = 0.50
+
+    # Hold-at-zero window inserted between the offset flip and the
+    # ramp-up. Lets mpv's decoder produce a couple of stable audio
+    # blocks at the new position and the time smoother converge on the
+    # new offset before output is audible — without this the ramp-up
+    # happens over a still-wobbling signal and "takes a few pops to
+    # settle in" (user, 2026-05-03). Total seek gap is now
+    # 500 + 200 + 500 = 1.2 s; predictable, user accepts the pause.
+    _SEEK_SETTLE_S = 0.20
 
     def _all_active_stim_streams(self) -> list:
         """Return every live StimAudioStream / aux stream across slot data.
@@ -3070,11 +3083,13 @@ class ControlWindow(QMainWindow):
         return streams
 
     def _seek_with_envelope(self, pos: float) -> None:
-        """Seek every active player to `pos` with a 120 ms pre-seek
-        silence ramp + 120 ms post-seek ramp back up. Hides the
-        funscript-axis discontinuity that otherwise pops on the haptic
-        ports when seeking through stim playback (see
-        `project_forgeplayer_pop_fix_spec.md`).
+        """Seek every active player to `pos` with a three-stage
+        envelope: ramp-down → settle hold → ramp-up. Hides the
+        funscript-axis discontinuity AND the post-seek warm-up window
+        where mpv's decoder and the time smoother are still
+        converging — without the settle hold, the ramp-up happens
+        over a wobbling signal and "takes a few pops to settle in"
+        (user, 2026-05-03). See `project_forgeplayer_pop_fix_spec.md`.
 
         If nothing is currently audible (no players, paused), seeks
         immediately — no envelope dance needed when there's nothing
@@ -3093,6 +3108,7 @@ class ControlWindow(QMainWindow):
         DebugLog.record(
             "seek.envelope_start", target_s=pos, streams=len(streams),
             ramp_seconds=self._SEEK_ENVELOPE_S,
+            settle_seconds=self._SEEK_SETTLE_S,
         )
         for s in streams:
             s.request_envelope(0.0, self._SEEK_ENVELOPE_S)
@@ -3100,13 +3116,22 @@ class ControlWindow(QMainWindow):
         def _do_seek() -> None:
             DebugLog.record("seek.execute", target_s=pos)
             self._engine.seek_all(pos)
-            for s in streams:
-                s.request_envelope(1.0, self._SEEK_ENVELOPE_S)
+
+            def _do_ramp_up() -> None:
+                DebugLog.record("seek.ramp_up", target_s=pos)
+                for s in streams:
+                    s.request_envelope(1.0, self._SEEK_ENVELOPE_S)
+
+            QTimer.singleShot(
+                int(self._SEEK_SETTLE_S * 1000), _do_ramp_up,
+            )
 
         # QTimer.singleShot keeps the GUI responsive while the audio
         # thread completes the silence ramp. After the timer fires the
-        # actual seek + ramp-up happens; sync resumes naturally because
-        # the synth's time_source was never stopped.
+        # actual seek runs; settle hold gives mpv + smoother a chance
+        # to stabilize at the new position before ramp-up; sync
+        # resumes naturally because the synth's time_source was never
+        # stopped.
         QTimer.singleShot(int(self._SEEK_ENVELOPE_S * 1000), _do_seek)
 
     def _skip(self, seconds: float) -> None:
