@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/forgeplayer_horizontal.png" alt="ForgePlayer" width="640">
+</p>
+
 # ForgePlayer
 
 **Synchronized multi-screen playback with device routing.**

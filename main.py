@@ -3,9 +3,21 @@
 """ForgePlayer — synchronized multi-monitor video/audio player."""
 
 import sys
+from pathlib import Path
+
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QPalette, QColor
+from PySide6.QtGui import QIcon, QPalette, QColor
 from app.control_window import ControlWindow
+
+# Branding directory siblings main.py at runtime (dev) and ships next
+# to the executable in PyInstaller bundles. Look for the multi-res ICO
+# first (Windows native, also fine on macOS / Linux via Qt); fall back
+# to the bare PNG if icons haven't been regenerated.
+_HERE = Path(__file__).parent
+_ICON_CANDIDATES = (
+    _HERE / "branding" / "forgeplayer.ico",
+    _HERE / "branding" / "forgeplayer_icon.png",
+)
 
 
 def _dark_palette() -> QPalette:
@@ -24,10 +36,20 @@ def _dark_palette() -> QPalette:
     return p
 
 
+def _resolve_icon() -> QIcon | None:
+    for path in _ICON_CANDIDATES:
+        if path.is_file():
+            return QIcon(str(path))
+    return None
+
+
 def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setPalette(_dark_palette())
+    icon = _resolve_icon()
+    if icon is not None:
+        app.setWindowIcon(icon)
     win = ControlWindow()
     win.show()
     sys.exit(app.exec())
