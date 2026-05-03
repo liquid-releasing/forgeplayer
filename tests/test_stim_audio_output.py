@@ -375,6 +375,39 @@ class TestTimeSmoother:
         expected_offset = 180.0 - float(steady1[-1])
         assert sm.offset == pytest.approx(expected_offset)
 
+    def test_frozen_smoother_holds_offset_across_huge_jump(self):
+        """When `frozen=True` is set (e.g. by `stop()` during teardown),
+        the smoother must NOT auto-resync even on jumps that would
+        normally cross AUTO_RESYNC_THRESHOLD. This prevents the
+        close-pop where mpv's vanishing time-pos snapped the carrier's
+        modulation parameters at full output volume.
+        Regression for debug-stream-20260503-155128.jsonl line 238.
+        """
+        sm = _TimeSmoother()
+        sample_rate = 48000
+
+        # Steady state: adopt an offset and let the smoother settle.
+        steady0 = self._block(0, 1024)
+        sm.update(steady0, media_time=5.0, sample_rate=sample_rate)
+        held_offset = sm.offset
+        original_resync_count = sm.auto_resync_count
+
+        # Now freeze and feed a wildly different observation — exactly
+        # the close-pop scenario (mpv reports media_time=0 while
+        # steady_clock has marched on for hundreds of seconds).
+        sm.frozen = True
+        steady1 = self._block(48000 * 100, 1024)  # 100 s of steady clock later
+        out = sm.update(steady1, media_time=0.0, sample_rate=sample_rate)
+
+        # Offset must be untouched.
+        assert sm.offset == pytest.approx(held_offset)
+        # No auto-resync should have been counted.
+        assert sm.auto_resync_count == original_resync_count
+        assert not sm.just_auto_resynced
+        # Output is still steady_clock + held offset (synth keeps
+        # making continuous samples while caller fades out).
+        np.testing.assert_allclose(out, steady1 + held_offset)
+
     def test_output_is_monotonic_within_block(self):
         """The system_time_estimate ramp must be monotonic (non-decreasing)
         for the synth's per-sample axis interpolation to work right."""

@@ -254,6 +254,15 @@ class _TimeSmoother:
         self.just_auto_resynced: bool = False
         self._error_history: list[float] = []
         self._initialized = False
+        # When True, `update()` short-circuits: returns the held offset
+        # and refuses to auto-resync even on big jumps. Set by stop()
+        # before tearing down the stream so that mpv's time-pos
+        # vanishing doesn't trigger an auto_resync at full output
+        # volume — that produced an audible click on close
+        # (debug-stream-20260503-155128.jsonl line 238: stim.auto_resync
+        # at fade_gain=1.0, envelope_gain=1.0, stopping=true,
+        # offset jump 154 s → carrier discontinuity → pop).
+        self.frozen: bool = False
 
     def reset(self) -> None:
         self.offset = 0.0
@@ -287,6 +296,13 @@ class _TimeSmoother:
         n = steady_clock.shape[0]
         steady_end = float(steady_clock[-1]) if n else 0.0
         observed_offset = media_time - steady_end
+
+        if self.frozen:
+            # Frozen by stop(): hold the offset steady so the audio
+            # callback can fade out without the smoother snapping the
+            # carrier's modulation parameters underneath it.
+            self.just_auto_resynced = False
+            return steady_clock + self.offset
 
         if not self._initialized:
             # First callback — adopt observed offset wholesale; nothing to
@@ -652,6 +668,13 @@ class StimAudioStream:
         with self._lock:
             if self._stream is None:
                 return
+            # Freeze the smoother BEFORE setting _stopping or kicking
+            # off the fade envelope. Otherwise the next audio callback
+            # could see mpv's time-pos already vanishing, fire an
+            # auto_resync at full output volume, snap the offset, and
+            # produce a carrier-modulation step that the cosine
+            # fade-out can't fully mask within one block.
+            self._smoother.frozen = True
             self._stopping = True
 
         fade = self.STOP_FADE_SECONDS if fade_seconds is None else float(fade_seconds)
