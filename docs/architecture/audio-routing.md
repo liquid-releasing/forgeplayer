@@ -97,27 +97,42 @@ is the canonical pattern; the cascade itself **is** the policy — there
 is no user-configurable fallback preference (the v0.0.2
 `Preferences.haptic2_fallback` field has been removed).
 
-### Haptic 2 cascade — current ordering (decided 2026-05-01)
+### Haptic 2 resolver — asymmetric per `content_preference` (revised 2026-05-03)
 
-1. **Prostate WAV** — sibling `<stem>.prostate.wav` exists →
-   `AudioFilePlaybackSource`. **Wins over funscripts when both are
-   present.** See "Audio over synth" below for the rationale.
-2. **Prostate funscripts** — `alpha-prostate` channel present
-   (`beta-prostate` and `volume-prostate` optional) → second `StimSynth`
-   with `prostate=True` channels. When `beta-prostate` is missing, the
+The H2 source is decided by `detect_prostate_source` in
+`funscript_loader.py` from two probes (`<stem>.prostate.wav` exists,
+`alpha-prostate` channel exists) and the user's `content_preference`
+Setup pref. The rule is **asymmetric**:
+
+`content_preference="sound"` — **authoritative, no fallback**:
+
+1. `.prostate.wav` exists → `AudioFilePlaybackSource`.
+2. else → `kind="none"` → caller mirrors Haptic 1 (second `StimSynth`
+   on the primary channels). **No fallback to the funscript-driven
+   prostate synth** — when the user picks sound, getting the synth
+   instead is a surprise (Euphoria, 2026-05-03 dogfood).
+
+`content_preference="funscript"` — **best-effort, falls back**:
+
+1. `alpha-prostate` channel present → second `StimSynth` with
+   `prostate=True` channels. (When `beta-prostate` is missing, the
    beta carrier is synthesized as zeros — correct for single-pair
    prostate hardware. Real prostate scripts in the wild ship
-   `alpha-prostate` alone (Euphoria, Zer0 Game), so this branch is the
-   common case.
-3. **Mirror Haptic 1** — neither prostate source available → second
-   `StimSynth` with the same primary channels Haptic 1 is playing.
-   Two independent synth instances (not shared state) for thread
-   safety; the doubled CPU cost is acceptable.
-4. **Silent** — early-returns when no Haptic 2 device is configured in
-   Setup, or when the H2 device picker matches H1 (would conflict on
-   the exclusive output handle).
+   `alpha-prostate` alone — Euphoria, Zer0 Game — so this is the
+   common case.)
+2. else, `.prostate.wav` exists → `AudioFilePlaybackSource`.
+3. else → `kind="none"` → mirror H1.
 
-### Audio over synth: why pre-rendered files win when both exist
+**Silent (early-return)** when no Haptic 2 device is configured in
+Setup, or when the H2 device picker matches H1 (would conflict on the
+exclusive output handle).
+
+The asymmetry maps to the user's mental model: sound is exclusive
+("audio or mirror, not funscript"), funscript is best-effort ("any
+sound beats silence on H2"). Real prostate scenes ship funscripts
+without audio, so the funscript branch genuinely needs the fallback.
+
+### Why "sound" is the default preference
 
 Pre-rendered `.wav` files produce cleaner output than the live synth
 under the conditions our users actually hit:

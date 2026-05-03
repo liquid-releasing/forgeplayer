@@ -61,12 +61,22 @@ class ProstateSource:
       - `"none"` — no prostate source; caller's per-port resolution
         falls through to mirroring Haptic 1.
 
-    When **both** an audio file and funscripts are available for the
-    same destination, the user's `content_preference` Setup pref
-    decides which wins (sound = audio file; funscript = synth). When
-    only one form is present, that form plays regardless of preference
-    (preference is a tie-breaker, never a filter). See
-    `docs/architecture/audio-routing.md` for the full rationale.
+    Resolution rule is **asymmetric** by user mental model
+    (2026-05-03 dogfood):
+
+      - `content_preference="sound"` is **authoritative** — no fallback
+        to the un-preferred form. If `<stem>.prostate.wav` is missing,
+        return `kind="none"` so the caller mirrors Haptic 1. The user
+        explicitly asked for audio; getting funscript-driven synth
+        instead would be a surprise (Euphoria, 2026-05-03 dogfood).
+      - `content_preference="funscript"` is **best-effort** — funscript
+        wins if present; falls back to `.prostate.wav` if there's no
+        `alpha-prostate` channel; falls back to mirror-H1 if neither.
+        Real prostate scenes ship funscripts without audio (audio for
+        prostate is rare), so falling back to whatever sound exists is
+        better than silence.
+
+    See `docs/architecture/audio-routing.md` for the full rationale.
     """
     kind: Literal["funscripts", "audio_file", "none"]
     audio_path: Path | None = None
@@ -78,17 +88,20 @@ def detect_prostate_source(
 ) -> ProstateSource:
     """Decide what to feed the Haptic 2 dongle for this scene.
 
-    Per-port resolution rule (replaces v0.0.3's hard-coded "audio over
-    synth" cascade):
+    Per-port resolution rule (asymmetric per 2026-05-03 dogfood):
 
-      1. Detect what's available for the prostate destination:
-         - audio_available  = sibling `<stem>.prostate.wav` exists
+      Detect what's available for the prostate destination:
+         - audio_available     = sibling `<stem>.prostate.wav` exists
          - funscript_available = `alpha-prostate` channel present
-      2. If both are available, the `content_preference` pref decides:
-         "sound" → audio_file; "funscript" → funscripts.
-      3. If only one is available, return that one regardless of pref.
-      4. If neither, return kind="none" — the caller falls through to
-         mirroring Haptic 1 (or silent if H1 has no content either).
+
+      content_preference == "sound" (authoritative — no fallback):
+         - audio_available    → audio_file
+         - else               → none (caller mirrors H1)
+
+      content_preference == "funscript" (best-effort — falls back):
+         - funscript_available → funscripts
+         - else, audio_available → audio_file
+         - else                → none (caller mirrors H1)
 
     Real prostate funscripts in the wild ship `alpha-prostate` alone
     (Euphoria, Zer0 Game) or with optional `volume-prostate`. The pair
@@ -119,18 +132,18 @@ def detect_prostate_source(
 
     funscript_available = "alpha-prostate" in funscript_set.channels
 
-    # Both available → preference is the tie-breaker.
-    if audio_path is not None and funscript_available:
-        if content_preference == "funscript":
-            return ProstateSource(kind="funscripts")
-        return ProstateSource(kind="audio_file", audio_path=audio_path)
+    if content_preference == "sound":
+        # Authoritative: never substitute funscript synth for sound.
+        # Mirror H1 if .prostate.wav is missing.
+        if audio_path is not None:
+            return ProstateSource(kind="audio_file", audio_path=audio_path)
+        return ProstateSource(kind="none")
 
-    # Only one available → play it regardless of preference.
-    if audio_path is not None:
-        return ProstateSource(kind="audio_file", audio_path=audio_path)
+    # content_preference == "funscript" — best-effort, falls back.
     if funscript_available:
         return ProstateSource(kind="funscripts")
-
+    if audio_path is not None:
+        return ProstateSource(kind="audio_file", audio_path=audio_path)
     return ProstateSource(kind="none")
 
 
