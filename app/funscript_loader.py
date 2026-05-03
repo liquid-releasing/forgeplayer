@@ -62,20 +62,19 @@ class ProstateSource:
       - `"none"` — no prostate source; caller's per-port resolution
         falls through to mirroring Haptic 1.
 
-    Resolution rule is **asymmetric** by user mental model
-    (2026-05-03 dogfood):
+    Both preferences resolve **symmetrically** (2026-05-03 dogfood,
+    revised post-stim-mp3 dispatch):
 
-      - `content_preference="sound"` is **authoritative** — no fallback
-        to the un-preferred form. If `<stem>.prostate.wav` is missing,
-        return `kind="none"` so the caller mirrors Haptic 1. The user
-        explicitly asked for audio; getting funscript-driven synth
-        instead would be a surprise (Euphoria, 2026-05-03 dogfood).
-      - `content_preference="funscript"` is **best-effort** — funscript
-        wins if present; falls back to `.prostate.wav` if there's no
-        `alpha-prostate` channel; falls back to mirror-H1 if neither.
-        Real prostate scenes ship funscripts without audio (audio for
-        prostate is rare), so falling back to whatever sound exists is
-        better than silence.
+      - Each preference picks its prostate-specific source if
+        available; otherwise returns `kind="none"` so the caller
+        mirrors Haptic 1 (which itself dispatches per the same
+        preference, so mirror-H1 ends up being the right form
+        regardless).
+      - We never fall back to the *other* form at the H2 level — H2
+        only ever does "play the prostate-specific source" or "mirror
+        whatever H1 ended up with." Cross-form fallback at H1 already
+        covers the "preferred form not available, play *something*"
+        case for the main stim port.
 
     See `docs/architecture/audio-routing.md` for the full rationale.
     """
@@ -89,20 +88,23 @@ def detect_prostate_source(
 ) -> ProstateSource:
     """Decide what to feed the Haptic 2 dongle for this scene.
 
-    Per-port resolution rule (asymmetric per 2026-05-03 dogfood):
+    Per-port resolution rule (symmetric per 2026-05-03 dogfood):
 
       Detect what's available for the prostate destination:
          - audio_available     = sibling `<stem>.prostate.wav` exists
          - funscript_available = `alpha-prostate` channel present
 
-      content_preference == "sound" (authoritative — no fallback):
+      content_preference == "sound":
          - audio_available    → audio_file
          - else               → none (caller mirrors H1)
 
-      content_preference == "funscript" (best-effort — falls back):
+      content_preference == "funscript":
          - funscript_available → funscripts
-         - else, audio_available → audio_file
          - else                → none (caller mirrors H1)
+
+    No cross-form fallback — H2 only ever plays its prostate-specific
+    source or mirrors H1. The cross-form fallback lives at the H1
+    dispatch layer where silent stim is unacceptable.
 
     Real prostate funscripts in the wild ship `alpha-prostate` alone
     (Euphoria, Zer0 Game) or with optional `volume-prostate`. The pair
@@ -134,17 +136,13 @@ def detect_prostate_source(
     funscript_available = "alpha-prostate" in funscript_set.channels
 
     if content_preference == "sound":
-        # Authoritative: never substitute funscript synth for sound.
-        # Mirror H1 if .prostate.wav is missing.
         if audio_path is not None:
             return ProstateSource(kind="audio_file", audio_path=audio_path)
         return ProstateSource(kind="none")
 
-    # content_preference == "funscript" — best-effort, falls back.
+    # content_preference == "funscript"
     if funscript_available:
         return ProstateSource(kind="funscripts")
-    if audio_path is not None:
-        return ProstateSource(kind="audio_file", audio_path=audio_path)
     return ProstateSource(kind="none")
 
 

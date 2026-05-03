@@ -506,17 +506,11 @@ class TestLoadStimChannelsProstate:
 
 
 class TestDetectProstateSourcePerPortResolution:
-    """v0.0.4 (revised 2026-05-03): asymmetric per-port resolution.
-
-    `content_preference="sound"` is **authoritative** — no fallback to
-    funscript synth. If `<stem>.prostate.wav` is missing, returns
-    `kind="none"` so the caller mirrors Haptic 1.
-
-    `content_preference="funscript"` is **best-effort** — falls back to
-    `.prostate.wav` if no `alpha-prostate` channel exists; falls back
-    to `kind="none"` (mirror H1) only if neither form is available.
-    Real prostate scenes ship funscripts without audio; falling back
-    to whatever sound exists beats silence in that case.
+    """v0.0.4 (revised 2026-05-03 post-stim-mp3-dispatch): symmetric
+    per-port resolution. Each preference picks its prostate-specific
+    source if available; otherwise returns `kind="none"` so the caller
+    mirrors Haptic 1. Cross-form fallback lives at H1 (where silent
+    stim is unacceptable), never at H2.
     """
 
     def _make_prostate_set(
@@ -552,13 +546,17 @@ class TestDetectProstateSourcePerPortResolution:
             channels=channels,
         )
 
-    def test_audio_only_plays_audio_regardless_of_pref(self, tmp_path: Path):
-        """Audio-only is unambiguous: sound pref obviously plays it; funscript
-        pref falls back to it (best-effort fallback for the funscript path).
-        """
+    def test_audio_only_with_sound_pref_plays_audio(self, tmp_path: Path):
         fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=False)
         assert detect_prostate_source(fs, "sound").kind == "audio_file"
-        assert detect_prostate_source(fs, "funscript").kind == "audio_file"
+
+    def test_audio_only_with_funscript_pref_returns_none(self, tmp_path: Path):
+        """Symmetric resolver: funscript pref does NOT fall back to
+        the sound file at H2. Caller mirrors H1 instead. Cross-form
+        fallback lives at H1 only.
+        """
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=False)
+        assert detect_prostate_source(fs, "funscript").kind == "none"
 
     def test_funscript_only_with_funscript_pref_plays_funscript(self, tmp_path: Path):
         fs = self._make_prostate_set(tmp_path, with_audio=False, with_funscript=True)

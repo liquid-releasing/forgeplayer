@@ -97,40 +97,58 @@ is the canonical pattern; the cascade itself **is** the policy — there
 is no user-configurable fallback preference (the v0.0.2
 `Preferences.haptic2_fallback` field has been removed).
 
-### Haptic 2 resolver — asymmetric per `content_preference` (revised 2026-05-03)
+### Resolution rules per `content_preference` (revised 2026-05-03 post-stim-mp3)
 
-The H2 source is decided by `detect_prostate_source` in
-`funscript_loader.py` from two probes (`<stem>.prostate.wav` exists,
-`alpha-prostate` channel exists) and the user's `content_preference`
-Setup pref. The rule is **asymmetric**:
+`content_preference` (Sound vs Funscript) drives two routing layers:
 
-`content_preference="sound"` — **authoritative, no fallback**:
+**Haptic 1 (main stim port)** — cross-form fallback. Silent stim is
+worse than wrong-form, so the dispatch always plays *something* when
+either form exists.
 
-1. `.prostate.wav` exists → `AudioFilePlaybackSource`.
-2. else → `kind="none"` → caller mirrors Haptic 1 (second `StimSynth`
-   on the primary channels). **No fallback to the funscript-driven
-   prostate synth** — when the user picks sound, getting the synth
-   instead is a surprise (Euphoria, 2026-05-03 dogfood).
+| Pref | H1 dispatch picks |
+| --- | --- |
+| sound | stim mp3 if a "Stim audio" picker variant exists, else funscript synth |
+| funscript | funscript synth if a `funscript_set` exists, else stim mp3 |
 
-`content_preference="funscript"` — **best-effort, falls back**:
+When dispatched as `audio_file`, mpv plays the mp3 in audio-only mode
+through Haptic 1's device. When dispatched as `funscript_set`, the
+synth path runs as before.
 
-1. `alpha-prostate` channel present → second `StimSynth` with
-   `prostate=True` channels. (When `beta-prostate` is missing, the
-   beta carrier is synthesized as zeros — correct for single-pair
-   prostate hardware. Real prostate scripts in the wild ship
-   `alpha-prostate` alone — Euphoria, Zer0 Game — so this is the
-   common case.)
-2. else, `.prostate.wav` exists → `AudioFilePlaybackSource`.
-3. else → `kind="none"` → mirror H1.
+**Haptic 2 (prostate port)** — never crosses forms; only ever plays
+prostate-specific source for the matching preference, otherwise
+mirrors H1.
 
-**Silent (early-return)** when no Haptic 2 device is configured in
-Setup, or when the H2 device picker matches H1 (would conflict on the
-exclusive output handle).
+| Pref | `detect_prostate_source` picks |
+| --- | --- |
+| sound | `.prostate.wav` if exists, else `kind="none"` → mirror H1 |
+| funscript | `alpha-prostate` channel if exists, else `kind="none"` → mirror H1 |
 
-The asymmetry maps to the user's mental model: sound is exclusive
-("audio or mirror, not funscript"), funscript is best-effort ("any
-sound beats silence on H2"). Real prostate scenes ship funscripts
-without audio, so the funscript branch genuinely needs the fallback.
+`mirror_h1` matches whichever form H1 itself dispatched: if H1 is an
+audio file, H2 opens a second `AudioFilePlaybackSource` on the same
+file (true audio mirror); if H1 is funscript synth, H2 opens a fresh
+`StimSynth` on the same primary channels. Tight sync via shared
+`media_sync` so both ports stay aligned to mpv's clock.
+
+**Silent (H2 early-return)** when no Haptic 2 device is configured in
+Setup, or when the H2 device picker matches H1 (would conflict on
+the exclusive output handle).
+
+### WASAPI exclusive mode for stim streams
+
+Stim streams (primary + aux) open in **WASAPI exclusive mode** when
+the device backs onto WASAPI (Windows). Exclusive mode locks the
+device to ForgePlayer and bypasses Windows' shared-mode mixer
+entirely — no resampling, no other-app audio leaking in, no
+shared-mode mixer state transitions. If exclusive open fails
+(non-WASAPI host, device busy, format unsupported), the stream
+retries in shared mode so launch still succeeds.
+
+Background: 2026-05-03 dogfood reproduced clicks audible across
+*every* output device simultaneously when stim streams ran shared
+with mpv, but the recorded WAV of the stim output was provably
+clean. That fingerprint matches shared-mode mixer contention. Stim
+exclusive mode takes the engine out of the loop for the dongle
+paths.
 
 ### Why "sound" is the default preference
 

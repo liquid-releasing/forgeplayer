@@ -609,6 +609,12 @@ class ControlWindow(QMainWindow):
     def _h1_source_label(self, slot1_data: dict) -> str:
         fs = slot1_data.get("funscript_set")
         ap = slot1_data.get("audio_path", "")
+        # When dispatch chose the audio-file form (sound preference +
+        # stim mp3 available), show the mp3 filename instead of the
+        # funscript path that's still on slot_data for prostate
+        # detection.
+        if slot1_data.get("primary_dispatch") == "audio_file" and ap:
+            return os.path.basename(ap)
         if fs is not None and getattr(fs, "main_path", None):
             return os.path.basename(fs.main_path)
         if fs is not None and getattr(fs, "channels", {}):
@@ -792,9 +798,13 @@ class ControlWindow(QMainWindow):
         root.setSpacing(12)
 
         subtitle = self._column_subtitle(
-            "When a scene ships both forms for the same haptic destination, "
-            "this picks the winner. With only one form available, it plays "
-            "regardless of this setting."
+            "Picks which form a scene plays on Haptic 1 when both are "
+            "available. Sound = pre-rendered stim audio file (.wav / "
+            ".mp3); Funscript = live synthesis from the funscript. If "
+            "your pick isn't available, Haptic 1 falls back to the "
+            "other form (silent stim is worse than wrong-form). "
+            "Haptic 2 mirrors Haptic 1 when no prostate-specific "
+            "source exists."
         )
         root.addWidget(subtitle)
         root.addWidget(self._build_setup_content_pref_box())
@@ -860,13 +870,16 @@ class ControlWindow(QMainWindow):
         return page
 
     def _build_setup_content_pref_box(self) -> QGroupBox:
-        """Content preference — sound vs funscript tie-breaker.
+        """Content preference — picks the form when a scene ships both.
 
-        Per-port resolution rule: when a scene ships BOTH a sound file
-        and a funscript for the same destination, this preference picks
-        the winner. When only one form exists, it plays regardless of
-        preference. See `app/preferences.py` ContentPreference for the
-        full rationale (sound default; funscript path is opt-in).
+        Resolution (revised 2026-05-03):
+        - Haptic 1: cross-form fallback when preferred form is missing
+          (silent stim is worse than wrong-form).
+        - Haptic 2 (prostate): only ever plays prostate-specific source
+          for the preferred form, OR mirrors H1. Never crosses forms
+          at the H2 level. See `funscript_loader.detect_prostate_source`
+          for the rule, `app/preferences.py` ContentPreference for
+          the full rationale (sound default).
         """
         box = QGroupBox("Content preference")
         layout = QVBoxLayout(box)
@@ -1565,16 +1578,51 @@ class ControlWindow(QMainWindow):
                 self._set_slot_media(slot1, video_path="", audio_path="")
 
         # Slot 2 is the Stim slot — its source can be either a native
-        # FunscriptSet (preferred — real-time synthesis via StimSynth +
-        # the user's Haptic 1 dongle) or a pre-rendered audio file
-        # (legacy v0.0.1 path; mpv plays it through Slot 2's output).
-        # Native funscript wins when both are available; the audio file
-        # is the fallback when the scene has only pre-renders.
-        if choices.funscript_set is not None and (
+        # FunscriptSet (real-time synthesis via StimSynth + Haptic 1
+        # dongle) or a pre-rendered stim audio file (the "Stim audio"
+        # picker variant — typically `<stem>[edit].mp3`).
+        #
+        # Dispatch honors `content_preference` (revised 2026-05-03):
+        #   sound pref:
+        #     - audio mp3 available → audio file
+        #     - else → funscript synth (silent stim is worse than wrong-form)
+        #   funscript pref:
+        #     - funscript_set available → funscript synth
+        #     - else → audio mp3 (same fallback rationale)
+        # H1 always falls back across forms; H2's prostate resolver
+        # never does (it mirrors H1 instead — see funscript_loader).
+        fs_present = choices.funscript_set is not None and bool(
             choices.funscript_set.main_path or choices.funscript_set.channels
-        ):
+        )
+        audio_present = bool(choices.audio)
+        prefer_sound = self._prefs.content_preference == "sound"
+
+        use_audio_file = (
+            (prefer_sound and audio_present) or
+            (not prefer_sound and not fs_present and audio_present)
+        )
+
+        if use_audio_file:
+            self._set_slot_media(
+                slot2, video_path="", audio_path=choices.audio.path,
+            )
+            # Keep funscript_set on slot_data even when dispatching the
+            # audio-file path: H2 prostate detection still needs it
+            # (alpha-prostate channel + base_stem). primary_dispatch
+            # disambiguates which form H1 is actually playing so the
+            # aux launcher's mirror_h1 path picks audio-file vs synth.
+            slot2["funscript_set"] = choices.funscript_set if fs_present else None
+            slot2["primary_dispatch"] = "audio_file"
+            DebugLog.record(
+                "stim.dispatch", slot=1, source="audio_file",
+                path=choices.audio.path,
+                content_preference=self._prefs.content_preference,
+                fallback=not (prefer_sound and audio_present),
+            )
+        elif fs_present:
             self._set_slot_media(slot2, video_path="", audio_path="")
             slot2["funscript_set"] = choices.funscript_set
+            slot2["primary_dispatch"] = "funscript_set"
             DebugLog.record(
                 "stim.dispatch",
                 slot=1,
@@ -1583,21 +1631,17 @@ class ControlWindow(QMainWindow):
                 pulse_based=any(
                     ch.startswith("pulse_") for ch in choices.funscript_set.channels
                 ),
-            )
-        elif choices.audio:
-            self._set_slot_media(
-                slot2,
-                video_path="",
-                audio_path=choices.audio.path,
-            )
-            slot2["funscript_set"] = None
-            DebugLog.record(
-                "stim.dispatch", slot=1, source="audio_file",
-                path=choices.audio.path,
+                content_preference=self._prefs.content_preference,
+                fallback=prefer_sound and not audio_present,
             )
         else:
             self._set_slot_media(slot2, video_path="", audio_path="")
             slot2["funscript_set"] = None
+            slot2["primary_dispatch"] = "none"
+            DebugLog.record(
+                "stim.dispatch", slot=1, source="none",
+                content_preference=self._prefs.content_preference,
+            )
         # Final refresh — _set_slot_media already updated the panels
         # but at that time slot2["funscript_set"] still held the prior
         # scene's value. Re-render after the assignment.
@@ -1756,6 +1800,11 @@ class ControlWindow(QMainWindow):
             "funscript_set":       None,
             "stim_audio_stream":   None,
             "aux_audio_streams":   [],
+            # Set by H1 dispatch — "funscript_set", "audio_file", "none".
+            # Disambiguates which form the stim slot is actually playing
+            # so the launch path picks the right code branch and the
+            # Live panel labels render correctly.
+            "primary_dispatch":    None,
             # Populated at launch by _maybe_launch_haptic2_aux:
             #   "aux_resolved_source": {"kind": str, "label": str}
             #   "aux_silent_reason": str
@@ -2514,6 +2563,7 @@ class ControlWindow(QMainWindow):
         time_source,
         is_playing_source,
         media_sync,
+        primary_audio_path: str | None = None,
     ) -> None:
         """Spawn the Haptic 2 auxiliary audio stream when configured.
 
@@ -2610,9 +2660,18 @@ class ControlWindow(QMainWindow):
                      "Haptic 1 for tight sync.",
             )
 
-        src = detect_prostate_source(
-            funscript_set, self._prefs.content_preference,
-        )
+        # `funscript_set` can be None when H1 dispatched as audio_file
+        # for an audio-only scene with no funscripts at all. No
+        # prostate detection possible — fall straight through to the
+        # mirror_h1 path (which will mirror the audio file or silently
+        # skip if neither audio_path nor primary_channels is set).
+        if funscript_set is not None:
+            src = detect_prostate_source(
+                funscript_set, self._prefs.content_preference,
+            )
+        else:
+            from app.funscript_loader import ProstateSource  # noqa: PLC0415
+            src = ProstateSource(kind="none")
 
         # Build the source object based on the resolved detection. The
         # resolved kind ships in the `stim.aux_resolved` event AND lands
@@ -2720,18 +2779,44 @@ class ControlWindow(QMainWindow):
             resolved_label = f"{funscript_set.base_stem}-prostate.funscript"
 
         else:
-            # No prostate-specific content → mirror Haptic 1. Same
-            # primary channels, fresh StimSynth (the vendored restim
-            # algorithms aren't documented as thread-safe under
-            # concurrent generate_audio() calls, so we pay the
-            # doubled-CPU cost rather than share state).
-            aux_source = StimSynth(
-                primary_channels, media_sync,
-                waveform=self._prefs.audio_algorithm,
-                sample_rate=h2_rate,
-            )
-            aux_kind = "mirror_h1"
-            resolved_label = f"{funscript_set.base_stem}.funscript (mirror H1)"
+            # No prostate-specific content → mirror Haptic 1. The form
+            # depends on what H1 itself is playing:
+            #   - H1 audio_file (mp3) → mirror with another
+            #     AudioFilePlaybackSource on the same file
+            #   - H1 funscript synth → fresh StimSynth on the same
+            #     primary channels (two synth instances since the
+            #     vendored restim algorithms aren't documented as
+            #     thread-safe under concurrent generate_audio() calls)
+            if primary_audio_path:
+                try:
+                    aux_source = AudioFilePlaybackSource(
+                        primary_audio_path, h2_rate,
+                    )
+                except (ValueError, OSError) as exc:
+                    slot_data["aux_silent_reason"] = (
+                        f"Failed to open mirror audio file: {exc}"
+                    )
+                    DebugLog.record(
+                        "stim.aux_mirror_audio_failed",
+                        slot=slot_idx,
+                        path=primary_audio_path, error=repr(exc),
+                    )
+                    return
+                aux_kind = "mirror_h1_audio"
+                resolved_label = (
+                    f"{os.path.basename(primary_audio_path)} (mirror H1)"
+                )
+            else:
+                aux_source = StimSynth(
+                    primary_channels, media_sync,
+                    waveform=self._prefs.audio_algorithm,
+                    sample_rate=h2_rate,
+                )
+                aux_kind = "mirror_h1"
+                resolved_label = (
+                    f"{funscript_set.base_stem}.funscript (mirror H1)"
+                    if funscript_set is not None else "(mirror H1)"
+                )
 
         if aux_source is None:
             return
@@ -2833,6 +2918,79 @@ class ControlWindow(QMainWindow):
             sample_rate=h2_rate,
         )
 
+    def _launch_haptic2_aux_for_audio_file(
+        self,
+        *,
+        slot_idx: int,
+        slot_data: dict,
+        funscript_set,
+        primary_audio_path: str,
+    ) -> None:
+        """Companion to `_launch_stim_synth`'s aux launcher, but for
+        the audio-file H1 dispatch path (mpv plays the stim mp3 on
+        H1's device; this wires up H2 to mirror it or play its own
+        prostate-specific source).
+
+        Builds the same time_source / is_playing_source / media_sync
+        / mpv_devices the synth path produces, then delegates to
+        `_maybe_launch_haptic2_aux` with `primary_channels=None`,
+        `primary_audio_path=<the H1 mp3>`. The aux launcher's
+        mirror_h1 branch will open an `AudioFilePlaybackSource` on
+        H2's device with the same mp3 — true audio-mirror.
+        """
+        from app.stim_synth import CallbackMediaSync  # noqa: PLC0415
+        from app.stim_audio_output import (  # noqa: PLC0415
+            query_device_sample_rate, resolve_audio_device,
+        )
+
+        engine = self._engine
+        media_sync = CallbackMediaSync(lambda: True)
+        is_playing_source = (
+            lambda: engine.has_active_players() and not engine.is_paused()
+        )
+        offset_seconds = float(self._prefs.haptic_offset_ms) / 1000.0
+        if offset_seconds == 0.0:
+            time_source = engine.get_position
+        else:
+            def time_source(_get=engine.get_position, _off=offset_seconds):
+                return _get() + _off
+
+        try:
+            mpv_devices = engine.list_audio_devices(include_hdmi=True)
+        except Exception as exc:
+            DebugLog.record("stim.mpv_devices_failed", error=repr(exc))
+            mpv_devices = []
+
+        # H1's device sample rate isn't strictly the synth's anymore
+        # (mpv handles H1), but the aux launcher uses primary_sample_rate
+        # only for a rate-mismatch warning between H1 and H2. Query the
+        # H1 device directly for that comparison.
+        h1_device = self._audio_device_for_slot(1) or None
+        h1_handle = resolve_audio_device(h1_device, mpv_devices)
+        try:
+            primary_sample_rate = query_device_sample_rate(h1_handle)
+        except Exception:
+            primary_sample_rate = 48000
+
+        try:
+            self._maybe_launch_haptic2_aux(
+                slot_idx=slot_idx,
+                slot_data=slot_data,
+                funscript_set=funscript_set,
+                primary_channels=None,
+                primary_sample_rate=primary_sample_rate,
+                mpv_devices=mpv_devices,
+                time_source=time_source,
+                is_playing_source=is_playing_source,
+                media_sync=media_sync,
+                primary_audio_path=primary_audio_path,
+            )
+        except Exception as exc:
+            DebugLog.record(
+                "stim.aux_launch_unexpected_error",
+                slot=slot_idx, error=repr(exc),
+            )
+
     def _on_launch(self) -> None:
         # Reset the "has played" flag — calibrate is allowed in the
         # post-Launch / pre-first-Play window so the user can verify
@@ -2915,11 +3073,16 @@ class ControlWindow(QMainWindow):
             # device + screen + fill via the `_*_for_slot` helpers.
             audio_device = self._audio_device_for_slot(i)
 
+            # H1 dispatch (slot 1 only) recorded which form was chosen.
+            # Other slots fall through to the legacy "funscript first,
+            # then audio_only, then video" cascade.
+            primary_dispatch = data.get("primary_dispatch")
+
             # Native funscript synthesis (Stim slot). Bypasses mpv
             # entirely — StimSynth produces audio from the funscript and
             # streams to the slot's audio device. Time and play/pause
             # follow the SyncEngine's primary player (Slot 1's video).
-            if funscript_set is not None:
+            if funscript_set is not None and primary_dispatch != "audio_file":
                 if self._launch_stim_synth(i, data, funscript_set, audio_device):
                     launched = True
                 continue
@@ -2931,6 +3094,16 @@ class ControlWindow(QMainWindow):
                 self._engine.init_player_audio_only(i, audio_device)
                 self._engine.load_file(i, audio_path)
                 launched = True
+                # When the H1 stim slot is dispatched as audio_file,
+                # we also launch a Haptic 2 aux stream so the prostate
+                # dongle either plays its own .prostate.wav or mirrors
+                # the same audio file H1 is playing.
+                if i == 1 and primary_dispatch == "audio_file":
+                    self._launch_haptic2_aux_for_audio_file(
+                        slot_idx=i, slot_data=data,
+                        funscript_set=funscript_set,
+                        primary_audio_path=audio_path,
+                    )
                 continue
 
             screen_idx = self._screen_index_for_slot(i)

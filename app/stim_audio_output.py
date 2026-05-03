@@ -629,13 +629,43 @@ class StimAudioStream:
         """Open the audio device and begin pulling blocks from the synth.
 
         Idempotent: calling twice is a no-op after the first call.
+
+        Stim streams open in **WASAPI exclusive mode** when the device is
+        WASAPI-backed (Windows). Exclusive mode locks the device to this
+        process and bypasses Windows' shared-mode mixer entirely — no
+        resampling, no other-app audio bleeding into the stim output, and
+        no shared-mode mixer state transitions that can produce clicks
+        (2026-05-03 dogfood: pops audible across all output devices when
+        stim streams ran shared with mpv, consistent with shared-mode
+        mixer contention). If exclusive mode fails (non-WASAPI host,
+        device busy, format unsupported), we log + retry in shared mode
+        so launch still succeeds.
         """
         with self._lock:
             if self._stream is not None:
                 return
             sd = _load_sounddevice()
+            stream = self._open_stream_with_fallback(sd)
+            stream.start()
+            self._stream = stream
+            self._open_recording_if_requested()
+
+    def _open_stream_with_fallback(self, sd):
+        """Try WASAPI exclusive; fall back to shared on failure.
+
+        Lifted out of `start()` so the fallback logic stays readable.
+        Returns an UNstarted stream — caller calls `.start()`.
+        """
+        # Best-effort exclusive mode. WasapiSettings only matters on
+        # WASAPI host APIs; on other hosts sounddevice ignores it.
+        try:
+            wasapi = sd.WasapiSettings(exclusive=True)
+        except Exception:
+            wasapi = None
+
+        if wasapi is not None:
             try:
-                stream = sd.OutputStream(
+                return sd.OutputStream(
                     samplerate=self._synth.sample_rate,
                     channels=2,
                     dtype="float32",
@@ -643,16 +673,31 @@ class StimAudioStream:
                     latency=self.LATENCY,
                     device=self._device_name,
                     callback=self._callback,
+                    extra_settings=wasapi,
                 )
-                stream.start()
             except Exception as exc:
-                _log.error(
-                    "Failed to open audio stream (device=%r): %s",
+                _log.warning(
+                    "WASAPI exclusive open failed (device=%r): %s — "
+                    "retrying in shared mode",
                     self._device_name, exc,
                 )
-                raise
-            self._stream = stream
-            self._open_recording_if_requested()
+
+        try:
+            return sd.OutputStream(
+                samplerate=self._synth.sample_rate,
+                channels=2,
+                dtype="float32",
+                blocksize=self.BLOCK_SIZE,
+                latency=self.LATENCY,
+                device=self._device_name,
+                callback=self._callback,
+            )
+        except Exception as exc:
+            _log.error(
+                "Failed to open audio stream (device=%r): %s",
+                self._device_name, exc,
+            )
+            raise
 
     # Default ramp-to-silence duration before tearing down the device.
     # 500 ms matches the seek-aware envelope (control_window's
