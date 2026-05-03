@@ -420,12 +420,14 @@ class LibraryPanel(QWidget):
         self._view.setSpacing(0)
         self._view.setSelectionMode(QAbstractItemView.SingleSelection)
         self._view.setMouseTracking(True)
-        # `activated` covers both double-click and Enter-key activation
-        # across platforms — don't also connect `doubleClicked` or the
-        # handler fires twice per double-click (opens the picker modal
-        # twice, which leaves a stray picker on top of the Live tab
-        # after the first pick's teardown).
-        self._view.activated.connect(self._on_activated)
+        # Single-click activation — matches the touch / cockpit UX
+        # expectation that one tap loads the scene. We DON'T also
+        # connect `activated` (double-click + Enter) because that
+        # would fire a second activation when the user double-clicks
+        # out of habit, opening the picker modal twice. Keyboard Enter
+        # support is dropped as part of this trade — re-add via a
+        # KeyPressEvent override if it becomes important.
+        self._view.clicked.connect(self._on_activated)
         self._view.setContextMenuPolicy(Qt.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._on_context_menu)
 

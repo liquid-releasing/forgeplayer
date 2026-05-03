@@ -97,27 +97,60 @@ is the canonical pattern; the cascade itself **is** the policy — there
 is no user-configurable fallback preference (the v0.0.2
 `Preferences.haptic2_fallback` field has been removed).
 
-### Haptic 2 cascade — current ordering (decided 2026-05-01)
+### Resolution rules per `content_preference` (revised 2026-05-03 post-stim-mp3)
 
-1. **Prostate WAV** — sibling `<stem>.prostate.wav` exists →
-   `AudioFilePlaybackSource`. **Wins over funscripts when both are
-   present.** See "Audio over synth" below for the rationale.
-2. **Prostate funscripts** — `alpha-prostate` channel present
-   (`beta-prostate` and `volume-prostate` optional) → second `StimSynth`
-   with `prostate=True` channels. When `beta-prostate` is missing, the
-   beta carrier is synthesized as zeros — correct for single-pair
-   prostate hardware. Real prostate scripts in the wild ship
-   `alpha-prostate` alone (Euphoria, Zer0 Game), so this branch is the
-   common case.
-3. **Mirror Haptic 1** — neither prostate source available → second
-   `StimSynth` with the same primary channels Haptic 1 is playing.
-   Two independent synth instances (not shared state) for thread
-   safety; the doubled CPU cost is acceptable.
-4. **Silent** — early-returns when no Haptic 2 device is configured in
-   Setup, or when the H2 device picker matches H1 (would conflict on
-   the exclusive output handle).
+`content_preference` (Sound vs Funscript) drives two routing layers:
 
-### Audio over synth: why pre-rendered files win when both exist
+**Haptic 1 (main stim port)** — cross-form fallback. Silent stim is
+worse than wrong-form, so the dispatch always plays *something* when
+either form exists.
+
+| Pref | H1 dispatch picks |
+| --- | --- |
+| sound | stim mp3 if a "Stim audio" picker variant exists, else funscript synth |
+| funscript | funscript synth if a `funscript_set` exists, else stim mp3 |
+
+When dispatched as `audio_file`, mpv plays the mp3 in audio-only mode
+through Haptic 1's device. When dispatched as `funscript_set`, the
+synth path runs as before.
+
+**Haptic 2 (prostate port)** — never crosses forms; only ever plays
+prostate-specific source for the matching preference, otherwise
+mirrors H1.
+
+| Pref | `detect_prostate_source` picks |
+| --- | --- |
+| sound | `.prostate.wav` if exists, else `kind="none"` → mirror H1 |
+| funscript | `alpha-prostate` channel if exists, else `kind="none"` → mirror H1 |
+
+`mirror_h1` matches whichever form H1 itself dispatched: if H1 is an
+audio file, H2 opens a second `AudioFilePlaybackSource` on the same
+file (true audio mirror); if H1 is funscript synth, H2 opens a fresh
+`StimSynth` on the same primary channels. Tight sync via shared
+`media_sync` so both ports stay aligned to mpv's clock.
+
+**Silent (H2 early-return)** when no Haptic 2 device is configured in
+Setup, or when the H2 device picker matches H1 (would conflict on
+the exclusive output handle).
+
+### WASAPI exclusive mode for stim streams
+
+Stim streams (primary + aux) open in **WASAPI exclusive mode** when
+the device backs onto WASAPI (Windows). Exclusive mode locks the
+device to ForgePlayer and bypasses Windows' shared-mode mixer
+entirely — no resampling, no other-app audio leaking in, no
+shared-mode mixer state transitions. If exclusive open fails
+(non-WASAPI host, device busy, format unsupported), the stream
+retries in shared mode so launch still succeeds.
+
+Background: 2026-05-03 dogfood reproduced clicks audible across
+*every* output device simultaneously when stim streams ran shared
+with mpv, but the recorded WAV of the stim output was provably
+clean. That fingerprint matches shared-mode mixer contention. Stim
+exclusive mode takes the engine out of the loop for the dongle
+paths.
+
+### Why "sound" is the default preference
 
 Pre-rendered `.wav` files produce cleaner output than the live synth
 under the conditions our users actually hit:

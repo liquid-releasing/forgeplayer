@@ -12,6 +12,8 @@ import pytest
 from app.funscript_loader import (
     FunscriptActions,
     StimChannels,
+    apply_synth_isolation,
+    detect_prostate_source,
     load_funscript,
     load_stim_channels,
     radial_1d_to_2d,
@@ -501,3 +503,175 @@ class TestLoadStimChannelsProstate:
         assert ch.source == "native_stereostim"
         np.testing.assert_array_equal(ch.beta, np.zeros_like(ch.alpha))
         np.testing.assert_array_almost_equal(ch.volume.p, [0.7, 0.7])
+
+
+class TestDetectProstateSourcePerPortResolution:
+    """v0.0.4 (revised 2026-05-03 post-stim-mp3-dispatch): symmetric
+    per-port resolution. Each preference picks its prostate-specific
+    source if available; otherwise returns `kind="none"` so the caller
+    mirrors Haptic 1. Cross-form fallback lives at H1 (where silent
+    stim is unacceptable), never at H2.
+    """
+
+    def _make_prostate_set(
+        self,
+        tmp_path: Path,
+        *,
+        with_audio: bool,
+        with_funscript: bool,
+    ) -> FunscriptSet:
+        ap_path = None
+        channels: dict[str, str] = {}
+        main_path: str | None = None
+        if with_funscript:
+            ap = tmp_path / "scene.alpha-prostate.funscript"
+            _write_funscript(ap, [(0, 0), (1000, 100)])
+            channels["alpha-prostate"] = str(ap)
+            ap_path = ap
+        if with_audio:
+            wav = tmp_path / "scene.prostate.wav"
+            # Header-only; detect_prostate_source only checks existence.
+            wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+        if not channels:
+            # detect_prostate_source needs base_dir derivable from
+            # main_path or any channel path. With audio-only we still
+            # need a hint about which directory to look in — supply
+            # main_path pointing at a file we don't actually load.
+            main = tmp_path / "scene.funscript"
+            _write_funscript(main, [(0, 0)])
+            main_path = str(main)
+        return FunscriptSet(
+            base_stem="scene",
+            main_path=main_path,
+            channels=channels,
+        )
+
+    def test_audio_only_with_sound_pref_plays_audio(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=False)
+        assert detect_prostate_source(fs, "sound").kind == "audio_file"
+
+    def test_audio_only_with_funscript_pref_returns_none(self, tmp_path: Path):
+        """Symmetric resolver: funscript pref does NOT fall back to
+        the sound file at H2. Caller mirrors H1 instead. Cross-form
+        fallback lives at H1 only.
+        """
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=False)
+        assert detect_prostate_source(fs, "funscript").kind == "none"
+
+    def test_funscript_only_with_funscript_pref_plays_funscript(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=False, with_funscript=True)
+        assert detect_prostate_source(fs, "funscript").kind == "funscripts"
+
+    def test_funscript_only_with_sound_pref_returns_none(self, tmp_path: Path):
+        """Sound preference is authoritative: with funscripts available but
+        no `.prostate.wav`, do NOT fall back to funscript synth — return
+        kind="none" so the caller mirrors H1. Locks in the Euphoria fix
+        (2026-05-03 dogfood: user picked sound, got funscript synth, was
+        confused — that fallback was wrong).
+        """
+        fs = self._make_prostate_set(tmp_path, with_audio=False, with_funscript=True)
+        assert detect_prostate_source(fs, "sound").kind == "none"
+
+    def test_both_available_sound_pref_picks_audio(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=True)
+        result = detect_prostate_source(fs, "sound")
+        assert result.kind == "audio_file"
+        assert result.audio_path is not None
+        assert result.audio_path.name == "scene.prostate.wav"
+
+    def test_both_available_funscript_pref_picks_funscripts(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=True)
+        assert detect_prostate_source(fs, "funscript").kind == "funscripts"
+
+    def test_neither_returns_none(self, tmp_path: Path):
+        fs = self._make_prostate_set(tmp_path, with_audio=False, with_funscript=False)
+        assert detect_prostate_source(fs, "sound").kind == "none"
+        assert detect_prostate_source(fs, "funscript").kind == "none"
+
+    def test_default_pref_is_sound(self, tmp_path: Path):
+        """The function signature defaults to content_preference='sound'.
+        Calling without the argument should match the v0.0.3 cascade
+        behavior (audio over funscript) for backwards compatibility.
+        """
+        fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=True)
+        assert detect_prostate_source(fs).kind == "audio_file"
+
+
+# ── apply_synth_isolation ─────────────────────────────────────────────────────
+
+class TestApplySynthIsolation:
+    """Pop-investigation A/B knob via FORGEPLAYER_SYNTH_ISOLATION env var."""
+
+    def _channels(self) -> StimChannels:
+        t = np.linspace(0.0, 10.0, 100)
+        alpha = np.linspace(0.0, 1.0, 100)
+        beta = np.cos(t)
+        vol = FunscriptActions(t=np.array([0.0, 5.0]), p=np.array([0.0, 1.0]))
+        carrier = FunscriptActions(t=np.array([0.0]), p=np.array([700.0]))
+        pf = FunscriptActions(t=np.array([0.0]), p=np.array([20.0]))
+        pw = FunscriptActions(t=np.array([0.0]), p=np.array([0.5]))
+        pr = FunscriptActions(t=np.array([0.0]), p=np.array([0.001]))
+        return StimChannels(
+            t=t, alpha=alpha, beta=beta, source="native_stereostim",
+            volume=vol, carrier_frequency=carrier,
+            pulse_frequency=pf, pulse_width=pw, pulse_rise_time=pr,
+        )
+
+    def test_off_mode_returns_unchanged(self, monkeypatch):
+        monkeypatch.delenv("FORGEPLAYER_SYNTH_ISOLATION", raising=False)
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        assert result is ch
+
+    def test_unknown_mode_returns_unchanged(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "garbage")
+        ch = self._channels()
+        assert apply_synth_isolation(ch) is ch
+
+    def test_constant_mode_strips_everything(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "constant")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, np.full(100, 0.5))
+        np.testing.assert_array_equal(result.beta, np.zeros(100))
+        assert result.volume is None
+        assert result.carrier_frequency is None
+        assert result.pulse_frequency is None
+        assert result.pulse_width is None
+        assert result.pulse_rise_time is None
+
+    def test_alpha_mode_keeps_alpha_only(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "alpha")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, ch.alpha)
+        np.testing.assert_array_equal(result.beta, np.zeros(100))
+        assert result.volume is None
+        assert result.pulse_frequency is None
+
+    def test_alpha_beta_mode_keeps_position_only(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "alpha_beta")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, ch.alpha)
+        np.testing.assert_array_equal(result.beta, ch.beta)
+        assert result.volume is None
+        assert result.pulse_frequency is None
+
+    def test_alpha_beta_volume_mode_strips_pulse_params(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "alpha_beta_volume")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, ch.alpha)
+        np.testing.assert_array_equal(result.beta, ch.beta)
+        assert result.volume is ch.volume
+        assert result.carrier_frequency is None
+        assert result.pulse_frequency is None
+        assert result.pulse_width is None
+        assert result.pulse_rise_time is None
+
+    def test_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "  CONSTANT  ")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, np.full(100, 0.5))

@@ -375,6 +375,39 @@ class TestTimeSmoother:
         expected_offset = 180.0 - float(steady1[-1])
         assert sm.offset == pytest.approx(expected_offset)
 
+    def test_frozen_smoother_holds_offset_across_huge_jump(self):
+        """When `frozen=True` is set (e.g. by `stop()` during teardown),
+        the smoother must NOT auto-resync even on jumps that would
+        normally cross AUTO_RESYNC_THRESHOLD. This prevents the
+        close-pop where mpv's vanishing time-pos snapped the carrier's
+        modulation parameters at full output volume.
+        Regression for debug-stream-20260503-155128.jsonl line 238.
+        """
+        sm = _TimeSmoother()
+        sample_rate = 48000
+
+        # Steady state: adopt an offset and let the smoother settle.
+        steady0 = self._block(0, 1024)
+        sm.update(steady0, media_time=5.0, sample_rate=sample_rate)
+        held_offset = sm.offset
+        original_resync_count = sm.auto_resync_count
+
+        # Now freeze and feed a wildly different observation — exactly
+        # the close-pop scenario (mpv reports media_time=0 while
+        # steady_clock has marched on for hundreds of seconds).
+        sm.frozen = True
+        steady1 = self._block(48000 * 100, 1024)  # 100 s of steady clock later
+        out = sm.update(steady1, media_time=0.0, sample_rate=sample_rate)
+
+        # Offset must be untouched.
+        assert sm.offset == pytest.approx(held_offset)
+        # No auto-resync should have been counted.
+        assert sm.auto_resync_count == original_resync_count
+        assert not sm.just_auto_resynced
+        # Output is still steady_clock + held offset (synth keeps
+        # making continuous samples while caller fades out).
+        np.testing.assert_allclose(out, steady1 + held_offset)
+
     def test_output_is_monotonic_within_block(self):
         """The system_time_estimate ramp must be monotonic (non-decreasing)
         for the synth's per-sample axis interpolation to work right."""
@@ -606,4 +639,178 @@ class TestStimAudioStream:
         callback(outdata, 512, None, None)
 
         np.testing.assert_array_equal(outdata, np.zeros_like(outdata))
+        stream.stop()
+
+
+class TestPopFixEnvelope:
+    """The secondary envelope (request_envelope) is the pop-fix path —
+    layered on top of the play/pause fade gate so seek and stop can
+    silence the output over a longer window than the 5 ms play/pause
+    fade allows. Spec: project_forgeplayer_pop_fix_spec.md."""
+
+    def test_envelope_starts_at_unity(self):
+        """Default envelope gain is 1.0 so existing behavior (no
+        pop-fix calls) is unchanged — synth output passes through
+        untouched."""
+        stream = StimAudioStream(
+            synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),
+            time_source=lambda: 0.0,
+        )
+        assert stream._envelope_gain == 1.0
+        assert stream._envelope_target == 1.0
+
+    def test_request_envelope_clamps_target(self):
+        stream = StimAudioStream(
+            synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),
+            time_source=lambda: 0.0,
+        )
+        stream.request_envelope(2.0, 0.1)
+        assert stream._envelope_target == 1.0
+        stream.request_envelope(-0.5, 0.1)
+        assert stream._envelope_target == 0.0
+
+    def test_request_envelope_sets_fade_samples(self):
+        stream = StimAudioStream(
+            synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),
+            time_source=lambda: 0.0,
+        )
+        # 0.12 s × 44100 Hz = 5292 samples
+        stream.request_envelope(0.0, 0.12)
+        assert stream._envelope_fade_samples == int(0.12 * 44100)
+
+    def test_envelope_attenuates_callback_output(self, fake_sounddevice):
+        """After request_envelope(0.0, ...), the callback's output
+        amplitude must shrink toward zero — independent of play/pause
+        state."""
+        # is_playing pinned True so the play/pause fade gate stays at
+        # full output and any attenuation we observe came from the
+        # secondary envelope, not the gate.
+        synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
+        stream = StimAudioStream(
+            synth=synth, time_source=lambda: 0.0, device_id=None,
+            mpv_devices=[], is_playing_source=lambda: True,
+        )
+        stream.start()
+        callback = fake_sounddevice.OutputStream.call_args.kwargs["callback"]
+
+        # Warm up the play/pause fade gate so it's at 1.0 — first
+        # callback would otherwise show ramp-up artifacts.
+        warmup = np.zeros((512, 2), dtype=np.float32)
+        for _ in range(20):
+            callback(warmup, 512, None, None)
+        baseline_peak = float(np.max(np.abs(warmup)))
+
+        # Request silence over a short window so the test runs fast.
+        stream.request_envelope(0.0, 0.02)  # ≈ 882 samples at 44.1k
+
+        # Pull a few blocks past the envelope's fade window.
+        post = np.zeros((512, 2), dtype=np.float32)
+        for _ in range(10):
+            callback(post, 512, None, None)
+        post_peak = float(np.max(np.abs(post)))
+
+        # Output should be effectively silent now.
+        assert post_peak < baseline_peak * 0.05, (
+            f"envelope didn't attenuate (baseline {baseline_peak:.4f}, "
+            f"post {post_peak:.4f})"
+        )
+        stream.stop()
+
+    def test_envelope_ramps_back_up(self, fake_sounddevice):
+        """After silence + request_envelope(1.0), output should return
+        to full amplitude. Verifies the round-trip works (seek
+        completes, audio resumes)."""
+        synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
+        stream = StimAudioStream(
+            synth=synth, time_source=lambda: 0.0, device_id=None,
+            mpv_devices=[], is_playing_source=lambda: True,
+        )
+        stream.start()
+        callback = fake_sounddevice.OutputStream.call_args.kwargs["callback"]
+
+        # Warm up to full
+        warmup = np.zeros((512, 2), dtype=np.float32)
+        for _ in range(20):
+            callback(warmup, 512, None, None)
+        baseline_peak = float(np.max(np.abs(warmup)))
+
+        # Silence
+        stream.request_envelope(0.0, 0.02)
+        silence = np.zeros((512, 2), dtype=np.float32)
+        for _ in range(10):
+            callback(silence, 512, None, None)
+
+        # Audible again
+        stream.request_envelope(1.0, 0.02)
+        ramp_up = np.zeros((512, 2), dtype=np.float32)
+        for _ in range(20):
+            callback(ramp_up, 512, None, None)
+        recovered_peak = float(np.max(np.abs(ramp_up)))
+
+        # Should be back to ~baseline (allow small tolerance for the
+        # synth being at a slightly different funscript phase).
+        assert recovered_peak > baseline_peak * 0.5, (
+            f"envelope didn't ramp back up (baseline {baseline_peak:.4f}, "
+            f"recovered {recovered_peak:.4f})"
+        )
+        stream.stop()
+
+    def test_long_ramp_actually_takes_multiple_blocks(self, fake_sounddevice):
+        """Regression for the 2026-05-03 pop-fix bug: a 500 ms ramp with
+        ~1 ms blocks must NOT complete in a single block. The earlier
+        implementation reused `_cosine_ramp` from the play/pause fade
+        gate, which assumed the ramp fits inside `frames` samples —
+        that compressed the full 0→1 sweep into one block, defeating
+        the pop fix entirely (envelope was at 1.0 again 21 ms after
+        a seek).
+        """
+        synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
+        stream = StimAudioStream(
+            synth=synth, time_source=lambda: 0.0, device_id=None,
+            mpv_devices=[], is_playing_source=lambda: True,
+        )
+        stream.start()
+        callback = fake_sounddevice.OutputStream.call_args.kwargs["callback"]
+
+        # Drive envelope to 0 first (no pop-fix race needed for this test).
+        stream.request_envelope(0.0, 0.005)
+        warmup = np.zeros((512, 2), dtype=np.float32)
+        for _ in range(5):
+            callback(warmup, 512, None, None)
+        assert stream._envelope_gain < 0.01, "envelope should be silent"
+
+        # Now request a slow 500 ms ramp to 1.0 and check the gain
+        # progresses gradually across blocks — NOT instantly.
+        stream.request_envelope(1.0, 0.5)
+        # 44.1 kHz × 0.5 s = 22 050 samples. With 512-frame blocks the
+        # ramp covers ~43 blocks. After ONE 512-frame block, the ramp
+        # should only have advanced ~1/43 of the way (~2 %).
+        single_block = np.zeros((512, 2), dtype=np.float32)
+        callback(single_block, 512, None, None)
+
+        gain_after_one_block = stream._envelope_gain
+        assert gain_after_one_block < 0.10, (
+            f"envelope gain after one block was {gain_after_one_block:.4f}; "
+            f"a 500 ms ramp should still be near silent — _cosine_ramp bug "
+            f"would put this at ~1.0 instead."
+        )
+
+        # Run another ~10 blocks (~120 ms total ramp time) — should be
+        # somewhere in the middle of the ramp.
+        for _ in range(10):
+            callback(single_block, 512, None, None)
+        gain_mid = stream._envelope_gain
+        assert 0.05 < gain_mid < 0.95, (
+            f"after ~120 ms / 500 ms ramp, gain was {gain_mid:.4f} — "
+            f"expected partway, not at either endpoint"
+        )
+
+        # Run enough blocks for the ramp to fully complete (>50 blocks).
+        for _ in range(50):
+            callback(single_block, 512, None, None)
+        gain_done = stream._envelope_gain
+        assert gain_done > 0.99, (
+            f"after 60+ blocks, gain was {gain_done:.4f}; ramp should be "
+            f"at full output by now."
+        )
         stream.stop()

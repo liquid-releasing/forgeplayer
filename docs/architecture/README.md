@@ -3,10 +3,14 @@
 These are **dev-facing** docs — design decisions, integration boundaries
 with upstream projects, debugging history. Not the user manual.
 
+User-facing docs live at `docs/` root level:
+
+- [`getting-started.md`](../getting-started.md) — first-time setup
+- [`user-guide.md`](../user-guide.md) — feature-by-feature reference
+
 When ForgePlayer publishes user docs via mkdocs, **exclude this folder**
 in `mkdocs.yml` (or move to `docs/internal/architecture/` and exclude
-`docs/internal/`). User-facing pages live at the `docs/` root level
-(`hdr-content.md`, `quality.md`, etc.).
+`docs/internal/`).
 
 ## What's here
 

@@ -30,6 +30,18 @@ _PREFS_PATH = Path.home() / ".forgeplayer" / "preferences.json"
 # families on one rig.
 AudioAlgorithm = Literal["continuous", "pulse"]
 
+# When a scene ships BOTH a pre-rendered sound file (.wav/.mp3) and a
+# funscript for the same haptic destination, this preference is the
+# tie-breaker. Default is "sound" because (1) most stereo-stim users
+# have one MP4 + one sound file, not two funscripts; (2) sound playback
+# avoids the synth-pop residue we're still chasing in v0.0.3; (3)
+# FunscriptForge produces sound files — choosing Sound rewards users
+# in the lqr content pipeline. Funscript users opt in deliberately.
+# Per-port resolution: when only one form exists for a destination,
+# play whichever exists regardless of preference (preference is a
+# tie-breaker, never a filter).
+ContentPreference = Literal["sound", "funscript"]
+
 @dataclass
 class Preferences:
     """User-configurable cross-session preferences.
@@ -55,6 +67,16 @@ class Preferences:
     # "all screens are fair game" (the v0.0.1 default — user hasn't opted in
     # to filtering).
     playback_screen_indices: List[int] = field(default_factory=list)
+    # Which screen indices should mpv crop-fill (panscan=1.0) instead of
+    # letterbox. Spirit: aspect-handling is per-monitor (each physical
+    # screen has its own native aspect, e.g. 32:9 ultrawide vs 16:9
+    # standard). Pre-redesign this lived as a per-slot Fill checkbox on
+    # Live; the v0.0.4 redesign moves it to Setup so Live stays read-only.
+    # Empty list = no screens fill (today's default).
+    fill_screen_indices: List[int] = field(default_factory=list)
+    # Sound vs Funscript tie-breaker when both forms exist for a haptic
+    # destination. See ContentPreference docstring above for rationale.
+    content_preference: ContentPreference = "sound"
 
     @classmethod
     def load(cls) -> "Preferences":
@@ -68,6 +90,9 @@ class Preferences:
         # back to default rather than crash the synth at launch time.
         if clean.get("audio_algorithm") not in ("continuous", "pulse"):
             clean.pop("audio_algorithm", None)
+        # Same coercion for content_preference. Default is "sound".
+        if clean.get("content_preference") not in ("sound", "funscript"):
+            clean.pop("content_preference", None)
         # Stale `haptic2_fallback` keys from pre-cascade prefs files are
         # silently dropped — the cascade is now policy, no user pick.
         clean.pop("haptic2_fallback", None)
