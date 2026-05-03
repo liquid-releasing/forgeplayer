@@ -177,6 +177,10 @@ Off by default; zero overhead when off.
 ## Next steps
 
 - [User guide](./user-guide.md) — feature-by-feature reference.
-- [Architecture: audio routing](./architecture/audio-routing.md) — how
-  source-to-destination routing decisions are made internally.
-- [BACKLOG.md](../BACKLOG.md) — what's coming next.
+- [BACKLOG.md][backlog] (on GitHub) — what's coming next.
+- [docs/architecture/][archdir] (on GitHub) — internal design docs:
+  audio-routing model, restim channel taxonomy, stim synthesis. Read
+  these if you're hacking on the codebase.
+
+[backlog]: https://github.com/liquid-releasing/forgeplayer/blob/main/BACKLOG.md
+[archdir]: https://github.com/liquid-releasing/forgeplayer/tree/main/docs/architecture

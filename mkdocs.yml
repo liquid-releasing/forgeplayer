@@ -1,0 +1,87 @@
+site_name: ForgePlayer
+site_description: Synchronized multi-screen playback with device routing.
+site_url: https://forgeplayer.app/
+repo_url: https://github.com/liquid-releasing/forgeplayer
+repo_name: liquid-releasing/forgeplayer
+edit_uri: edit/main/docs/
+
+# We keep the long-form README at repo root for GitHub display, and a
+# slimmer landing page (docs/index.md) for the rendered site.
+docs_dir: docs
+site_dir: site
+
+# Internal-only pages stay out of the rendered site. Keep this list in
+# sync with anything dev-facing that lives under docs/.
+exclude_docs: |
+  architecture/
+  release.md
+  user-testing-*.md
+
+theme:
+  name: material
+  language: en
+  features:
+    - content.code.copy
+    - navigation.instant
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - User Guide: user-guide.md
+  - Quality: quality.md
+  - HDR Content: hdr-content.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/liquid-releasing/forgeplayer
