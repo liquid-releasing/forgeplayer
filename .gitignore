@@ -36,3 +36,9 @@ test_media/
 libmpv-2.dll
 mpv-1.dll
 mpv-2.dll
+
+# MkDocs build output
+site/
+
+# Local scratch / one-off scripts (e.g. pop analyzers, debugging)
+scratch/

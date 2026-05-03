@@ -282,7 +282,9 @@ session unless you explicitly start a new one via the Library scan.
   decoders synced via mpv time-pos. Frame-perfect single-decoder
   rendering is a future feature for true video-wall use cases.
 
-See [BACKLOG.md](../BACKLOG.md) for the full roadmap.
+See [BACKLOG.md][backlog] (on GitHub) for the full roadmap.
+
+[backlog]: https://github.com/liquid-releasing/forgeplayer/blob/main/BACKLOG.md
 
 ---
 
@@ -299,6 +301,7 @@ See [BACKLOG.md](../BACKLOG.md) for the full roadmap.
 ## Where to ask
 
 - Bugs / behavior issues — open an issue in the repo.
-- Architecture questions — read
-  [`docs/architecture/`](./architecture/) first; that's the dev-facing
-  set, deeper than this guide.
+- Architecture questions — read [`docs/architecture/`][archdir] (on
+  GitHub) first; that's the dev-facing set, deeper than this guide.
+
+[archdir]: https://github.com/liquid-releasing/forgeplayer/tree/main/docs/architecture

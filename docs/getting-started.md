@@ -9,11 +9,13 @@ separately and want everything on one timeline, this is the path.
 ## What you need
 
 - A Windows / macOS / Linux machine with a working audio output
-- One or more **USB audio DACs** if you're using stim (a "stim dongle"
-  in this guide — typically the small DAC-only USB devices the estim
-  community uses, e.g. the device you'd otherwise plug into restim
-  directly)
-- Optional: a second USB DAC for a **prostate channel** (Haptic 2)
+- One or more **USB audio dongles** if you're using stim — these are
+  the small USB devices that show up to Windows / macOS as an audio
+  output and feed your stim hardware (any device you'd otherwise plug
+  into restim directly will do; technically these are USB audio DACs —
+  Digital-to-Analog Converters)
+- Optional: a second USB audio dongle for a **prostate channel**
+  (Haptic 2)
 - Optional: a second monitor for mirror playback
 - A **scene folder** — see [The Pack](#the-pack) below
 
@@ -82,8 +84,8 @@ Library refresh and remembers it after that.
 
 - **Scene Audio** — where the video's mp3 / mp4 audio plays. Usually
   your headset or speakers.
-- **Haptic 1** — your main stim USB DAC.
-- **Haptic 2** — second USB DAC for prostate, OR leave unset.
+- **Haptic 1** — your main stim USB dongle.
+- **Haptic 2** — second USB dongle for prostate, OR leave unset.
 
 The dropdowns show every audio output Windows reports. If your dongle
 isn't there, plug it in and click "Refresh".
@@ -129,14 +131,18 @@ volume with the slider beside the timeline.
 ## Pre-flight check: Calibrate
 
 Before you wire yourself up, click **Calibrate H1** (and **H2** if you
-have it set). The button toggles a steady carrier tone on the haptic
-device for ~30 seconds with optional 5 s ramp-up so you can:
+have it set). The button generates a steady **test tone** (not a
+sample of any scene audio — a synthesized continuous carrier) and
+sends it to the configured haptic dongle for ~30 seconds, with an
+optional 5 s ramp-up if the **5 s ramp** checkbox is on. Use this to:
 
-- Confirm the dongle is connected and getting signal
-- Set your levels (the dongle's physical knob)
-- Position electrodes / pads safely
+- Confirm the dongle is connected and getting signal.
+- Set your levels at the dongle's physical knob *before* turning the
+  body up.
+- Position electrodes / pads with a steady output you can tune to.
 
-Click again to stop.
+Click the button again to stop. The test tone is identical for every
+scene — it's a signal-path check, not a content preview.
 
 ---
 
@@ -177,6 +183,10 @@ Off by default; zero overhead when off.
 ## Next steps
 
 - [User guide](./user-guide.md) — feature-by-feature reference.
-- [Architecture: audio routing](./architecture/audio-routing.md) — how
-  source-to-destination routing decisions are made internally.
-- [BACKLOG.md](../BACKLOG.md) — what's coming next.
+- [BACKLOG.md][backlog] (on GitHub) — what's coming next.
+- [docs/architecture/][archdir] (on GitHub) — internal design docs:
+  audio-routing model, restim channel taxonomy, stim synthesis. Read
+  these if you're hacking on the codebase.
+
+[backlog]: https://github.com/liquid-releasing/forgeplayer/blob/main/BACKLOG.md
+[archdir]: https://github.com/liquid-releasing/forgeplayer/tree/main/docs/architecture
