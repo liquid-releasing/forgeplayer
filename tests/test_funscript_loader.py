@@ -12,6 +12,7 @@ import pytest
 from app.funscript_loader import (
     FunscriptActions,
     StimChannels,
+    apply_synth_isolation,
     detect_prostate_source,
     load_funscript,
     load_stim_channels,
@@ -596,3 +597,83 @@ class TestDetectProstateSourcePerPortResolution:
         """
         fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=True)
         assert detect_prostate_source(fs).kind == "audio_file"
+
+
+# ── apply_synth_isolation ─────────────────────────────────────────────────────
+
+class TestApplySynthIsolation:
+    """Pop-investigation A/B knob via FORGEPLAYER_SYNTH_ISOLATION env var."""
+
+    def _channels(self) -> StimChannels:
+        t = np.linspace(0.0, 10.0, 100)
+        alpha = np.linspace(0.0, 1.0, 100)
+        beta = np.cos(t)
+        vol = FunscriptActions(t=np.array([0.0, 5.0]), p=np.array([0.0, 1.0]))
+        carrier = FunscriptActions(t=np.array([0.0]), p=np.array([700.0]))
+        pf = FunscriptActions(t=np.array([0.0]), p=np.array([20.0]))
+        pw = FunscriptActions(t=np.array([0.0]), p=np.array([0.5]))
+        pr = FunscriptActions(t=np.array([0.0]), p=np.array([0.001]))
+        return StimChannels(
+            t=t, alpha=alpha, beta=beta, source="native_stereostim",
+            volume=vol, carrier_frequency=carrier,
+            pulse_frequency=pf, pulse_width=pw, pulse_rise_time=pr,
+        )
+
+    def test_off_mode_returns_unchanged(self, monkeypatch):
+        monkeypatch.delenv("FORGEPLAYER_SYNTH_ISOLATION", raising=False)
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        assert result is ch
+
+    def test_unknown_mode_returns_unchanged(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "garbage")
+        ch = self._channels()
+        assert apply_synth_isolation(ch) is ch
+
+    def test_constant_mode_strips_everything(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "constant")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, np.full(100, 0.5))
+        np.testing.assert_array_equal(result.beta, np.zeros(100))
+        assert result.volume is None
+        assert result.carrier_frequency is None
+        assert result.pulse_frequency is None
+        assert result.pulse_width is None
+        assert result.pulse_rise_time is None
+
+    def test_alpha_mode_keeps_alpha_only(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "alpha")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, ch.alpha)
+        np.testing.assert_array_equal(result.beta, np.zeros(100))
+        assert result.volume is None
+        assert result.pulse_frequency is None
+
+    def test_alpha_beta_mode_keeps_position_only(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "alpha_beta")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, ch.alpha)
+        np.testing.assert_array_equal(result.beta, ch.beta)
+        assert result.volume is None
+        assert result.pulse_frequency is None
+
+    def test_alpha_beta_volume_mode_strips_pulse_params(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "alpha_beta_volume")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, ch.alpha)
+        np.testing.assert_array_equal(result.beta, ch.beta)
+        assert result.volume is ch.volume
+        assert result.carrier_frequency is None
+        assert result.pulse_frequency is None
+        assert result.pulse_width is None
+        assert result.pulse_rise_time is None
+
+    def test_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("FORGEPLAYER_SYNTH_ISOLATION", "  CONSTANT  ")
+        ch = self._channels()
+        result = apply_synth_isolation(ch)
+        np.testing.assert_array_equal(result.alpha, np.full(100, 0.5))

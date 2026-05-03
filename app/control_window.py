@@ -2339,7 +2339,9 @@ class ControlWindow(QMainWindow):
         """
         # Lazy imports — keep the audio stack out of cold-start when the
         # user's not playing a stim scene.
-        from app.funscript_loader import load_stim_channels  # noqa: PLC0415
+        from app.funscript_loader import (  # noqa: PLC0415
+            apply_synth_isolation, load_stim_channels,
+        )
         from app.stim_audio_output import (  # noqa: PLC0415
             StimAudioStream,
             query_device_sample_rate,
@@ -2361,6 +2363,7 @@ class ControlWindow(QMainWindow):
                 base_stem=funscript_set.base_stem,
             )
             return False
+        channels = apply_synth_isolation(channels)
 
         # Mirror of the aux prostate-channel diagnostic for the primary
         # path. Logging both side-by-side lets us compare H1 (audible)
@@ -2569,7 +2572,7 @@ class ControlWindow(QMainWindow):
         # Lazy imports — keep the audio stack out of cold-start when the
         # user's not playing a stim scene.
         from app.funscript_loader import (  # noqa: PLC0415
-            detect_prostate_source, load_stim_channels,
+            apply_synth_isolation, detect_prostate_source, load_stim_channels,
         )
         from app.stim_audio_output import (  # noqa: PLC0415
             AudioFilePlaybackSource, StimAudioStream,
@@ -2666,6 +2669,7 @@ class ControlWindow(QMainWindow):
                     "stim.aux_prostate_unexpected_none", slot=slot_idx,
                 )
                 return
+            prostate_channels = apply_synth_isolation(prostate_channels)
             # Channel-summary diagnostic: surfaces whether what we're
             # feeding restim's threephase math is actually sensible. If
             # alpha is constant or near-zero, restim won't produce

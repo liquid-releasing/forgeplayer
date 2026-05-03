@@ -38,7 +38,8 @@ file so the vendor boundary stays clean.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -198,6 +199,68 @@ class StimChannels:
             p is not None
             for p in (self.pulse_frequency, self.pulse_width, self.pulse_rise_time)
         )
+
+
+_SYNTH_ISOLATION_MODES = {
+    "off", "constant", "alpha", "alpha_beta", "alpha_beta_volume",
+}
+
+
+def apply_synth_isolation(channels: StimChannels) -> StimChannels:
+    """Strip funscript axes per `FORGEPLAYER_SYNTH_ISOLATION` env var.
+
+    Pop-investigation A/B knob: each mode adds one more axis on top of
+    the previous one. `off` (default) = production. Lets us bisect
+    which axis is producing the steady-play pops by testing each
+    incrementally.
+
+    Modes (env var, case-insensitive):
+      - `off` (default) — return unchanged.
+      - `constant` — alpha=0.5, beta=0, no volume / pulse params.
+        Synth produces a steady carrier with no modulation at all.
+      - `alpha` — real alpha; beta=0; no volume / pulse.
+      - `alpha_beta` — real alpha + beta; no volume / pulse.
+      - `alpha_beta_volume` — real alpha + beta + volume; no pulse.
+
+    Unknown modes are treated as `off` (with no warning — env-var
+    typos shouldn't break a launch, just skip the override).
+    """
+    mode = os.environ.get("FORGEPLAYER_SYNTH_ISOLATION", "off").strip().lower()
+    if mode not in _SYNTH_ISOLATION_MODES or mode == "off":
+        return channels
+    n = channels.t.size
+    if n == 0:
+        return channels
+
+    constant_alpha = np.full(n, 0.5, dtype=channels.alpha.dtype)
+    constant_beta = np.zeros(n, dtype=channels.beta.dtype)
+
+    if mode == "constant":
+        return replace(
+            channels,
+            alpha=constant_alpha, beta=constant_beta,
+            volume=None, carrier_frequency=None,
+            pulse_frequency=None, pulse_width=None, pulse_rise_time=None,
+        )
+    if mode == "alpha":
+        return replace(
+            channels,
+            beta=constant_beta,
+            volume=None, carrier_frequency=None,
+            pulse_frequency=None, pulse_width=None, pulse_rise_time=None,
+        )
+    if mode == "alpha_beta":
+        return replace(
+            channels,
+            volume=None, carrier_frequency=None,
+            pulse_frequency=None, pulse_width=None, pulse_rise_time=None,
+        )
+    # mode == "alpha_beta_volume"
+    return replace(
+        channels,
+        carrier_frequency=None,
+        pulse_frequency=None, pulse_width=None, pulse_rise_time=None,
+    )
 
 
 def load_funscript(path: str | Path) -> FunscriptActions:

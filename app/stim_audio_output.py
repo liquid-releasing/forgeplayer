@@ -28,7 +28,10 @@ stream).
 from __future__ import annotations
 
 import logging
+import os
 import threading
+import wave
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -607,6 +610,12 @@ class StimAudioStream:
         self._envelope_target: float = 1.0
         self._envelope_fade_samples: int = 1
         self._envelope_progress: float = 1.0
+        # Pop-investigation: optional record-to-WAV per stream. Opens
+        # in start() when FORGEPLAYER_RECORD_STIM_DIR is set; writes
+        # int16 stereo from the audio thread. Disk I/O on the audio
+        # thread is best-effort wrapped in try/except.
+        self._record_wav: wave.Wave_write | None = None
+        self._record_path: Path | None = None
 
     @property
     def device_name(self) -> str | int | None:
@@ -643,6 +652,7 @@ class StimAudioStream:
                 )
                 raise
             self._stream = stream
+            self._open_recording_if_requested()
 
     # Default ramp-to-silence duration before tearing down the device.
     # 500 ms matches the seek-aware envelope (control_window's
@@ -697,6 +707,62 @@ class StimAudioStream:
                 stream.close()
             except Exception as exc:
                 _log.warning("Error closing audio stream: %s", exc)
+
+        self._close_recording()
+
+    def _open_recording_if_requested(self) -> None:
+        """If `FORGEPLAYER_RECORD_STIM_DIR` is set, open a per-stream
+        WAV file (int16 stereo at synth rate). Best-effort — failures
+        log a warning but do NOT raise; recording is debug-only."""
+        record_dir = os.environ.get("FORGEPLAYER_RECORD_STIM_DIR", "").strip()
+        if not record_dir:
+            return
+        try:
+            d = Path(record_dir)
+            d.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+            tag = str(self._device_name) if self._device_name is not None else "default"
+            safe_tag = "".join(
+                c if c.isalnum() else "_" for c in tag
+            )[:48] or "stim"
+            self._record_path = d / f"stim-{stamp}-{safe_tag}.wav"
+            wf = wave.open(str(self._record_path), "wb")
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(int(self._synth.sample_rate))
+            self._record_wav = wf
+            _log.info("Recording stim output to %s", self._record_path)
+        except Exception as exc:
+            _log.warning(
+                "Failed to open stim recording (dir=%r): %s",
+                record_dir, exc,
+            )
+            self._record_wav = None
+            self._record_path = None
+
+    def _close_recording(self) -> None:
+        wf = self._record_wav
+        self._record_wav = None
+        if wf is not None:
+            try:
+                wf.close()
+            except Exception as exc:
+                _log.warning("Error closing stim recording: %s", exc)
+
+    def _record_block(self, outdata: np.ndarray) -> None:
+        """Best-effort write to the open recording. Called from the
+        audio thread; failures are swallowed so a recording problem
+        never breaks playback."""
+        wf = self._record_wav
+        if wf is None:
+            return
+        try:
+            block_int16 = (
+                np.clip(outdata, -1.0, 1.0) * 32767.0
+            ).astype(np.int16, copy=False)
+            wf.writeframes(block_int16.tobytes())
+        except Exception:
+            pass
 
     def is_running(self) -> bool:
         return self._stream is not None
@@ -976,6 +1042,7 @@ class StimAudioStream:
                         self._envelope_gain = 0.0
                         self.request_envelope(1.0, self.AUTO_RESYNC_RECOVERY_S)
                 outdata[:] = self._apply_envelope(faded, frames)
+                self._record_block(outdata)
                 return
 
             # Apply pause/play fade gate. A direct multiplication by 0/1
@@ -998,6 +1065,7 @@ class StimAudioStream:
             block = self._apply_envelope(block, frames)
 
             outdata[:] = block
+            self._record_block(outdata)
         except Exception as exc:
             _log.exception("audio callback failed: %s", exc)
             outdata.fill(0)
