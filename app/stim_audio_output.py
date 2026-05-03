@@ -226,8 +226,27 @@ class _TimeSmoother:
     """
 
     HISTORY = 8
-    MAX_DRIFT_PER_SEC = 0.02  # i.e. 20 ms per audio second of correction
-    AUTO_RESYNC_THRESHOLD = 1.0  # seconds of disagreement → silent re-adoption
+    # Slew-rate cap on the smoother's offset correction. Bumped from
+    # 2% → 5% on 2026-05-02. Reasoning: the previous 2% leaves only 20 ms
+    # of correction per second of audio, which is enough for mpv's
+    # frame-rate jitter but not for systematic clock drift between the
+    # audio device crystal and mpv's media clock. With 2%, accumulated
+    # drift could push the offset past the auto-resync threshold and
+    # trigger an audible click during steady playback. 5% gives the
+    # smoother headroom to absorb routine drift; the per-block tempo
+    # change is still small enough to be inaudible (5% on a 700 Hz
+    # carrier is a 35 Hz shift, lasting one block ≈ 21 ms).
+    MAX_DRIFT_PER_SEC = 0.05
+    # Disagreement (seconds) between observed and tracked offset that
+    # triggers a silent re-adoption. Bumped from 1.0 → 2.0 on 2026-05-02
+    # because: (1) seeks now go through `_seek_with_envelope` which
+    # wraps the offset jump in a 250 ms envelope, so the smoother
+    # doesn't need to detect them; (2) post-seek decoder settling can
+    # take 1-2 s and produced audible secondary auto-resyncs at the
+    # 1.0 threshold even after the seek envelope had completed. 2.0 s
+    # leaves real "something is wrong" jumps detectable while
+    # absorbing routine post-seek jitter.
+    AUTO_RESYNC_THRESHOLD = 2.0
 
     def __init__(self) -> None:
         self.offset: float = 0.0
@@ -497,6 +516,13 @@ class StimAudioStream:
     # zero in a single sample is a click; ~5 ms ramp is below the
     # ear's transient threshold while still feeling instantaneous.
     FADE_MS = 5.0
+    # Recovery envelope length when the time smoother auto-resyncs
+    # (e.g. mpv time_pos jumps, audio thread starvation, etc.). The
+    # original design relied on the play/pause fade gate's 5 ms ramp
+    # for recovery, which users heard as click-pause-click roughly
+    # once a second on Windows playback. Bumping the post-resync
+    # envelope ramp to 100 ms turns each into a soft fade.
+    AUTO_RESYNC_RECOVERY_S = 0.10
 
     def __init__(
         self,
@@ -537,6 +563,34 @@ class StimAudioStream:
         # stream mid-buffer at full carrier amplitude → audible pop on
         # close.
         self._stopping: bool = False
+        # Independent multiplicative envelope, layered on top of the
+        # play/pause fade gate. Used for transitions where the 5 ms
+        # play/pause fade is too short to mask the underlying audio
+        # discontinuity:
+        #   - **Seek**: pre-seek ramp to 0 over ~500 ms, mpv seeks while
+        #     stream is silent, post-seek ramp back to 1.
+        #   - **Calibrate stop / device close**: ramp to 0 over ~500 ms
+        #     before tearing down, eliminating the close-pop a 5 ms fade
+        #     can leave on some USB dongles.
+        #
+        # State is structured to support MULTI-BLOCK ramps. The original
+        # design re-used `_cosine_ramp` from the play/pause fade gate,
+        # but that helper assumes the ramp completes within one audio
+        # block (true for the 5 ms play/pause case at any reasonable
+        # block size, false for our 500 ms envelope case where the ramp
+        # spans ~24 blocks). The 2026-05-03 dogfood pop fix is exactly
+        # this: track `progress` across blocks so a request_envelope
+        # actually takes its requested seconds.
+        #   - `_envelope_gain`: current per-block multiplier (live value)
+        #   - `_envelope_start`: gain when the current ramp began
+        #   - `_envelope_target`: target gain
+        #   - `_envelope_fade_samples`: total samples in the current ramp
+        #   - `_envelope_progress`: 0.0 → 1.0, fraction of ramp covered
+        self._envelope_gain: float = 1.0
+        self._envelope_start: float = 1.0
+        self._envelope_target: float = 1.0
+        self._envelope_fade_samples: int = 1
+        self._envelope_progress: float = 1.0
 
     @property
     def device_name(self) -> str | int | None:
@@ -574,32 +628,41 @@ class StimAudioStream:
                 raise
             self._stream = stream
 
-    # Time to leave the audio callback running while the fade-out
-    # completes before tearing down the device. One block at typical
-    # rates is ~21–23 ms; 40 ms covers any reasonable block size with
-    # margin for OS scheduling. Short enough that a user won't notice
-    # the delay between hitting close and the window disappearing.
-    STOP_FADEOUT_MS = 40.0
+    # Default ramp-to-silence duration before tearing down the device.
+    # 500 ms matches the seek-aware envelope (control_window's
+    # _SEEK_ENVELOPE_S). User has explicitly clicked stop / close, so
+    # a soft half-second fade is preferred over a click.
+    STOP_FADE_SECONDS = 0.50
 
-    def stop(self) -> None:
+    def stop(self, *, fade_seconds: float | None = None) -> None:
         """Close the audio device. Safe to call multiple times.
 
-        Sets `_stopping` so the next audio callback forces fade target
-        to 0 (regardless of `is_playing_source`), then sleeps long
-        enough for the fade-out to play out before actually closing
-        the stream. Otherwise PortAudio cuts at full carrier amplitude
-        and the user hears a pop on close.
+        Ramps the secondary envelope to 0 over `fade_seconds` (default:
+        STOP_FADE_SECONDS = 120 ms) BEFORE tearing down so PortAudio
+        doesn't cut the stream mid-buffer at full carrier amplitude.
+        Without this ramp the user hears a click on close — the
+        play/pause fade gate's 5 ms fade is too fast on some USB
+        dongles to fully discharge the output.
+
+        We also flip the legacy `_stopping` flag so the play/pause
+        fade gate ALSO drives target to 0 (belt + suspenders — if the
+        envelope path errors for any reason, the fade gate still gets
+        us to silence within FADE_MS).
         """
         with self._lock:
             if self._stream is None:
                 return
             self._stopping = True
 
-        # Block on the GUI thread for one fade window so the audio
-        # thread completes a fade-out callback. Acceptable because
-        # close-players is already a deliberate user gesture.
+        fade = self.STOP_FADE_SECONDS if fade_seconds is None else float(fade_seconds)
+        self.request_envelope(0.0, fade)
+
+        # Block on the GUI thread until the envelope has had time to
+        # complete + a small cushion for the last audio callback to
+        # apply it. Acceptable because every caller of stop() is a
+        # deliberate user gesture (close, calibrate-tap-off).
         import time  # noqa: PLC0415
-        time.sleep(self.STOP_FADEOUT_MS * 1e-3)
+        time.sleep(fade + 0.02)
 
         with self._lock:
             stream = self._stream
@@ -631,6 +694,92 @@ class StimAudioStream:
         stays put), seeks. Surfaced for debug export alongside
         underrun_count."""
         return self._smoother.auto_resync_count
+
+    def request_envelope(self, target: float, seconds: float) -> None:
+        """Smoothly ramp the secondary envelope toward `target` (0..1)
+        over `seconds` of audio. Multiplied into the output AFTER the
+        play/pause fade gate, so this can drive the carrier to silence
+        WITHOUT changing the play/pause state.
+
+        Used by callers that need a longer fade than the play/pause
+        gate's 5 ms — typically:
+          - SyncEngine.seek_all → request_envelope(0.0, 0.5) → seek →
+            request_envelope(1.0, 0.5). Hides the funscript axis
+            discontinuity on seek that otherwise pops.
+          - CalibrationStream / launched-stream stop → request_envelope(
+            0.0, 0.5), wait, then close the device. Gives the
+            output time to slope to zero before PortAudio cuts.
+
+        Re-entrant — calling mid-ramp restarts the ramp with the new
+        target, starting from the current gain (no jump-to-start
+        artifact). Reaches the new target in `seconds` regardless of
+        what was happening when the call landed.
+
+        Thread-safe: state fields are read on the audio thread and
+        written on the GUI thread; Python's GIL gives us atomic
+        float/int writes which is sufficient here.
+        """
+        clamped = max(0.0, min(1.0, float(target)))
+        sample_rate = int(self._synth.sample_rate)
+        # Ramp must cover at least 1 sample to avoid divide-by-zero
+        # paths; in practice 500 ms × 48k = 24 000 samples so the
+        # clamp-to-1 only matters on absurd inputs.
+        fade_samples = max(1, int(float(seconds) * sample_rate))
+        self._envelope_start = self._envelope_gain  # ramp starts from where we are
+        self._envelope_target = clamped
+        self._envelope_fade_samples = fade_samples
+        self._envelope_progress = 0.0
+
+    def _apply_envelope(
+        self,
+        block: np.ndarray,
+        frames: int,
+    ) -> np.ndarray:
+        """Apply the secondary envelope multiplier to `block` with
+        proper multi-block progress tracking.
+
+        Why we don't reuse `_cosine_ramp`: that helper assumes the ramp
+        completes within `frames` samples (true for the 5 ms play/pause
+        fade at any reasonable block size, FALSE for our 500 ms envelope
+        which spans ~24 audio blocks). Reusing it would compress the
+        full 0→1 ramp into one block — exactly the bug that caused the
+        ~50 ms post-seek pops users heard during the 2026-05-03 dogfood
+        even with `_SEEK_ENVELOPE_S = 0.5` set. Here we compute per-
+        sample progress through the cosine ramp explicitly.
+        """
+        target = self._envelope_target
+        start = self._envelope_start
+
+        # Already at target: fast paths.
+        if self._envelope_progress >= 1.0 and abs(self._envelope_gain - target) < 1e-6:
+            if self._envelope_gain == 1.0:
+                return block
+            if self._envelope_gain == 0.0:
+                return np.zeros_like(block)
+            return block * self._envelope_gain
+
+        fade_samples = self._envelope_fade_samples
+        # Sample-by-sample progress through the ramp. progress=0 →
+        # gain=start; progress=1 → gain=target. Clamp at 1.0 for any
+        # samples past the ramp's end.
+        samples_into_ramp = self._envelope_progress * fade_samples
+        sample_indices = np.arange(frames)
+        sample_progress = np.minimum(
+            (samples_into_ramp + sample_indices) / fade_samples, 1.0,
+        )
+
+        # Cosine shape: same zero-derivative-at-endpoints curve as the
+        # play/pause fade gate, just spread across multiple blocks.
+        phase = sample_progress * np.pi
+        gain = start + (target - start) * 0.5 * (1.0 - np.cos(phase))
+
+        # Update state for next block's call.
+        self._envelope_gain = float(gain[-1])
+        self._envelope_progress = float(
+            min(1.0, (samples_into_ramp + frames) / fade_samples)
+        )
+
+        return (block * gain.reshape(-1, 1).astype(np.float32))
 
     @staticmethod
     def _cosine_ramp(
@@ -734,14 +883,76 @@ class StimAudioStream:
             # this whole block via a cosine curve (zero derivative at
             # both endpoints, no audible knee at the boundary). Next
             # block will see the jumped modulation but fade_gain=0 →
-            # ramps up from zero with the same cosine shape, masking
-            # the step.
+            # ramps up from zero with the same cosine shape over
+            # FADE_MS = 5 ms.
+            #
+            # Two layers of fix on top of the original design:
+            #
+            # 1. Apply the secondary envelope to THIS block. The
+            #    seek-aware pop fix runs request_envelope(0.0, ...)
+            #    BEFORE the seek fires, so by the time auto-resync
+            #    triggers the envelope is at (or near) zero. Without
+            #    this multiply, one block of post-seek audio at full
+            #    fade_gain amplitude leaks through — the "upside pop"
+            #    on every seek.
+            #
+            # 2. Force the envelope to 0 and request a longer ramp
+            #    back up (100 ms) for the recovery. The next block's
+            #    fade_gain ramp (5 ms) alone is too fast to mask the
+            #    funscript modulation step that auto-resync produces;
+            #    users hear it as a click-pause-click roughly once a
+            #    second during playback (78 resyncs in a 90 s scene
+            #    is typical, per stim.stream_closed events). The 100 ms
+            #    envelope ramp turns each click into a soft fade.
+            #    Per-block envelope already covers the seek-up case
+            #    (request_envelope(1.0, 0.25) from the seek QTimer
+            #    just sets a longer-still target which is fine).
             if self._smoother.just_auto_resynced:
+                # Diagnostic: log every resync's context so we can
+                # correlate user-reported pops with smoother behavior.
+                # Cheap when debug logging is off (DebugLog.record
+                # returns immediately if not enabled). Read both
+                # offsets via the smoother's diagnostic accessors so
+                # we don't reach into private state.
+                try:
+                    from app.debug_log import DebugLog as _DL  # noqa: PLC0415
+                    if _DL.enabled:
+                        _DL.record(
+                            "stim.auto_resync",
+                            media_time=float(media_t),
+                            steady_end=float(steady_clock[-1]) if frames else 0.0,
+                            new_offset=float(self._smoother.offset),
+                            envelope_gain=float(self._envelope_gain),
+                            fade_gain=float(self._fade_gain),
+                            stopping=bool(self._stopping),
+                            resync_count=int(self._smoother.auto_resync_count),
+                        )
+                except Exception:
+                    pass
+
                 ramp = self._cosine_ramp(
                     self._fade_gain, 0.0, frames, fade_samples=frames,
                 )
-                outdata[:] = block * ramp.reshape(-1, 1)
+                faded = block * ramp.reshape(-1, 1)
                 self._fade_gain = 0.0
+                # Recovery envelope decision:
+                # - During stop: do nothing — caller's request_envelope(
+                #   0.0, ...) already drives output to silence before close.
+                # - Steady-play auto-resync (envelope was at full output
+                #   before the resync): drop envelope to 0 and ramp back
+                #   up over AUTO_RESYNC_RECOVERY_S (100 ms). Without this
+                #   the modulation step is audible as a click during play.
+                # - Post-seek auto-resync (envelope was already at or near
+                #   0 from the seek's pre-fade): leave the caller's pending
+                #   request alone. The seek's QTimer set a 250 ms ramp-up
+                #   target; overriding to a shorter recovery here makes
+                #   the post-seek transition more abrupt than the caller
+                #   requested.
+                if not self._stopping:
+                    if self._envelope_gain > 0.5:
+                        self._envelope_gain = 0.0
+                        self.request_envelope(1.0, self.AUTO_RESYNC_RECOVERY_S)
+                outdata[:] = self._apply_envelope(faded, frames)
                 return
 
             # Apply pause/play fade gate. A direct multiplication by 0/1
@@ -755,6 +966,13 @@ class StimAudioStream:
             elif self._is_playing_source is not None:
                 target = 1.0 if bool(self._is_playing_source()) else 0.0
                 block = self._apply_fade_gate(block, target, frames, sample_rate)
+
+            # Apply the secondary envelope on top of the play/pause
+            # fade gate. The two layers stack multiplicatively: pause
+            # → fade gate goes to 0 (regardless of envelope); seek →
+            # envelope goes to 0 (regardless of play/pause). Whichever
+            # is silent wins.
+            block = self._apply_envelope(block, frames)
 
             outdata[:] = block
         except Exception as exc:

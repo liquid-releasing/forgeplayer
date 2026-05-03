@@ -224,6 +224,35 @@ class ControlWindow(QMainWindow):
         seek_row.addWidget(self._dur_label)
         vbox.addLayout(seek_row)
 
+        # ── Scene volume ──
+        # Ephemeral slider for the video slot's playback volume. mpv's
+        # `volume` property stacks with the OS / headset master, so this
+        # is a per-session "make it quieter / louder" knob without
+        # touching the user's system audio. Default 100 % (full); the
+        # state doesn't persist — each new scene starts at 100. Stim
+        # output is on a separate device + has its own physical knob,
+        # so this slider doesn't touch the haptic ports.
+        volume_row = QHBoxLayout()
+        volume_row.setSpacing(8)
+        vol_label = QLabel("🔊  Scene volume")
+        vol_label.setStyleSheet("color: #9ba3c4; font-size: 12px;")
+        vol_label.setFixedWidth(140)
+        self._scene_volume_slider = ClickableSlider(Qt.Orientation.Horizontal)
+        self._scene_volume_slider.setRange(0, 100)
+        self._scene_volume_slider.setValue(100)
+        self._scene_volume_slider.setMinimumHeight(28)
+        self._scene_volume_slider.valueChanged.connect(self._on_scene_volume_changed)
+        self._scene_volume_label = QLabel("100%")
+        self._scene_volume_label.setFixedWidth(48)
+        self._scene_volume_label.setStyleSheet("font-size: 12px;")
+        self._scene_volume_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        volume_row.addWidget(vol_label)
+        volume_row.addWidget(self._scene_volume_slider, 1)
+        volume_row.addWidget(self._scene_volume_label)
+        vbox.addLayout(volume_row)
+
         # ── Transport controls ──
         # Touch-friendly heights (52px) optimized for the 1090×720
         # touchscreen. Prev/Next chapter and the Calibrate row land in
@@ -1570,6 +1599,9 @@ class ControlWindow(QMainWindow):
         # Calibrate buttons gate on funscript_set presence; refresh now
         # that the new scene's content has been applied.
         self._update_calibrate_buttons_enabled()
+        # Scene volume is ephemeral — reset to 100 % on every new scene
+        # so a quiet pick from the prior session doesn't carry over.
+        self._scene_volume_slider.setValue(100)
 
         if not (choices.video or choices.audio):
             QMessageBox.information(
@@ -2949,9 +2981,13 @@ class ControlWindow(QMainWindow):
                     self._engine._players[i].audio_files = [audio_path]  # type: ignore[index]
                 except Exception:
                     pass
-            # Mirror slots are muted; primary video plays at default volume.
+            # Mirror slots are muted; primary video plays at the
+            # scene-volume slider value (default 100, but the user may
+            # have nudged it pre-launch).
             if _SLOT_ROLES[i] == "mirror":
                 self._engine.set_volume(i, 0)
+            elif _SLOT_ROLES[i] == "video":
+                self._engine.set_volume(i, int(self._scene_volume_slider.value()))
             launched = True
 
         if launched:
@@ -2992,11 +3028,92 @@ class ControlWindow(QMainWindow):
         self._seek_bar.setValue(0)
         self._time_label.setText("0:00")
 
+    def _on_scene_volume_changed(self, value: int) -> None:
+        """Apply the slider's value to the video slot's mpv player.
+        No-op pre-launch (engine has no player yet) — the launch flow
+        re-applies the current slider value once the player is built."""
+        self._scene_volume_label.setText(f"{value}%")
+        # Slot 0 is the video slot carrying the scene audio. Mirror slots
+        # (2/3) stay muted via _on_launch's set_volume(0). Slot 1 is the
+        # synth path — separate device, untouched.
+        self._engine.set_volume(0, int(value))
+
+    # ── Seek with pop-fix envelope ─────────────────────────────────────────────
+
+    # Pre-seek and post-seek ramp duration. 500 ms each side — total
+    # perceived gap ~1 s. The synth recomputes alpha/beta modulation
+    # per buffer; a seek lands inside a fade window and flips the
+    # carrier discontinuously without this. Tone framing (per the
+    # locked spec): "make em wait in anticipation" — the brief silence
+    # is a feature, not a cost. Iteration history:
+    #   - 120 ms (tried 2026-05-02): "pop on the upside" 60% of seeks
+    #   - 250 ms (tried 2026-05-02): pops down but still ~1/seek
+    #   - 500 ms (current): per user request "go to half second"
+    _SEEK_ENVELOPE_S = 0.50
+
+    def _all_active_stim_streams(self) -> list:
+        """Return every live StimAudioStream / aux stream across slot data.
+
+        Used by the seek-envelope path to ramp ALL stim outputs to
+        silence simultaneously. Empty list means no stim is currently
+        running and the seek can fire immediately without an envelope
+        round-trip.
+        """
+        streams: list = []
+        for i in range(_NUM_SLOTS):
+            d = self._slot_data(i)
+            primary = d.get("stim_audio_stream")
+            if primary is not None:
+                streams.append(primary)
+            for aux in d.get("aux_audio_streams") or []:
+                streams.append(aux)
+        return streams
+
+    def _seek_with_envelope(self, pos: float) -> None:
+        """Seek every active player to `pos` with a 120 ms pre-seek
+        silence ramp + 120 ms post-seek ramp back up. Hides the
+        funscript-axis discontinuity that otherwise pops on the haptic
+        ports when seeking through stim playback (see
+        `project_forgeplayer_pop_fix_spec.md`).
+
+        If nothing is currently audible (no players, paused), seeks
+        immediately — no envelope dance needed when there's nothing
+        to fade.
+        """
+        streams = self._all_active_stim_streams()
+        needs_envelope = (
+            bool(streams)
+            and self._engine.has_active_players()
+            and not self._engine.is_paused()
+        )
+        if not needs_envelope:
+            self._engine.seek_all(pos)
+            return
+
+        DebugLog.record(
+            "seek.envelope_start", target_s=pos, streams=len(streams),
+            ramp_seconds=self._SEEK_ENVELOPE_S,
+        )
+        for s in streams:
+            s.request_envelope(0.0, self._SEEK_ENVELOPE_S)
+
+        def _do_seek() -> None:
+            DebugLog.record("seek.execute", target_s=pos)
+            self._engine.seek_all(pos)
+            for s in streams:
+                s.request_envelope(1.0, self._SEEK_ENVELOPE_S)
+
+        # QTimer.singleShot keeps the GUI responsive while the audio
+        # thread completes the silence ramp. After the timer fires the
+        # actual seek + ramp-up happens; sync resumes naturally because
+        # the synth's time_source was never stopped.
+        QTimer.singleShot(int(self._SEEK_ENVELOPE_S * 1000), _do_seek)
+
     def _skip(self, seconds: float) -> None:
         pos = self._engine.get_position()
         dur = self._engine.get_duration()
         new_pos = max(0.0, min(pos + seconds, dur))
-        self._engine.seek_all(new_pos)
+        self._seek_with_envelope(new_pos)
 
     def _on_seek_press(self) -> None:
         self._seek_dragging = True
@@ -3005,7 +3122,7 @@ class ControlWindow(QMainWindow):
         dur = self._engine.get_duration()
         if dur > 0:
             pos = (self._seek_bar.value() / 10000.0) * dur
-            self._engine.seek_all(pos)
+            self._seek_with_envelope(pos)
         self._seek_dragging = False
 
     # ── Poll timer ─────────────────────────────────────────────────────────────
