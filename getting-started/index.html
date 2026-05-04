@@ -476,6 +476,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Install">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#run-from-source-developers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run from source (developers)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -729,6 +746,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Install">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#run-from-source-developers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run from source (developers)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -887,54 +921,76 @@ separately and want everything on one timeline, this is the path.</p>
 </ul>
 <hr />
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
+<p>Pick a build for your platform and run it. No Python install, no libmpv
+install — everything is bundled.</p>
+<ul>
+<li><strong><a href="https://forgeplayer.app/">forgeplayer.app</a></strong> — direct download buttons
+  for Windows / macOS / Linux on the landing page.</li>
+<li><strong><a href="https://github.com/liquid-releasing/forgeplayer-releases/releases/latest">GitHub Releases</a></strong> —
+  same builds, plus older versions and changelogs.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>File</th>
+<th>How to run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows</td>
+<td><code>ForgePlayer-windows.zip</code></td>
+<td>Unzip, double-click <code>ForgePlayer.exe</code></td>
+</tr>
+<tr>
+<td>macOS</td>
+<td><code>ForgePlayer-macos.zip</code></td>
+<td>Unzip, open <code>ForgePlayer.app</code> (right-click → Open the first time, since the app isn't notarized yet)</td>
+</tr>
+<tr>
+<td>Linux</td>
+<td><code>ForgePlayer-linux.tar.gz</code></td>
+<td>Extract, run <code>ForgePlayer/ForgePlayer</code></td>
+</tr>
+</tbody>
+</table>
+<p>The window opens with four tabs: <strong>Library</strong>, <strong>Live</strong>, <strong>Setup</strong>,
+<strong>Preferences</strong>.</p>
+<h3 id="run-from-source-developers">Run from source (developers)<a class="headerlink" href="#run-from-source-developers" title="Permanent link">&para;</a></h3>
+<p>If you'd rather hack on the code:</p>
 <ol>
-<li>
-<p><strong>Install Python 3.11+</strong> (3.12 or 3.13 is fine).</p>
-</li>
-<li>
-<p><strong>Install libmpv</strong> (frame-accurate media engine):</p>
-</li>
-<li>
-<p><strong>Windows:</strong> download the latest mpv build from
+<li>Install Python 3.11+ (3.12 or 3.13 is fine).</li>
+<li>Install libmpv:</li>
+<li><strong>Windows:</strong> download the latest mpv build from
      <a href="https://mpv.io/installation/">mpv.io/installation</a> and place
-     <code>libmpv-2.dll</code> next to <code>main.py</code> or anywhere on <code>PATH</code>.</p>
-</li>
+     <code>libmpv-2.dll</code> next to <code>main.py</code> or anywhere on <code>PATH</code>.</li>
 <li><strong>macOS:</strong> <code>brew install mpv</code></li>
-<li>
-<p><strong>Linux:</strong> <code>sudo apt-get install libmpv-dev</code> (Debian / Ubuntu) or
-     equivalent.</p>
-</li>
-<li>
-<p><strong>Clone and install Python deps:</strong></p>
-</li>
-</ol>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git clone &lt;forgeplayer-repo&gt;
+<li><strong>Linux:</strong> <code>sudo apt-get install libmpv-dev</code> (Debian / Ubuntu) or
+     equivalent.</li>
+<li>Clone and install Python deps:
+   <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git clone https://github.com/liquid-releasing/forgeplayer.git
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cd forgeplayer
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>python -m venv .venv
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>.venv/Scripts/activate           # Windows
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>source .venv/bin/activate        # macOS / Linux
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>pip install -r requirements.txt
-</span></code></pre></div>
-<ol>
-<li><strong>Run:</strong></li>
+</span></code></pre></div></li>
+<li>Run: <code>python main.py</code></li>
 </ol>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python main.py
-</span></code></pre></div>
-<p>Window opens with four tabs: <strong>Library</strong>, <strong>Live</strong>, <strong>Setup</strong>,
-   <strong>Preferences</strong>.</p>
 <hr />
 <h2 id="the-pack">The Pack<a class="headerlink" href="#the-pack" title="Permanent link">&para;</a></h2>
 <p>A "scene" is one folder containing the video, optional sibling audio
 files, optional funscripts (one or many), and any pinned picks. Sample
 layout:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>my-scene/
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  my-scene.mp4                                    &lt;- main video
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  my-scene[E-Stim _Popper Edit].mp3               &lt;- pre-rendered stim audio (optional)
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  my-scene.funscript                              &lt;- main funscript (1D position track)
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  my-scene.alpha.funscript                        &lt;- explicit alpha axis (optional)
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  my-scene.beta.funscript                         &lt;- explicit beta axis (optional)
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  my-scene.alpha-prostate.funscript               &lt;- prostate channel for Haptic 2 (optional)
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  my-scene.prostate.wav                           &lt;- pre-rendered prostate audio (optional)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>my-scene/
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  my-scene.mp4                                    &lt;- main video
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  my-scene[E-Stim _Popper Edit].mp3               &lt;- pre-rendered stim audio (optional)
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  my-scene.funscript                              &lt;- main funscript (1D position track)
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  my-scene.alpha.funscript                        &lt;- explicit alpha axis (optional)
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  my-scene.beta.funscript                         &lt;- explicit beta axis (optional)
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  my-scene.alpha-prostate.funscript               &lt;- prostate channel for Haptic 2 (optional)
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  my-scene.prostate.wav                           &lt;- pre-rendered prostate audio (optional)
 </span></code></pre></div>
 <p>Drop the folder anywhere readable. ForgePlayer scans it on first
 Library refresh and remembers it after that.</p>
