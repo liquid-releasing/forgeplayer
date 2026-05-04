@@ -261,18 +261,25 @@ jobs:
             artifacts/ForgePlayer-macos.zip
             artifacts/ForgePlayer-linux.tar.gz
           body: |
-            > ⚠️ **Alpha release.** This build is under active development. Expect rough edges.
+            > ⚠️ **Pre-1.0 development release.** Active development; expect rough edges.
 
-            ForgePlayer — the next-gen successor to Fred's CHPlayer for synchronized multi-monitor video + haptic playback. Point it at a FunscriptForge or ForgeAssembler pack folder, pick a scene in the Library, and it plays across your screens with audio routed separately to your speakers and USB estim device.
+            ForgePlayer is a synchronized multi-screen player with per-port device routing. Drop a FunscriptForge or ForgeAssembler scene pack into the Library and ForgePlayer plays it across your screens — with audio routed separately to scene speakers, your Haptic 1 stim port, and (optionally) a Haptic 2 prostate port — all from the same timeline.
 
-            **Device compatibility:** mechanical, 2b, and stereostim devices are supported in this alpha via the pre-rendered-audio haptic path. FOC-stim support lands in v0.0.2 when native funscript playback ships.
+            **What's new since the last cut:**
+            - Live tab cockpit — per-port pre-flight calibrate, lock-on-Play, single-click scene activation
+            - Dual-port stim routing — Haptic 1 main stim + Haptic 2 prostate-specific channel
+            - Sound vs Funscript content preference — pre-rendered stim audio (mp3) or live funscript synthesis
+            - WASAPI exclusive mode for stim streams on Windows (avoids shared-mixer artifacts)
+            - Pop fixes — multi-block envelope ramp, close-pop fix, post-seek settle hold
+
+            **Device compatibility:** mechanical, 2b, stereostim, FOC-stim — supported via pre-rendered stim audio (mp3) or live funscript synthesis (vendored restim).
 
             ## Downloads
             - **Windows** — `ForgePlayer-windows.zip` — unzip and run `ForgePlayer.exe`
             - **macOS** — `ForgePlayer-macos.zip` — unzip and open `ForgePlayer.app`
             - **Linux** — `ForgePlayer-linux.tar.gz` — extract and run `ForgePlayer/ForgePlayer`
 
-            First run: visit **Setup** to pick your Scene Audio and Haptic 1 devices, then **Library → Scan a folder** at your media root.
+            **First run:** open **Setup**, pick your Scene Audio and Haptic 1 devices (and Haptic 2 if you have a second stim dongle), then **Library → Scan a folder** at your media root. Click a scene tile to activate it; press Play.
 
             Questions, bug reports, and feedback welcome in [our Discord](https://discord.gg/sZWCqgxY).
           append_body: true
