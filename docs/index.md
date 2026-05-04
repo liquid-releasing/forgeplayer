@@ -73,8 +73,11 @@ Drop the folder. Refresh the Library. Click the tile. Play.
 
 ---
 
-## Status
+## Download
 
-**v0.0.4 — preparing alpha (2026-05-03).** See the
-[GitHub repository](https://github.com/liquid-releasing/forgeplayer)
-for source and the latest release.
+**v0.0.4 — released 2026-05-04.**
+
+[:material-download: Download v0.0.4 (Windows / macOS / Linux)](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest){ .md-button .md-button--primary }
+
+Source on GitHub:
+[liquid-releasing/forgeplayer](https://github.com/liquid-releasing/forgeplayer).

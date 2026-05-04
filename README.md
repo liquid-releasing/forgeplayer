@@ -10,15 +10,17 @@ Play a video on your 4K monitor, companion view on your phone, estim audio to yo
 
 ## Status
 
-**v0.0.4 — preparing alpha (2026-05-03).** Current development branch:
-`feat/live-redesign`. Working: synchronized multi-screen video, dual-port
-stim with frame-perfect mirror or per-port prostate routing, content
-preference (sound files vs live funscript synth), seek-aware pop
-mitigation, scene library with pinned variant picks, debug instrumentation
-streamed to JSONL. Most recent dogfood (2026-05-03) confirmed the synth
-audio path is provably clean; remaining noise sources traced to Windows
-shared-mode mixer contention, addressed via WASAPI exclusive mode for
-stim streams. See [SPEC.md](./SPEC.md) for the full v0.0.1-alpha design,
+**v0.0.4 released — 2026-05-04.** Download
+[Windows, macOS, or Linux builds](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest)
+from `forgeplayer-releases`.
+
+Working: synchronized multi-screen video, dual-port stim with
+frame-perfect mirror or per-port prostate routing, content preference
+(sound files vs live funscript synth), seek-aware pop mitigation, scene
+library with pinned variant picks, debug instrumentation streamed to
+JSONL. WASAPI exclusive mode used for stim streams on Windows to
+sidestep shared-mixer contention. See [SPEC.md](./SPEC.md) for the
+full v0.0.1-alpha design,
 [docs/getting-started.md](./docs/getting-started.md) for first-time
 setup, and [docs/user-guide.md](./docs/user-guide.md) for the full
 feature reference.
