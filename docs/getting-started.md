@@ -23,36 +23,45 @@ separately and want everything on one timeline, this is the path.
 
 ## Install
 
-1. **Install Python 3.11+** (3.12 or 3.13 is fine).
+Pick a build for your platform and run it. No Python install, no libmpv
+install — everything is bundled.
 
-2. **Install libmpv** (frame-accurate media engine):
+- **[forgeplayer.app](https://forgeplayer.app/)** — direct download buttons
+  for Windows / macOS / Linux on the landing page.
+- **[GitHub Releases](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest)** —
+  same builds, plus older versions and changelogs.
 
+| Platform | File | How to run |
+|---|---|---|
+| Windows | `ForgePlayer-windows.zip` | Unzip, double-click `ForgePlayer.exe` |
+| macOS | `ForgePlayer-macos.zip` | Unzip, open `ForgePlayer.app` (right-click → Open the first time, since the app isn't notarized yet) |
+| Linux | `ForgePlayer-linux.tar.gz` | Extract, run `ForgePlayer/ForgePlayer` |
+
+The window opens with four tabs: **Library**, **Live**, **Setup**,
+**Preferences**.
+
+### Run from source (developers)
+
+If you'd rather hack on the code:
+
+1. Install Python 3.11+ (3.12 or 3.13 is fine).
+2. Install libmpv:
    - **Windows:** download the latest mpv build from
      [mpv.io/installation](https://mpv.io/installation/) and place
      `libmpv-2.dll` next to `main.py` or anywhere on `PATH`.
    - **macOS:** `brew install mpv`
    - **Linux:** `sudo apt-get install libmpv-dev` (Debian / Ubuntu) or
      equivalent.
-
-3. **Clone and install Python deps:**
-
+3. Clone and install Python deps:
    ```
-   git clone <forgeplayer-repo>
+   git clone https://github.com/liquid-releasing/forgeplayer.git
    cd forgeplayer
    python -m venv .venv
    .venv/Scripts/activate           # Windows
    source .venv/bin/activate        # macOS / Linux
    pip install -r requirements.txt
    ```
-
-4. **Run:**
-
-   ```
-   python main.py
-   ```
-
-   Window opens with four tabs: **Library**, **Live**, **Setup**,
-   **Preferences**.
+4. Run: `python main.py`
 
 ---
 
