@@ -58,6 +58,18 @@ class SyncEngine:
                 "input_default_bindings": False,
                 "input_vo_keyboard": False,
                 "osc": False,
+                # Frame-accurate seeking. mpv's default lands on the
+                # nearest prior keyframe (typically -2..-12s with
+                # HandBrake-encoded sources). With chapter-nav + slider
+                # scrub the drift was visible — chapter targets landed
+                # short and the next click could re-target the same
+                # chapter. hr-seek=yes decodes forward from the keyframe
+                # to land exactly on the target. Adds 100-500ms per
+                # seek for 1080p; imperceptible on this hardware.
+                # Re-encoding with `-force_key_frames` at chapter
+                # boundaries (forgeassembler's job) is the alternative;
+                # this is the runtime fix for arbitrary source files.
+                "hr_seek": "yes",
             }
             if audio_device:
                 kwargs["audio_device"] = audio_device

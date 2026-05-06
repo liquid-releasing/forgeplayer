@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QScreen, QAction
 
+from app.chapters import Chapter, load_chapters, next_chapter, prev_chapter
 from app.player_window import PlayerWindow
 from app.sync_engine import SyncEngine
 from app.session import Session, SlotConfig
@@ -108,6 +109,19 @@ class ControlWindow(QMainWindow):
         self._slots: list[dict] = [
             self._make_slot_data() for _ in range(_NUM_SLOTS)
         ]
+
+        # Chapters from the active video's `<stem>.chapters.json` sidecar
+        # — empty when no sidecar / no video. Populated by
+        # `_apply_scene_choices` and consumed by the prev/next chapter
+        # transport buttons.
+        self._chapters: list[Chapter] = []
+        # Last chapter seek target (ms). mpv's default seek lands on the
+        # nearest prior keyframe — a few seconds short of the target.
+        # Without tracking the requested target, get_position would
+        # report the drifted position and the next chapter click would
+        # re-target the same chapter (stuck). We trust the target until
+        # the user does a non-chapter seek (slider, ±N skip).
+        self._last_chapter_target_ms: int | None = None
 
         # Calibration streams — one per haptic port. None means no
         # active calibration. See _update_calibrate_buttons_enabled.
@@ -261,11 +275,24 @@ class ControlWindow(QMainWindow):
 
         # ── Transport controls ──
         # Touch-friendly heights (52px) optimized for the 1090×720
-        # touchscreen. Prev/Next chapter and the Calibrate row land in
-        # the next commit.
+        # touchscreen. Prev/Next chapter frame the skip buttons; both
+        # gate on a loaded `<stem>.chapters.json` sidecar (see
+        # `app.chapters`). Calibrate row lands below.
         transport = QHBoxLayout()
         transport.setSpacing(8)
         transport.addStretch()
+
+        self._btn_prev_chapter = QPushButton("⏮  Prev")
+        self._btn_prev_chapter.setFixedHeight(52)
+        self._btn_prev_chapter.setMinimumWidth(80)
+        self._btn_prev_chapter.setStyleSheet("font-size: 13px;")
+        self._btn_prev_chapter.setToolTip(
+            "Jump to the previous chapter. "
+            "Needs a chapters.json sidecar next to the video."
+        )
+        self._btn_prev_chapter.clicked.connect(self._on_prev_chapter)
+        self._btn_prev_chapter.setEnabled(False)
+        transport.addWidget(self._btn_prev_chapter)
 
         for label, fn in [
             ("−30s", lambda: self._skip(-30)),
@@ -307,6 +334,18 @@ class ControlWindow(QMainWindow):
             b.setStyleSheet("font-size: 13px;")
             b.clicked.connect(fn)
             transport.addWidget(b)
+
+        self._btn_next_chapter = QPushButton("Next  ⏭")
+        self._btn_next_chapter.setFixedHeight(52)
+        self._btn_next_chapter.setMinimumWidth(80)
+        self._btn_next_chapter.setStyleSheet("font-size: 13px;")
+        self._btn_next_chapter.setToolTip(
+            "Jump to the next chapter. "
+            "Needs a chapters.json sidecar next to the video."
+        )
+        self._btn_next_chapter.clicked.connect(self._on_next_chapter)
+        self._btn_next_chapter.setEnabled(False)
+        transport.addWidget(self._btn_next_chapter)
 
         transport.addStretch()
         vbox.addLayout(transport)
@@ -1649,6 +1688,19 @@ class ControlWindow(QMainWindow):
         # Calibrate buttons gate on funscript_set presence; refresh now
         # that the new scene's content has been applied.
         self._update_calibrate_buttons_enabled()
+        # Load the active video's chapter sidecar (if any) and update
+        # the prev/next chapter button enable state. Audio-only scenes
+        # have no chapter sidecar — buttons disable cleanly.
+        self._chapters = (
+            load_chapters(choices.video.path) if choices.video else []
+        )
+        self._last_chapter_target_ms = None
+        self._update_chapter_buttons_enabled()
+        DebugLog.record(
+            "library.activate.chapters",
+            scene=entry.name,
+            chapter_count=len(self._chapters),
+        )
         # Scene volume is ephemeral — reset to 100 % on every new scene
         # so a quiet pick from the prior session doesn't carry over.
         self._scene_volume_slider.setValue(100)
@@ -3315,7 +3367,61 @@ class ControlWindow(QMainWindow):
         pos = self._engine.get_position()
         dur = self._engine.get_duration()
         new_pos = max(0.0, min(pos + seconds, dur))
+        # Non-chapter seek — clear the chapter-target memory so the next
+        # prev/next click reads the actual (post-skip) playhead.
+        self._last_chapter_target_ms = None
         self._seek_with_envelope(new_pos)
+
+    def _effective_chapter_position_ms(self) -> int:
+        """Logical position (ms) for prev/next chapter calculations.
+
+        mpv's default keyframe-rounded seek lands a few seconds short of
+        the requested target, which would make the next chapter click
+        re-target the same chapter (stuck). When our last requested
+        chapter target is ahead of the actual playhead, trust the
+        target instead. Once playback advances past the target — or
+        the user does a non-chapter seek — actual position takes over.
+        """
+        actual_ms = int(self._engine.get_position() * 1000)
+        last_target = self._last_chapter_target_ms
+        if last_target is not None and actual_ms < last_target:
+            return last_target
+        return actual_ms
+
+    def _on_prev_chapter(self) -> None:
+        if not self._chapters:
+            return
+        position_ms = self._effective_chapter_position_ms()
+        target = prev_chapter(self._chapters, position_ms)
+        if target is None:
+            return
+        self._last_chapter_target_ms = target.at_ms
+        DebugLog.record(
+            "chapter.prev",
+            at_ms=target.at_ms, name=target.name, position_ms=position_ms,
+        )
+        self._seek_with_envelope(target.at_ms / 1000.0)
+
+    def _on_next_chapter(self) -> None:
+        if not self._chapters:
+            return
+        position_ms = self._effective_chapter_position_ms()
+        target = next_chapter(self._chapters, position_ms)
+        if target is None:
+            return
+        self._last_chapter_target_ms = target.at_ms
+        DebugLog.record(
+            "chapter.next",
+            at_ms=target.at_ms, name=target.name, position_ms=position_ms,
+        )
+        self._seek_with_envelope(target.at_ms / 1000.0)
+
+    def _update_chapter_buttons_enabled(self) -> None:
+        """Enable Prev/Next chapter only when a sidecar's chapter list
+        has been loaded for the active video."""
+        has_chapters = bool(self._chapters)
+        self._btn_prev_chapter.setEnabled(has_chapters)
+        self._btn_next_chapter.setEnabled(has_chapters)
 
     def _on_seek_press(self) -> None:
         self._seek_dragging = True
@@ -3324,6 +3430,8 @@ class ControlWindow(QMainWindow):
         dur = self._engine.get_duration()
         if dur > 0:
             pos = (self._seek_bar.value() / 10000.0) * dur
+            # Non-chapter seek — clear the chapter-target memory.
+            self._last_chapter_target_ms = None
             self._seek_with_envelope(pos)
         self._seek_dragging = False
 
