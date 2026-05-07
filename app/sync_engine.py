@@ -231,12 +231,38 @@ class SyncEngine:
         was rounding to the nearest keyframe. Adds ~100-500ms per seek
         for 1080p — imperceptible during normal use, and worth it for
         chapter-nav and slider scrub landing where the user expects.
+
+        Audio duck: briefly mutes each player around the seek so the
+        sample discontinuity at the new playhead doesn't pop. Without
+        this, ``precision="exact"`` lands the seek mid-sample and the
+        waveform jump is audible on USB / external DAC outputs. 50 ms
+        is enough to mask the click without being heard as a gap.
+        Each player's prior mute state is preserved so a user-set mute
+        survives the seek.
         """
-        for p in self._active:
+        active = self._active
+        prior_mute_state: list[tuple[mpv.MPV, bool]] = []
+        for p in active:
+            try:
+                prior_mute_state.append((p, bool(p.mute)))
+                p.mute = True
+            except Exception:
+                pass
+        for p in active:
             try:
                 p.seek(position, "absolute", "exact")
             except Exception:
                 pass
+
+        def _restore_mute() -> None:
+            for p, was_muted in prior_mute_state:
+                if not was_muted:
+                    try:
+                        p.mute = False
+                    except Exception:
+                        pass
+
+        threading.Timer(0.05, _restore_mute).start()
 
     # ── State queries ─────────────────────────────────────────────────────────
 

@@ -878,7 +878,7 @@ class ControlWindow(QMainWindow):
             ".mp3); Funscript = live synthesis from the funscript. If "
             "your pick isn't available, Haptic 1 falls back to the "
             "other form (silent stim is worse than wrong-form). "
-            "Haptic 2 mirrors Haptic 1 when no prostate-specific "
+            "Haptic 2 mirrors Haptic 1 when no alt-stim-specific "
             "source exists."
         )
         root.addWidget(subtitle)
@@ -945,11 +945,28 @@ class ControlWindow(QMainWindow):
             is_haptic=True,
         ))
         rl.addLayout(self._labeled_row_with_test(
-            "Haptic 2 (prostate)", self._setup_haptic2_combo,
-            "Optional prostate output. Same device family as Haptic 1 "
+            "Haptic 2 (alt stim)", self._setup_haptic2_combo,
+            "Optional second stim output. Same device family as Haptic 1 "
             "recommended for tight sync.",
             is_haptic=True,
         ))
+
+        # Re-query Windows for the current audio device list and rebuild
+        # the four dropdowns. Without this, devices plugged in AFTER app
+        # start (USB DACs, headphones, the user's Fosi amp) only become
+        # available on a full restart — `self._audio_devices` is captured
+        # once at __init__ and the combos are populated from it.
+        refresh_row = QHBoxLayout()
+        refresh_row.addStretch(1)
+        btn_refresh = QPushButton("Refresh devices")
+        btn_refresh.setToolTip(
+            "Re-scan Windows for plugged-in audio devices. "
+            "Use after plugging in a USB DAC / amp / headset."
+        )
+        btn_refresh.setMinimumHeight(32)
+        btn_refresh.clicked.connect(self._on_refresh_audio_devices)
+        refresh_row.addWidget(btn_refresh)
+        rl.addLayout(refresh_row)
 
         root.addWidget(role_box)
         root.addStretch()
@@ -1357,6 +1374,43 @@ class ControlWindow(QMainWindow):
             else:
                 out.append((name, desc))
         return out
+
+    def _on_refresh_audio_devices(self) -> None:
+        """Re-query Windows audio devices and rebuild the Setup combos.
+
+        Devices plugged in after app start aren't visible until the
+        cached ``self._audio_devices`` is refreshed. This rebuilds it
+        from a fresh ``SyncEngine.list_audio_devices()`` call and
+        repopulates each combo, preserving the saved selection if the
+        device is still present (or falling back to "— not set —").
+        """
+        raw_devices = SyncEngine.list_audio_devices()
+        self._audio_devices = self._disambiguate_audio_descriptions(raw_devices)
+        for combo, saved in (
+            (self._setup_scene_combo, self._prefs.scene_audio_device),
+            (self._setup_scene_secondary_combo,
+             self._prefs.scene_audio_secondary_device),
+            (self._setup_haptic1_combo, self._prefs.haptic1_audio_device),
+            (self._setup_haptic2_combo, self._prefs.haptic2_audio_device),
+        ):
+            blocker = combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("— not set —", "")
+            for name, desc in self._audio_devices:
+                combo.addItem(desc, name)
+            for idx in range(combo.count()):
+                if combo.itemData(idx) == saved:
+                    combo.setCurrentIndex(idx)
+                    break
+            combo.blockSignals(blocker)
+        DebugLog.record(
+            "setup.audio_devices_refreshed",
+            count=len(self._audio_devices),
+        )
+        self._setup_status.setText(
+            f"Refreshed — {len(self._audio_devices)} devices found"
+        )
+        QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
 
     def _build_role_combo(self, *, saved_value: str) -> QComboBox:
         combo = QComboBox()
