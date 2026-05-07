@@ -35,6 +35,13 @@ class TestDefaults:
         p = Preferences()
         assert p.haptic_offset_ms == 0
 
+    def test_scene_audio_secondary_device_default_is_empty(self):
+        # Empty means feature off — no mirror spawned. Makes the
+        # feature opt-in for users who actually have a second
+        # audio-capable stim device wired up.
+        p = Preferences()
+        assert p.scene_audio_secondary_device == ""
+
 
 class TestRoundTrip:
     def test_save_and_load_preserves_audio_algorithm(self, temp_prefs_path):
@@ -50,6 +57,15 @@ class TestRoundTrip:
 
         loaded = Preferences.load()
         assert loaded.haptic_offset_ms == 120
+
+    def test_save_and_load_preserves_scene_audio_secondary_device(
+        self, temp_prefs_path,
+    ):
+        p = Preferences(scene_audio_secondary_device="wasapi/{abc-123}")
+        p.save()
+
+        loaded = Preferences.load()
+        assert loaded.scene_audio_secondary_device == "wasapi/{abc-123}"
 
 
 class TestLoadValidation:

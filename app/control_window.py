@@ -520,6 +520,20 @@ class ControlWindow(QMainWindow):
             self._output_scene_port, self._output_scene_source,
         ))
 
+        # Optional second port for the same scene audio (drives a stim
+        # device that accepts an audio input). Hidden until configured
+        # in Setup so the panel stays uncluttered for the common case.
+        self._output_scene_secondary_port = self._make_port_label()
+        self._output_scene_secondary_source = self._make_source_label()
+        self._output_scene_secondary_row_widgets = (
+            self._output_scene_secondary_port,
+            self._output_scene_secondary_source,
+        )
+        layout.addLayout(self._make_output_row(
+            self._output_scene_secondary_port,
+            self._output_scene_secondary_source,
+        ))
+
         self._output_h1_port = self._make_port_label()
         self._output_h1_source = self._make_source_label()
         layout.addLayout(self._make_output_row(
@@ -622,6 +636,28 @@ class ControlWindow(QMainWindow):
             self._output_scene_source.setText(f"{os.path.basename(video_path)}  (embedded)")
         else:
             self._output_scene_source.setText("(no scene loaded)")
+
+        # Scene Audio (also) — only render when the user has configured
+        # a secondary device. Same source line as primary scene audio.
+        secondary_device = self._prefs.scene_audio_secondary_device
+        show_secondary = bool(secondary_device)
+        self._output_scene_secondary_port.setVisible(show_secondary)
+        self._output_scene_secondary_source.setVisible(show_secondary)
+        if show_secondary:
+            self._output_scene_secondary_port.setText(
+                f"→ Scene Audio (also): "
+                f"{self._audio_device_label(secondary_device)}"
+            )
+            if secondary_device == scene_device:
+                self._output_scene_secondary_source.setText(
+                    "(silent — same device as primary Scene Audio)"
+                )
+            elif video_path:
+                self._output_scene_secondary_source.setText(
+                    f"{os.path.basename(video_path)}  (mirrored)"
+                )
+            else:
+                self._output_scene_secondary_source.setText("(no scene loaded)")
 
         # Haptic 1 (slot 1)
         h1_device = self._prefs.haptic1_audio_device
@@ -876,6 +912,9 @@ class ControlWindow(QMainWindow):
         self._setup_scene_combo = self._build_role_combo(
             saved_value=self._prefs.scene_audio_device,
         )
+        self._setup_scene_secondary_combo = self._build_role_combo(
+            saved_value=self._prefs.scene_audio_secondary_device,
+        )
         self._setup_haptic1_combo = self._build_role_combo(
             saved_value=self._prefs.haptic1_audio_device,
         )
@@ -884,12 +923,20 @@ class ControlWindow(QMainWindow):
         )
 
         self._setup_scene_combo.currentIndexChanged.connect(self._on_setup_changed)
+        self._setup_scene_secondary_combo.currentIndexChanged.connect(self._on_setup_changed)
         self._setup_haptic1_combo.currentIndexChanged.connect(self._on_setup_changed)
         self._setup_haptic2_combo.currentIndexChanged.connect(self._on_setup_changed)
 
         rl.addLayout(self._labeled_row_with_test(
             "Scene audio", self._setup_scene_combo,
             "Video's embedded sound (speakers / headphones).",
+            is_haptic=False,
+        ))
+        rl.addLayout(self._labeled_row_with_test(
+            "Scene audio (also)", self._setup_scene_secondary_combo,
+            "Optional second port that gets the same video sound — "
+            "drive a stim device that accepts an audio input when there's "
+            "no funscript. Leave unset to disable.",
             is_haptic=False,
         ))
         rl.addLayout(self._labeled_row_with_test(
@@ -1432,6 +1479,9 @@ class ControlWindow(QMainWindow):
 
     def _on_setup_changed(self) -> None:
         self._prefs.scene_audio_device = self._setup_scene_combo.currentData() or ""
+        self._prefs.scene_audio_secondary_device = (
+            self._setup_scene_secondary_combo.currentData() or ""
+        )
         self._prefs.haptic1_audio_device = self._setup_haptic1_combo.currentData() or ""
         self._prefs.haptic2_audio_device = self._setup_haptic2_combo.currentData() or ""
         if self._setup_algo_pulse.isChecked():
@@ -1443,6 +1493,7 @@ class ControlWindow(QMainWindow):
         DebugLog.record(
             "setup.prefs_saved",
             scene=bool(self._prefs.scene_audio_device),
+            scene_secondary=bool(self._prefs.scene_audio_secondary_device),
             haptic1=bool(self._prefs.haptic1_audio_device),
             haptic2=bool(self._prefs.haptic2_audio_device),
             algo=self._prefs.audio_algorithm,
@@ -2191,6 +2242,10 @@ class ControlWindow(QMainWindow):
             if w:
                 w.close()
                 self._player_windows[i] = None
+        # Tear down the optional scene-audio mirror so its mpv instance
+        # doesn't survive Close (would hold the secondary device handle
+        # and play residual audio on the next Library click).
+        self._engine.terminate_scene_audio_mirror()
         self._btn_play.setText("▶  Play")
         self._seek_bar.setValue(0)
         self._time_label.setText("0:00")
@@ -3225,6 +3280,15 @@ class ControlWindow(QMainWindow):
                 self._engine.set_volume(i, int(self._scene_volume_slider.value()))
             launched = True
 
+        # Optional scene-audio mirror — sends the same video sound to a
+        # second output device. User-configured in Setup; empty = off.
+        # Refused when the secondary device matches the primary scene
+        # device (same exclusive handle would conflict). Mirror loads
+        # the slot 0 video path; for audio-only scenes it loads the
+        # audio path. Failures are non-fatal — primary path keeps
+        # working regardless.
+        self._launch_scene_audio_mirror_if_configured()
+
         if launched:
             self._timer.start()
             self.raise_()
@@ -3235,6 +3299,37 @@ class ControlWindow(QMainWindow):
         # buttons (and the helper hard-stops any stream that survived
         # the explicit stop above, defensively).
         self._update_calibrate_buttons_enabled()
+
+    def _launch_scene_audio_mirror_if_configured(self) -> None:
+        secondary = self._prefs.scene_audio_secondary_device
+        if not secondary:
+            return
+        if secondary == self._prefs.scene_audio_device:
+            DebugLog.record(
+                "scene_audio_mirror.silent",
+                reason="secondary device matches primary scene device",
+                device=secondary,
+            )
+            return
+        slot0 = self._slot_data(0)
+        media_path = slot0.get("video_path") or slot0.get("audio_path") or ""
+        if not media_path:
+            DebugLog.record(
+                "scene_audio_mirror.silent",
+                reason="no media on slot 0",
+            )
+            return
+        result = self._engine.init_scene_audio_mirror(media_path, secondary)
+        if result is None:
+            DebugLog.record(
+                "scene_audio_mirror.failed",
+                device=secondary, media=media_path,
+            )
+        else:
+            DebugLog.record(
+                "scene_audio_mirror.launched",
+                device=secondary, media=media_path,
+            )
 
     # ── Transport ──────────────────────────────────────────────────────────────
 

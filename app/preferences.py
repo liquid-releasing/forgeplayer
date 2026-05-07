@@ -52,6 +52,14 @@ class Preferences:
     """
 
     scene_audio_device: str = ""
+    # Optional second device that receives the SAME video audio as
+    # scene_audio_device. Use case: drive a stim device from the video's
+    # audio track when no funscript is available — music-driven scenes,
+    # hypnotic content, library content stuck without scripts. Empty
+    # string means feature off (no mirror spawned). Refused at launch
+    # if it equals scene_audio_device (would open the same exclusive
+    # handle twice).
+    scene_audio_secondary_device: str = ""
     haptic1_audio_device: str = ""
     haptic2_audio_device: str = ""
     # Synthesis algorithm — see AudioAlgorithm above.

@@ -28,6 +28,14 @@ class SyncEngine:
         # → auto-resync → audible click. Cache the last numeric value
         # and return it instead.
         self._last_position: float = 0.0
+        # Optional headless mpv instance that mirrors the video's audio
+        # to a second output device. Loaded with the same media as the
+        # primary video slot but rendered audio-only. Lives outside the
+        # slot grid because it has no role in the slot/screen routing
+        # model — it's a parallel listener, configured per-user via
+        # Preferences.scene_audio_secondary_device. Included in
+        # _active so play_all/pause_all/seek_all keep it in sync.
+        self._scene_audio_mirror: Optional[mpv.MPV] = None
 
     # ── Player lifecycle ──────────────────────────────────────────────────────
 
@@ -129,13 +137,73 @@ class SyncEngine:
     def terminate_all(self) -> None:
         for i in range(self.MAX_SLOTS):
             self.terminate_player(i)
+        self.terminate_scene_audio_mirror()
         self._last_position = 0.0
+
+    # ── Scene-audio mirror ────────────────────────────────────────────────────
+
+    def init_scene_audio_mirror(
+        self,
+        media_path: str,
+        audio_device: str,
+    ) -> Optional[mpv.MPV]:
+        """Spawn a headless mpv loading *media_path* audio-only on
+        *audio_device*. Used to fan video audio out to a second output
+        (e.g. a stim device that accepts an audio input). Idempotent:
+        terminates any prior mirror before creating the new one.
+
+        Returns the mpv instance, or None if creation failed (e.g. the
+        device is busy or not present). Failures are non-fatal — the
+        primary scene audio path keeps working.
+        """
+        with self._lock:
+            if self._scene_audio_mirror is not None:
+                try:
+                    self._scene_audio_mirror.terminate()
+                except Exception:
+                    pass
+                self._scene_audio_mirror = None
+            kwargs: dict = {
+                "force_window": "no",
+                "vid": "no",
+                "keep_open": True,
+                "pause": True,
+                "input_default_bindings": False,
+                "input_vo_keyboard": False,
+                "osc": False,
+                "hr_seek": "yes",
+            }
+            if audio_device:
+                kwargs["audio_device"] = audio_device
+            try:
+                p = mpv.MPV(**kwargs)
+                p.play(media_path)
+                self._scene_audio_mirror = p
+                return p
+            except Exception:
+                self._scene_audio_mirror = None
+                return None
+
+    def terminate_scene_audio_mirror(self) -> None:
+        with self._lock:
+            if self._scene_audio_mirror is not None:
+                try:
+                    self._scene_audio_mirror.terminate()
+                except Exception:
+                    pass
+                self._scene_audio_mirror = None
+
+    def has_scene_audio_mirror(self) -> bool:
+        return self._scene_audio_mirror is not None
 
     # ── Sync transport ────────────────────────────────────────────────────────
 
     @property
     def _active(self) -> list[mpv.MPV]:
-        return [p for p in self._players if p is not None]
+        out = [p for p in self._players if p is not None]
+        if self._scene_audio_mirror is not None:
+            out.append(self._scene_audio_mirror)
+        return out
 
     def play_all(self) -> None:
         for p in self._active:
