@@ -154,10 +154,19 @@ class SyncEngine:
                 pass
 
     def seek_all(self, position: float) -> None:
-        """Seek every active player to *position* seconds simultaneously."""
+        """Seek every active player to *position* seconds simultaneously.
+
+        Uses ``precision="exact"`` so mpv decodes forward from the prior
+        keyframe to land on the exact target frame. With ``precision=
+        "default-precise"`` (mpv's default for absolute seeks) we were
+        seeing -2..-12s drift on HandBrake-encoded sources because mpv
+        was rounding to the nearest keyframe. Adds ~100-500ms per seek
+        for 1080p — imperceptible during normal use, and worth it for
+        chapter-nav and slider scrub landing where the user expects.
+        """
         for p in self._active:
             try:
-                p.seek(position, "absolute")
+                p.seek(position, "absolute", "exact")
             except Exception:
                 pass
 

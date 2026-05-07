@@ -32,8 +32,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListView, QMenu, QPushButton, QStackedWidget, QStyle, QStyledItemDelegate,
-    QStyleOptionViewItem, QToolButton, QVBoxLayout, QWidget,
+    QListView, QMenu, QPushButton, QScroller, QStackedWidget, QStyle,
+    QStyledItemDelegate, QStyleOptionViewItem, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from app.library import (
@@ -430,6 +431,17 @@ class LibraryPanel(QWidget):
         self._view.clicked.connect(self._on_activated)
         self._view.setContextMenuPolicy(Qt.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._on_context_menu)
+
+        # Kinetic touch scroll. Without this, Qt treats touch events on the
+        # viewport as item clicks rather than scroll gestures — drags select
+        # cards instead of scrolling the grid, and tapping the scrollbar
+        # often misses (touch tolerance vs. scrollbar's mouse-tuned width).
+        # ``TouchGesture`` keeps mouse-wheel + scrollbar working as before;
+        # touch drag now flicks the list with momentum.
+        QScroller.grabGesture(
+            self._view.viewport(),
+            QScroller.ScrollerGestureType.TouchGesture,
+        )
 
         # Dark scrollbar / list background
         self._view.setStyleSheet(
