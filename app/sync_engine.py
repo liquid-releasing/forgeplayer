@@ -270,6 +270,26 @@ class SyncEngine:
         """Return the first active player (used to drive the seek bar)."""
         return next(iter(self._active), None)
 
+    def get_chapter_list(self) -> list[dict]:
+        """Return the primary player's chapter list as parsed by mpv.
+
+        mpv reads embedded chapter metadata across formats — FFMETADATA1
+        chapter atoms in MP4, QuickTime text-track chapters, Matroska
+        chapters, Nero atoms — and exposes them as a list of dicts with
+        ``time`` (seconds, float) and ``title`` (str). Returns [] when
+        no primary player is active or the file has no chapter atoms.
+        Used by ControlWindow as a fallback when no chapter sidecar
+        exists, so embedded chapters Just Work without authoring.
+        """
+        p = self._primary()
+        if p is None:
+            return []
+        try:
+            chs = p.chapter_list
+            return list(chs) if chs else []
+        except Exception:
+            return []
+
     def get_position(self) -> float:
         """Return current playback position in seconds.
 

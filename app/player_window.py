@@ -276,6 +276,18 @@ class PlayerWindow(QWidget):
             self.showFullScreen()
         else:
             self.showNormal()
+            # setGeometry positions the *client area* at target_y; Windows
+            # then puts the title bar above that. On some configurations
+            # (multi-monitor + DPI scaling, top-anchored taskbar) the
+            # title bar lands above the visible screen top, leaving the
+            # user no way to close or move the window. Defer the check
+            # via singleShot so frameGeometry returns the post-show
+            # frame; querying immediately after showNormal() reads the
+            # stale pre-realization rect.
+            QTimer.singleShot(
+                50,
+                lambda s=screen: self._ensure_title_bar_visible_after_show(s),
+            )
 
         # Read back where the window actually landed. Qt may have
         # respected our setGeometry(), or it may have moved the window
@@ -298,3 +310,23 @@ class PlayerWindow(QWidget):
                 actual_screen is screen if actual_screen is not None else False
             ),
         )
+
+    def _ensure_title_bar_visible_after_show(self, screen: QScreen) -> None:
+        """Defensively shift the window down if its title bar landed
+        above the available screen area. Called via singleShot after
+        ``showNormal()`` so frameGeometry returns the realized frame
+        (not the pre-show default rect). No-op when the window already
+        sits inside the screen.
+        """
+        avail = screen.availableGeometry()
+        frame = self.frameGeometry()
+        if frame.y() < avail.y():
+            delta = avail.y() - frame.y()
+            self.move(frame.x(), frame.y() + delta)
+            DebugLog.record(
+                "player.title_bar_correction",
+                slot=self.slot_index,
+                pre_y=frame.y(),
+                post_y=frame.y() + delta,
+                screen_avail_y=avail.y(),
+            )

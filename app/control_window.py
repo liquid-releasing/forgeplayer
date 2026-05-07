@@ -1287,6 +1287,33 @@ class ControlWindow(QMainWindow):
         y = geo.y() + max(0, (geo.height() - hint.height())) // 2
         self.move(x, y)
 
+    def _ensure_title_bar_visible(self) -> None:
+        """Defensively shift the window down if its title bar landed
+        above the available screen area — happens on multi-monitor /
+        DPI-scaled setups where Qt's frame inset on Windows places the
+        title bar off-screen at the top, leaving the user no way to
+        close or move the window. Runs once via showEvent.
+        """
+        handle = self.windowHandle()
+        if handle is None:
+            return
+        screen = handle.screen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        frame = self.frameGeometry()
+        if frame.y() < avail.y():
+            delta = avail.y() - frame.y()
+            self.move(frame.x(), frame.y() + delta)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not getattr(self, "_title_bar_checked", False):
+            self._title_bar_checked = True
+            # Defer so frameGeometry returns the post-show frame
+            # (pre-show it's still the default unrealized rect).
+            QTimer.singleShot(50, self._ensure_title_bar_visible)
+
     def _on_playback_screens_changed(self) -> None:
         indices = [
             i for i, cb in enumerate(self._setup_playback_checkboxes) if cb.isChecked()
@@ -3343,6 +3370,13 @@ class ControlWindow(QMainWindow):
         # working regardless.
         self._launch_scene_audio_mirror_if_configured()
 
+        # If no `<stem>.chapters.json` sidecar was found, fall back to
+        # whatever embedded chapter metadata the file itself carries.
+        # mpv parses chapters during demux which can take a few hundred
+        # ms; the populate call retries with backoff.
+        if not self._chapters:
+            QTimer.singleShot(200, self._maybe_populate_chapters_from_mpv)
+
         if launched:
             self._timer.start()
             self.raise_()
@@ -3566,11 +3600,66 @@ class ControlWindow(QMainWindow):
         self._seek_with_envelope(target.at_ms / 1000.0)
 
     def _update_chapter_buttons_enabled(self) -> None:
-        """Enable Prev/Next chapter only when a sidecar's chapter list
-        has been loaded for the active video."""
+        """Enable Prev/Next chapter only when chapters have been loaded
+        — either from a `<stem>.chapters.json` sidecar or from the
+        video's own embedded chapter atoms."""
         has_chapters = bool(self._chapters)
         self._btn_prev_chapter.setEnabled(has_chapters)
         self._btn_next_chapter.setEnabled(has_chapters)
+
+    def _maybe_populate_chapters_from_mpv(
+        self, attempts_remaining: int = 3,
+    ) -> None:
+        """Fallback chapter source: read mpv's parsed chapter_list when
+        no `<stem>.chapters.json` sidecar was found.
+
+        Sidecar wins over embedded — the user-editable file is the
+        source of truth so a small chapter rename doesn't require
+        re-muxing the MP4. When no sidecar exists, surface whatever
+        the file's own metadata carries (FFMETADATA1, QuickTime text-
+        track, Matroska — mpv normalizes them all). This makes "video
+        with chapters" Just Work without hand-authoring a sidecar.
+
+        Retries up to ``attempts_remaining`` times because mpv parses
+        chapters during demux, which can take a few hundred ms on big
+        files. Backoff: 200 ms / 600 ms / 1500 ms.
+        """
+        if self._chapters:
+            return  # sidecar already populated
+        raw = self._engine.get_chapter_list()
+        if not raw:
+            if attempts_remaining > 0:
+                # Spaced retries for slow demux on big files.
+                delay_ms = 1500 if attempts_remaining == 1 else (
+                    600 if attempts_remaining == 2 else 200
+                )
+                QTimer.singleShot(
+                    delay_ms,
+                    lambda: self._maybe_populate_chapters_from_mpv(
+                        attempts_remaining - 1,
+                    ),
+                )
+            return
+        chapters: list[Chapter] = []
+        for entry in raw:
+            try:
+                t_sec = float(entry["time"])
+                title = entry.get("title") or f"Chapter {len(chapters) + 1}"
+                title = str(title)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if t_sec < 0:
+                continue
+            chapters.append(Chapter(at_ms=int(t_sec * 1000), name=title))
+        chapters.sort(key=lambda ch: ch.at_ms)
+        if not chapters:
+            return
+        self._chapters = chapters
+        self._update_chapter_buttons_enabled()
+        DebugLog.record(
+            "chapters.populated_from_mpv",
+            count=len(chapters),
+        )
 
     def _on_seek_press(self) -> None:
         self._seek_dragging = True
