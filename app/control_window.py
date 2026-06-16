@@ -1589,6 +1589,32 @@ class ControlWindow(QMainWindow):
         # set; flip enable state if the user just (un)configured a port.
         self._update_calibrate_buttons_enabled()
 
+    def open_path(self, path: str) -> None:
+        """Open a file passed on the command line / via file association.
+
+        Today this handles a FunscriptForge ``.forge`` bundle (or its loose
+        ``<stem>.output/`` folder): import it into a scene and activate it on the
+        same path the Library uses. Unrecognized paths surface a message rather
+        than failing silently.
+        """
+        from app.bundle_importer import load_bundle  # noqa: PLC0415
+
+        try:
+            entry = load_bundle(path)
+        except Exception as exc:  # noqa: BLE001 — never crash the player on a bad file
+            QMessageBox.warning(
+                self, "Couldn't open bundle",
+                f"Failed to read:\n{path}\n\n{exc}",
+            )
+            return
+        if entry is None:
+            QMessageBox.information(
+                self, "Nothing to play",
+                f"This doesn't look like a ForgePlayer/FunscriptForge bundle:\n{path}",
+            )
+            return
+        self._on_scene_activated(entry)
+
     def _on_scene_activated(
         self, entry: SceneCatalogEntry, *, force_picker: bool = False,
     ) -> None:

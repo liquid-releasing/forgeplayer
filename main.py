@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon, QPalette, QColor
+from PySide6.QtCore import QTimer
 from app.control_window import ControlWindow
 
 # Branding directory siblings main.py at runtime (dev) and ships next
@@ -43,6 +44,15 @@ def _resolve_icon() -> QIcon | None:
     return None
 
 
+def _first_path_arg(args: list[str]) -> str | None:
+    """The first command-line argument that points at an existing path — a
+    bundle/scene to open on launch (file association passes `"%1"`)."""
+    for a in args[1:]:
+        if a and not a.startswith("-") and Path(a).exists():
+            return a
+    return None
+
+
 def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -52,6 +62,12 @@ def main() -> None:
         app.setWindowIcon(icon)
     win = ControlWindow()
     win.show()
+    # Open a bundle/scene passed on the command line (double-click a .forge via
+    # file association, or `forgeplayer <path>`). Deferred onto the event loop
+    # so widgets / mpv are fully up before the scene activates.
+    open_target = _first_path_arg(app.arguments())
+    if open_target:
+        QTimer.singleShot(0, lambda: win.open_path(open_target))
     sys.exit(app.exec())
 
 
