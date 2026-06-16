@@ -363,6 +363,22 @@ class TestScanLibraryRoot:
         # Scene name = root folder's name
         assert scenes[0].name == tmp_path.name
 
+    def test_skips_funscriptforge_export_outputs(self, tmp_path):
+        """A <stem>.output/ folder and .forge/.forgeplay bundle dirs are OUR
+        exports, not source scenes — the library walk skips them (they open via
+        the bundle importer). The real source scene still shows."""
+        _make_scene(tmp_path, "Scene", ["Scene.mp4", "Scene.funscript"])
+        # Loose export folder with device-organized e-stim channels.
+        _make_scene(tmp_path / "Scene.output" / "stations" / "estim3p",
+                    "", ["Scene.alpha.funscript", "Scene.beta.funscript"])
+        _touch(tmp_path / "Scene.output", "motion.funscript")
+        # An extracted bundle dir.
+        _touch(tmp_path / "Scene.forge", "motion.funscript")
+
+        scenes = scan_library_root(tmp_path)
+        names = {s.name for s in scenes}
+        assert names == {"Scene"}, names
+
     def test_loose_root_files_ignored_when_subfolders_exist(self, tmp_path):
         """Root has both scene subfolders AND loose files: loose files are
         admin noise, not a synthetic 'root scene'. Only subfolder scenes

@@ -51,6 +51,19 @@ PRESET_EXT = ".forgeplayer.json"
 # playable clips (packaged album-style).
 _FORGE_FLATTEN_SUBFOLDER = ".forge"
 
+# FunscriptForge export OUTPUTS — a `<stem>.output/` (device-organized folders)
+# or a `<stem>.forge` / `<stem>.forgeplay` bundle — are things WE produced, not
+# source scenes. The raw scanner makes broken cards from them: no video to
+# relink (only the bundle importer does that), and a "stim"-ish name pulled from
+# the e-stim content. They open via `bundle_importer` (double-click / Open), so
+# the library walk skips them. (`.forge` ZIP *files* are already ignored — only
+# media/funscript/audio extensions are scanned.)
+_EXPORT_BUNDLE_SUFFIXES = (".output", ".forge", ".forgeplay")
+
+
+def _is_export_bundle_dir(name: str) -> bool:
+    return name.lower().endswith(_EXPORT_BUNDLE_SUFFIXES)
+
 # Configurable limit so a malicious folder with millions of files doesn't hang
 # the scanner. Scenes exceeding this cap are still scanned but over-cap items
 # are skipped with a deterministic ordering.
@@ -308,6 +321,8 @@ def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
                 continue
             if child.name == _FORGE_FLATTEN_SUBFOLDER:
                 continue  # reserved for flat-dump semantics
+            if _is_export_bundle_dir(child.name):
+                continue  # FSF export output/bundle — opened via the importer
 
             scene = scan_scene_folder(child)
             if scene is not None:
@@ -322,6 +337,7 @@ def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
                     if (
                         grandchild.is_dir()
                         and grandchild.name != _FORGE_FLATTEN_SUBFOLDER
+                        and not _is_export_bundle_dir(grandchild.name)
                     ):
                         sub_scene = scan_scene_folder(grandchild)
                         if sub_scene is not None:
