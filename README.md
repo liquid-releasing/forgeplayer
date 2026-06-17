@@ -8,11 +8,25 @@ Play a video on your 4K monitor, companion view on your phone, estim audio to yo
 
 ---
 
+## Links
+
+- **Download / try it:** [forgeplayer.app](https://forgeplayer.app) — Windows
+  installer + portable builds.
+- **User docs:** [getting started](https://liquid-releasing.github.io/forgeplayer/getting-started/)
+  · [user guide](https://liquid-releasing.github.io/forgeplayer/user-guide/)
+  · [docs home](https://liquid-releasing.github.io/forgeplayer/)
+- **Discord:** [discord.gg/MHucAwwRc](https://discord.gg/MHucAwwRc) — feedback,
+  ideas, bug reports.
+
+---
+
 ## Status
 
-**v0.0.4 released — 2026-05-04.** Download
-[Windows, macOS, or Linux builds](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest)
-from `forgeplayer-releases`.
+**v0.0.5 released — 2026-06-17 (beta).** Download the
+[Windows installer or portable builds](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest)
+from `forgeplayer-releases` (or via [forgeplayer.app](https://forgeplayer.app)).
+Windows is the tested platform; macOS / Linux builds are unproven, and Bluetooth
+devices are not yet tested.
 
 Working: synchronized multi-screen video, dual-port stim with
 frame-perfect mirror or per-port prostate routing, content preference
