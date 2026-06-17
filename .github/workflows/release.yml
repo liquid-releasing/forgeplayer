@@ -74,9 +74,15 @@ jobs:
           $tag = "${{ github.ref_name }}"
           $ver = $tag -replace '^v',''
           if (-not $ver) { $ver = "0.0.0" }
-          # NSIS is preinstalled on windows-latest; fall back to PATH.
+          # NSIS is NOT preinstalled on windows-latest — install it (Chocolatey
+          # ships on the runner). makensis lands in Program Files (x86)\NSIS.
+          choco install nsis -y --no-progress
           $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-          if (-not (Test-Path $nsis)) { $nsis = "makensis" }
+          if (-not (Test-Path $nsis)) {
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($cmd) { $nsis = $cmd.Source }
+          }
+          if (-not (Test-Path $nsis)) { Write-Error "makensis not found after install"; exit 1 }
           Write-Host "makensis: $nsis  version: $ver"
           & "$nsis" "/DVERSION=$ver" "installer\forgeplayer.nsi"
           if ($LASTEXITCODE -ne 0) { Write-Error "makensis failed"; exit 1 }
