@@ -62,7 +62,11 @@ def _cache_key(video_path: str) -> str:
 
 
 def cached_path(video_path: str) -> Path:
-    return _CACHE_DIR / f"{_cache_key(video_path)}.jpg"
+    # PNG, not JPEG: Qt's PNG codec is built into QtGui, while JPEG read/write
+    # needs the `qjpeg` imageformats plugin — which isn't always bundled in the
+    # PyInstaller build (thumbnails worked in the dev venv but not the packaged
+    # app). PNG works everywhere; for a 448px frame the size cost is negligible.
+    return _CACHE_DIR / f"{_cache_key(video_path)}.png"
 
 
 def _grab_frame_to(video_path: str, out_path: Path) -> bool:
@@ -106,7 +110,7 @@ def _grab_frame_to(video_path: str, out_path: Path) -> bool:
             pass  # un-seekable / very short clip: screenshot wherever we are
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = Path(tempfile.mktemp(suffix=".jpg", dir=str(out_path.parent)))
+        tmp = Path(tempfile.mktemp(suffix=".png", dir=str(out_path.parent)))
         player.command("screenshot-to-file", str(tmp), "video")
         # screenshot-to-file is async-ish in libmpv — wait for the file.
         shot_deadline = time.monotonic() + 3.0
@@ -123,7 +127,7 @@ def _grab_frame_to(video_path: str, out_path: Path) -> bool:
         ok = False
         if not img.isNull():
             scaled = img.scaledToWidth(_THUMB_W, Qt.SmoothTransformation)
-            ok = scaled.save(str(out_path), "JPG", 82)
+            ok = scaled.save(str(out_path), "PNG")
         try:
             tmp.unlink()
         except OSError:
@@ -199,9 +203,23 @@ class ThumbnailService(QObject):
     @Slot(str, object)
     def _on_done(self, video_path: str, image: object) -> None:
         self._inflight.discard(video_path)
-        if isinstance(image, QImage) and not image.isNull():
+        ok = isinstance(image, QImage) and not image.isNull()
+        if ok:
             # QPixmap must be built on the GUI thread — we're there now.
             self._pixmaps[video_path] = QPixmap.fromImage(image)
             self.ready.emit(video_path)
         else:
             self._failed.add(video_path)
+        # Diagnostic breadcrumb (enable Debug to capture): tells us whether
+        # generation succeeded per scene, so a "no thumbnails" report is
+        # actionable instead of a guess.
+        try:
+            from app.debug_log import DebugLog
+            DebugLog.record(
+                "thumbnail.done",
+                ok=ok,
+                cached=str(cached_path(video_path)),
+                video=video_path,
+            )
+        except Exception:
+            pass

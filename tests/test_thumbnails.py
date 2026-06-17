@@ -36,9 +36,11 @@ def test_cache_key_survives_missing_file():
     assert isinstance(key, str) and key
 
 
-def test_cached_path_is_jpg_under_cache_dir(tmp_path):
+def test_cached_path_is_png_under_cache_dir(tmp_path):
+    # PNG (not JPEG): Qt's PNG codec is built in; JPEG needs the qjpeg plugin
+    # which isn't reliably bundled in the frozen app.
     f = tmp_path / "scene.mp4"; f.write_bytes(b"x")
     p = thumbnails.cached_path(str(f))
     assert isinstance(p, Path)
-    assert p.suffix == ".jpg"
+    assert p.suffix == ".png"
     assert p.parent == thumbnails._CACHE_DIR

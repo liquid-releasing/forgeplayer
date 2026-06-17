@@ -100,6 +100,9 @@ class Preferences:
     # Sound vs Funscript tie-breaker when both forms exist for a haptic
     # destination. See ContentPreference docstring above for rationale.
     content_preference: ContentPreference = "sound"
+    # Last library root folder the user scanned. Persisted so the Library
+    # tab reopens on the same folder next launch (empty = none chosen yet).
+    library_root: str = ""
 
     @classmethod
     def load(cls) -> "Preferences":

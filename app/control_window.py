@@ -178,6 +178,13 @@ class ControlWindow(QMainWindow):
         self._library_panel.scene_change_picks_requested.connect(
             lambda entry: self._on_scene_activated(entry, force_picker=True)
         )
+        # Persist + restore the library root across launches. This was never
+        # wired, so a folder the user scanned didn't survive a restart
+        # (root_changed went nowhere). Restore first, THEN connect the saver
+        # so the restore doesn't trigger a redundant write.
+        if self._prefs.library_root and os.path.isdir(self._prefs.library_root):
+            self._library_panel.set_root(self._prefs.library_root)
+        self._library_panel.root_changed.connect(self._on_library_root_changed)
         self._tabs.addTab(self._library_panel, "Library")
         self._tabs.addTab(self._build_live_tab(), "Live")
         self._tabs.addTab(self._build_setup_tab(), "Setup")
@@ -189,6 +196,13 @@ class ControlWindow(QMainWindow):
         # root want to land on their scenes, first-run users get a welcome
         # empty-state inside the Library panel pointing them at Scan Folder.
         self._tabs.setCurrentWidget(self._library_panel)
+
+    def _on_library_root_changed(self, root: str) -> None:
+        """Persist the scanned library root so the Library tab reopens on it
+        next launch (the fix for 'it didn't persist my folders')."""
+        self._prefs.library_root = root
+        self._prefs.save()
+        DebugLog.record("library.root_changed", root=root)
 
     def _build_live_tab(self) -> QWidget:
         """Live — the cockpit tab. Pure read-only display (Video panel +
