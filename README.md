@@ -6,6 +6,8 @@ One seek bar. Every screen. Every device. All in sync.
 
 Play a video on your 4K monitor, companion view on your phone, estim audio to your device, haptics to whatever you have — all from the same timeline. Mark a favorite moment with one tap. Loop it. Share it. No mouse required once you're watching.
 
+### ▶ Download & try it at [forgeplayer.app](https://forgeplayer.app) · [Discord](https://discord.gg/MHucAwwRc) · [Docs](https://liquid-releasing.github.io/forgeplayer/)
+
 ---
 
 ## Links

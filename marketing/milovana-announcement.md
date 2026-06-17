@@ -35,9 +35,13 @@ You point it at a scene, hit play, and:
 - **Each stim output needs its own audio interface or USB dongle** — separate
   from your speakers/headphones. One audio output drives your main stim; an
   optional second drives a second device (e.g. a prostate channel). So budget for
-  **one or two extra audio cards / dongles** if you want e‑stim.
-- It opens **`.forge` scene bundles** straight from a double‑click (the packs
-  exported by FunscriptForge), and it also reads loose funscript/audio folders.
+  **one or two extra audio cards / dongles** if you want e‑stim. Tested with a
+  [VENTION USB External Stereo Sound Card](https://www.amazon.com/dp/B08LGPKFN5)
+  (a cheap USB‑to‑3.5mm adapter) and others — any standard USB audio output
+  should work.
+- It opens **`.forge` scene bundles** straight from a double‑click — the packs
+  exported by **[FunscriptForge](https://funscriptforge.com)**, our companion
+  authoring app — and it also reads loose funscript / audio folders.
 
 It's built for the cockpit‑style way people actually watch: big screen in front
 of you, controls on a laptop or a little touchscreen off to the side, hands free.
@@ -63,7 +67,8 @@ A few honest caveats up front:
 - **Download (Windows installer):** https://forgeplayer.app
   The installer registers the `.forge` file type, so you can double‑click a scene
   bundle to play it. Portable builds for Windows / macOS / Linux are linked there
-  too.
+  too. *(It's not code‑signed yet, so Windows SmartScreen may say "unknown
+  publisher" — click **More info → Run anyway**.)*
 - **All releases:** https://github.com/liquid-releasing/forgeplayer-releases/releases/latest
 - **Docs / first‑time setup:** https://liquid-releasing.github.io/forgeplayer/getting-started/
 - **Full user guide:** https://liquid-releasing.github.io/forgeplayer/user-guide/

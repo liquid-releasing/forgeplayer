@@ -316,7 +316,7 @@ jobs:
 
             **First run:** open **Setup**, pick your Scene Audio and Haptic 1 devices (and Haptic 2 if you have a second stim dongle), then **Library → Scan a folder** at your media root. Click a scene tile to activate it; press Play.
 
-            Questions, bug reports, and feedback welcome in [our Discord](https://discord.gg/sZWCqgxY).
+            Questions, bug reports, and feedback welcome in [our Discord](https://discord.gg/MHucAwwRc).
           append_body: true
           # Auto-prepend the commit/PR list since the previous tag.
           # Cross-project policy (FA, FunscriptForge, ForgeYT, FP) —
