@@ -5,8 +5,12 @@ pastes cleanly into a forum post (Milovana renders BBCode, not Markdown — the
 headings/bullets below are just for your editing; bold the bits you want when
 you paste, and drop in the screenshot where marked).
 
-> **[ ADD SCREENSHOT HERE ]** — a shot of ForgePlayer running (Live tab with a
-> scene loaded, ideally across two monitors, is the money shot).
+> **Lead image:** the hero is hosted and launch-ready —
+> `https://forgeplayer.app/forgeplayer_hero.png` (already wired into the BBCode
+> version). For in-app screenshots, drop the files into the `forgeplayer-web`
+> repo (e.g. a `screenshots/` folder) so Cloudflare serves them at
+> `https://forgeplayer.app/screenshots/<name>.png`, then reference those URLs in
+> the post. A Live tab with a scene loaded across two monitors is the money shot.
 
 ---
 

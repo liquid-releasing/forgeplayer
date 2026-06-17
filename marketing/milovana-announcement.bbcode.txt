@@ -1,0 +1,50 @@
+[size=150][b]ForgePlayer (beta) — one player, every screen and your e-stim, all in sync[/b][/size]
+
+[img]https://forgeplayer.app/forgeplayer_hero.png[/img]
+
+Ever tried to watch a scene across two screens while an e-stim track plays — and spent the whole time fighting windows that drift out of sync? [b]ForgePlayer[/b] is the fix. It's a free desktop player that drives [b]your monitors and your e-stim / haptic devices from one timeline[/b]. One seek bar. Everything stays locked together, frame for frame.
+
+You point it at a scene, hit play, and:
+
+[list]
+[*][b]Video plays across up to three monitors[/b] at once, all in sync — main screen, a companion angle, a second wall, however you've set it up. Each screen can letterbox or crop-to-fill (handy for ultrawides) and go fullscreen on its own monitor.
+[*][b]E-stim / haptics play right alongside the video[/b], driven either from a [b]funscript[/b] (synthesised live) or a [b]pre-rendered audio file[/b]. It supports [b]three-phase stereostim[/b] output for modern e-stim hardware, plus a classic continuous waveform for 312 / 2B-style boxes.
+[*][b]Each stim output needs its own USB audio dongle[/b] — separate from your speakers. One drives your main stim; an optional second drives a second device (e.g. a prostate channel). Tested with a [url=https://www.amazon.com/dp/B08LGPKFN5]VENTION USB sound card[/url] and others — any standard USB audio output works.
+[*]It opens [b].forge scene bundles[/b] with a double-click — the packs exported by [url=https://funscriptforge.com]FunscriptForge[/url], our companion authoring app — and also reads loose funscript / audio folders.
+[/list]
+
+It's built for the cockpit-style way people actually watch: big screen in front of you, controls on a laptop or a little touchscreen off to the side, hands free.
+
+[size=125][b]What you need (e-stim hardware)[/b][/size]
+
+You'll want [b]one or two USB audio dongles + one or two stim power boxes[/b]. Haptic 1 carries the three-phase / stereostim signal; Haptic 2 an optional prostate signal.
+
+[b]Three-phase / stereostim boxes[/b] (use Pulse-based mode): [url=https://www.stimkits.com/]The Tingler StimKit I[/url] · [url=https://shop.impudicus.net/products/estim-hero-stereo-basic]EstimHero[/url] · [url=https://darkmatter69.com/collections/estim]ZC95 MKII[/url]
+
+[b]Classic boxes[/b] (use Continuous mode): [url=https://erostek.com/products/mk-312bt-power-unit]MK-312BT[/url] · [url=https://estim.store/collections/2b]2B[/url]
+
+[b]Not yet supported:[/b] Coyote (DG-Lab) — it's Bluetooth, which isn't tested yet.
+
+[size=125][b]This is a beta[/b][/size]
+
+ForgePlayer is [b]pre-1.0 software, actively developed[/b]. It works and it's fun, but expect rough edges — please report anything weird. A few honest caveats:
+
+[list]
+[*][b]Windows is the tested platform.[/b] macOS and Linux builds exist but are [b]not yet tested[/b].
+[*][b]Bluetooth devices haven't been tested yet.[/b] Today's path is audio-based e-stim (a stim box fed from an audio output).
+[*]e-stim safety: [b]keep electrode placement below the waist, start low, and ramp up.[/b] Use the in-app Calibrate button to set a comfortable level before you press play.
+[/list]
+
+[size=125][b]Try it[/b][/size]
+
+[list]
+[*][b]Download (Windows installer):[/b] [url=https://forgeplayer.app]forgeplayer.app[/url] — registers the .forge file type so you can double-click a bundle to play. Portable Windows / macOS / Linux builds are linked there too. (It's not code-signed yet, so Windows SmartScreen may say "unknown publisher" — click [b]More info -> Run anyway[/b].)
+[*][b]All releases:[/b] [url=https://github.com/liquid-releasing/forgeplayer-releases/releases/latest]GitHub releases[/url]
+[*][b]Docs / first-time setup:[/b] [url=https://liquid-releasing.github.io/forgeplayer/getting-started/]getting started[/url] · [url=https://liquid-releasing.github.io/forgeplayer/user-guide/]user guide[/url]
+[/list]
+
+[size=125][b]Come say hi / report bugs[/b][/size]
+
+Feedback, ideas, and bug reports are very welcome — this is the stage where your input shapes it. Join the Discord:
+
+[b][url=https://discord.gg/MHucAwwRc]discord.gg/MHucAwwRc[/url][/b]
