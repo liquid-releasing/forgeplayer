@@ -283,7 +283,11 @@ jobs:
           repository: liquid-releasing/forgeplayer-releases
           token: ${{ secrets.RELEASES_PAT }}
           name: ${{ steps.relname.outputs.name }}
-          prerelease: true
+          # Full "Latest" release on GitHub so the website's /releases/latest
+          # download buttons resolve to it. Beta status is conveyed by the
+          # site's "Pre-release software" note + the body banner below, not by
+          # GitHub's prerelease flag (which would hide the cut from /latest).
+          prerelease: false
           files: |
             artifacts/ForgePlayer-Setup.exe
             artifacts/ForgePlayer-windows.zip
