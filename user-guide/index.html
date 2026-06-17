@@ -495,6 +495,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#supported-e-stim-hardware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported e-stim hardware
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supported e-stim hardware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-phase-stereostim-boxes-use-pulse-based" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three-phase / stereostim boxes — use Pulse-based
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#classic-boxes-use-continuous" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Classic boxes — use Continuous
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#not-yet-supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not yet supported
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#library-tab" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -971,6 +1021,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#supported-e-stim-hardware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported e-stim hardware
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supported e-stim hardware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-phase-stereostim-boxes-use-pulse-based" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three-phase / stereostim boxes — use Pulse-based
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#classic-boxes-use-continuous" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Classic boxes — use Continuous
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#not-yet-supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not yet supported
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#library-tab" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1385,6 +1485,43 @@ need detail.</p>
   algorithm, haptic offset.</li>
 </ul>
 <p>Top bar (right side): <strong>⚑ Mark</strong>, <strong>Debug</strong> toggle, <strong>Export…</strong>, <strong>Clear</strong>.</p>
+<hr />
+<h2 id="supported-e-stim-hardware">Supported e-stim hardware<a class="headerlink" href="#supported-e-stim-hardware" title="Permanent link">&para;</a></h2>
+<p>ForgePlayer drives e-stim by sending an <strong>audio signal to a stim power box</strong>.
+Each box plugs into <strong>its own audio output — a USB sound-card dongle</strong>
+(e.g. a <a href="https://www.amazon.com/dp/B08LGPKFN5">VENTION USB sound card</a>; any
+standard USB audio output works), kept separate from your speakers. You assign
+which dongle handles each role in <strong>Setup → Audio device roles</strong>:</p>
+<ul>
+<li><strong>Haptic 1 (main stim)</strong> carries the optional <strong>three-phase / stereostim</strong>
+  signal.</li>
+<li><strong>Haptic 2 (optional)</strong> carries an optional <strong>prostate</strong> signal to a second
+  box.</li>
+</ul>
+<p>So a full e-stim setup is <strong>one or two USB audio dongles + one or two stim
+boxes</strong>. Match the <strong>synthesis algorithm</strong> (Preferences → Generation algorithm)
+to your box:</p>
+<h3 id="three-phase-stereostim-boxes-use-pulse-based">Three-phase / stereostim boxes — use <strong>Pulse-based</strong><a class="headerlink" href="#three-phase-stereostim-boxes-use-pulse-based" title="Permanent link">&para;</a></h3>
+<p>Modern, audio-driven hardware:</p>
+<ul>
+<li><a href="https://www.stimkits.com/">The Tingler — StimKit I</a></li>
+<li><a href="https://shop.impudicus.net/products/estim-hero-stereo-basic">EstimHero (Stereo Basic)</a></li>
+<li><a href="https://darkmatter69.com/collections/estim">ZC95 MKII E-stim Box</a></li>
+</ul>
+<h3 id="classic-boxes-use-continuous">Classic boxes — use <strong>Continuous</strong><a class="headerlink" href="#classic-boxes-use-continuous" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="https://erostek.com/products/mk-312bt-power-unit">MK-312BT</a></li>
+<li><a href="https://estim.store/collections/2b">2B</a></li>
+</ul>
+<h3 id="not-yet-supported">Not yet supported<a class="headerlink" href="#not-yet-supported" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Coyote (DG-Lab)</strong> — Bluetooth-based; Bluetooth devices haven't been tested
+  yet.</li>
+</ul>
+<blockquote>
+<p>Always <strong>Calibrate</strong> a box (Live tab) and start low before you press play —
+set a comfortable level on the box's own knob first.</p>
+</blockquote>
 <hr />
 <h2 id="library-tab">Library tab<a class="headerlink" href="#library-tab" title="Permanent link">&para;</a></h2>
 <h3 id="scene-tiles">Scene tiles<a class="headerlink" href="#scene-tiles" title="Permanent link">&para;</a></h3>
