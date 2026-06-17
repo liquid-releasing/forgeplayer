@@ -1,6 +1,6 @@
 # ForgePlayer User Guide
 
-Feature-by-feature reference for v0.0.4. If you're brand new, start at
+Feature-by-feature reference for v0.0.5. If you're brand new, start at
 [Getting Started](./getting-started.md) and come back here when you
 need detail.
 
@@ -14,7 +14,8 @@ The main control window has four tabs across the top:
 - **Live** — what's currently loaded, what's routing to which device,
   the timeline, transport, and scene-volume slider.
 - **Setup** — physical-device assignments (which audio device handles
-  which role, which monitor each player goes on, fullscreen vs windowed).
+  which role, which monitor each player goes on, and per-monitor crop
+  + crop position).
 - **Preferences** — content preference (sound vs funscript), synthesis
   algorithm, haptic offset.
 
@@ -29,6 +30,13 @@ Top bar (right side): **⚑ Mark**, **Debug** toggle, **Export…**, **Clear**.
 Each tile shows the scene's video thumbnail, name, and small badges for
 "has funscript", "has stim audio", "has prostate". A green dot in the
 corner means there's a saved pin (your variant picks).
+
+Thumbnails are real frames pulled from the scene's video (one frame ~12 %
+in), generated **lazily** — only for tiles you actually scroll past — and
+cached to `~/.forgeplayer/thumb_cache/`, so the grid stays responsive even
+on a large library and the frames are instant on the next visit. A tile
+shows a flat placeholder until its frame is ready (or for audio-only
+scenes that have no video).
 
 ### Activating a scene
 
@@ -61,6 +69,53 @@ overwrite the pin.
 
 If you add or remove files in a scene folder while ForgePlayer is
 running, click **Refresh** to re-scan.
+
+---
+
+## Opening a `.forge` bundle
+
+A `.forge` is a self-describing scene bundle exported from FunscriptForge —
+the motion track, every device channel, the stim audio, events, and a
+manifest, all in one file.
+
+### Double-click to play
+
+On Windows, the ForgePlayer **installer** registers the `.forge` file type,
+so **double-clicking a `.forge` opens it straight in ForgePlayer and plays**
+("Play in ForgePlayer"). Right-clicking offers "Edit in FunscriptForge" to
+re-open it for editing. (The portable zip build doesn't register the type —
+use the installer if you want the double-click association, or launch
+ForgePlayer with the bundle path, e.g. `ForgePlayer.exe "Scene.forge"`.)
+
+`.forge` bundles don't appear as Library tiles — they're single files you
+open directly, not scanned scene folders.
+
+### How it finds the video
+
+A bundle is lean by default: it carries the funscripts, the channels, and
+the stim audio, but **not** the (potentially multi-GB) source video. When
+you open one, ForgePlayer relinks the video in this order:
+
+1. **Inside the bundle** — if it was exported with **"include media"**, the
+   video rides inside the `.forge` and plays directly. Fully self-contained;
+   works on any machine, no external file needed.
+2. **The original location** — the absolute path the video lived at when it
+   was exported (recorded in the bundle's manifest). On the same machine,
+   this resolves wherever the bundle itself happens to sit — the `.forge`
+   does **not** have to be next to the video.
+3. **Next to the bundle** — a video with the recorded filename sitting in
+   the same folder as the `.forge` (or its parent). This is the case that
+   needs adjacency: it's how a **shared** lean bundle finds its video on
+   someone else's disk.
+
+If none of those resolve, the scene **still opens and plays** — funscripts,
+stim, everything — just with no picture, and ForgePlayer prompts you to
+attach a video manually.
+
+**Sharing tip:** for a bundle that "just plays" anywhere with zero setup,
+export it with **include media** (option 1 — video inside). To share lean
+bundles, keep the video file beside the `.forge` (option 3). For your own
+machine, it finds the original wherever it is (option 2).
 
 ---
 
@@ -122,9 +177,13 @@ waveform if you record the output.
 
 ### Fullscreen
 
-The Video panel has a **Fullscreen** toggle. Off → players open as
-windowed 1280×720 with title bars (good for adjusting). On → players
+The Video panel has a **Fullscreen players** toggle. Off → players open
+as windowed 1280×720 with title bars (good for adjusting). On → players
 go kiosk-mode covering the whole monitor.
+
+The toggle is **live**: flip it while players are already open and every
+open window goes fullscreen (or back to windowed) immediately — you don't
+have to relaunch. New launches read the toggle's current state.
 
 `F11` inside any player window also toggles fullscreen for that slot.
 
@@ -158,11 +217,28 @@ For each player slot, pick which monitor it lands on. The dropdown
 auto-populates with whatever Qt enumerates. Helpful labels include
 the model name where the monitor reports it.
 
-### Fullscreen / Crop
+### Crop (per monitor)
 
-The Setup tab's "Fill" / "Crop" toggle determines how each video slot
-renders — letterboxed within window vs cropped to fill. (The Live tab
-has its own Fullscreen toggle for the kiosk-mode behaviour.)
+Under **Monitor roles**, each playback screen has a **Crop** checkbox. Off
+→ the video is letterboxed/pillarboxed to preserve its native aspect. On →
+the video is scaled up to fill that monitor's aspect (mpv panscan) — useful
+for 16:9 content on a 32:9 ultrawide instead of leaving black bars.
+
+(This is distinct from the Live tab's **Fullscreen players** toggle, which
+controls whether the *window* takes over the whole monitor.)
+
+### Crop position
+
+When a screen is cropping, the **Crop position** radios choose which part of
+the frame to keep in the cropped dimension:
+
+- **Center** (default) — keep the middle, trim equally top and bottom.
+- **Top** — keep the top of the frame (with about a ⅛ margin so a subject
+  near the top edge isn't sliced off).
+- **Bottom** — keep the bottom of the frame (same ⅛ margin off the bottom).
+
+One choice applies to every cropping screen, and it applies **live** to any
+open players whose monitor is cropping.
 
 ---
 
@@ -183,10 +259,16 @@ sources for the matching preference, otherwise mirrors H1.
 
 ### Generation algorithm (when preference is funscript)
 
+- **Pulse-based** *(default)* — power-efficient waveform with shaped
+  discrete pulses. Slower numbing. For modern audio-based stereostim
+  hardware (Tingler, EstimHero, and similar). ForgePlayer defaults to
+  this because that's what the FunscriptForge content pipeline targets.
 - **Continuous** — classic restim waveform. Best for 312 / 2B-style
-  hardware. Lower power efficiency. Works well at ~100 Hz.
-- **Pulse-based** — power-efficient waveform with shaped discrete
-  pulses. Slower numbing. For modern audio-based stereostim hardware.
+  hardware. Lower power efficiency. Works well at ~100 Hz. Flip to this
+  once if that's your box.
+
+(The default applies to a fresh install; an existing `preferences.json`
+keeps whatever you last chose.)
 
 ### Haptic offset (s)
 
@@ -269,7 +351,7 @@ session unless you explicitly start a new one via the Library scan.
 
 ---
 
-## Known limitations (v0.0.4)
+## Known limitations (v0.0.5)
 
 - **Control panel sizing on monitor change** — moving the control
   window to a smaller secondary screen can leave it taller than
@@ -292,6 +374,7 @@ See [BACKLOG.md][backlog] (on GitHub) for the full roadmap.
 
 - **Per-scene pin file** — `<scene-folder>/<stem>.forgeplayer.pin.json`
 - **App preferences** — `~/.forgeplayer/preferences.json`
+- **Library thumbnails (cache)** — `~/.forgeplayer/thumb_cache/*.jpg`
 - **Session state** — `~/.forgeplayer/<session-name>.session.json`
 - **Debug logs (when enabled)** — `~/.forgeplayer/debug-stream-*.jsonl`
 - **Stim recordings (when env var set)** — `<your-chosen-dir>/stim-*.wav`
