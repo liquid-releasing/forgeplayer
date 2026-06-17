@@ -83,8 +83,11 @@ jobs:
             if ($cmd) { $nsis = $cmd.Source }
           }
           if (-not (Test-Path $nsis)) { Write-Error "makensis not found after install"; exit 1 }
-          Write-Host "makensis: $nsis  version: $ver"
-          & "$nsis" "/DVERSION=$ver" "installer\forgeplayer.nsi"
+          # Pass the absolute repo root so the .nsi uses absolute asset paths
+          # (NSIS resolves relative paths against the script dir, not CWD).
+          $root = (Get-Location).Path
+          Write-Host "makensis: $nsis  version: $ver  root: $root"
+          & "$nsis" "/DVERSION=$ver" "/DROOTDIR=$root" "installer\forgeplayer.nsi"
           if ($LASTEXITCODE -ne 0) { Write-Error "makensis failed"; exit 1 }
           if (-not (Test-Path "dist\ForgePlayer-Setup.exe")) {
             Write-Error "Installer not produced"

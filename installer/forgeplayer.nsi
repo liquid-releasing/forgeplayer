@@ -34,10 +34,14 @@ Unicode true
 !define PROGID_DESC    "FunscriptForge bundle"
 !define UNINST_KEY     "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
-; All asset paths are resolved against the script's own directory
-; (installer\) via ${__FILEDIR__}, so the build is independent of whatever
-; working directory makensis is invoked from. Repo root is one level up.
-!define ROOT "${__FILEDIR__}\.."
+; Asset paths anchor to an ABSOLUTE repo root passed by the build
+; (`makensis /DROOTDIR=<abs repo root> ...`). Absolute paths sidestep NSIS's
+; relative-path resolution (which anchors to the script dir, not the CWD, and
+; bit us twice). Falls back to "." for a from-root local build.
+!ifndef ROOTDIR
+  !define ROOTDIR "."
+!endif
+!define ROOT "${ROOTDIR}"
 
 Name "${APP_NAME} ${VERSION}"
 OutFile "${ROOT}\dist\ForgePlayer-Setup.exe"
