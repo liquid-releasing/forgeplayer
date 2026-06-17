@@ -62,6 +62,24 @@ _ACCENT = "#ff6b30"
 _TEXT_MUTED = "#9ba3c4"
 
 
+# Funscript sets whose base stem ends with one of these are per-toy renders
+# (a FunscriptForge "station" output for a specific physical device), not the
+# e-stim/haptic-audio set ForgePlayer actually plays. We hide them from the
+# picker for now — ForgePlayer drives audio-based stim, not these toys. ("yet":
+# routing to them is a later phase.)
+_DEVICE_TARGET_SUFFIXES = frozenset({
+    "handy", "lovense", "ossm", "osr2", "sr6", "vacuglide",
+    "keon", "launch", "kiiroo", "max", "edge",
+})
+
+
+def _is_device_target(fset: FunscriptSet) -> bool:
+    """True when this set is a per-toy render (…stem.handy / .lovense / …),
+    not the e-stim set."""
+    tail = fset.base_stem.rsplit(".", 1)
+    return len(tail) == 2 and tail[1].lower() in _DEVICE_TARGET_SUFFIXES
+
+
 # ── Dialog ───────────────────────────────────────────────────────────────────
 
 class SelectPicker(QDialog):
@@ -183,8 +201,14 @@ class SelectPicker(QDialog):
         # report: "the UI doesn't say which one it picked."
         body_layout.addWidget(self._build_summary())
 
-        if self._entry.needs_funscript_set_choice:
-            body_layout.addWidget(self._build_funscript_group())
+        # Only offer a funscript-set choice among real e-stim sets — hide the
+        # per-toy renders (.handy/.lovense/…). If that leaves a single set,
+        # there's nothing to choose, so the group is skipped entirely.
+        estim_sets = [
+            fs for fs in self._entry.funscript_sets if not _is_device_target(fs)
+        ]
+        if len(estim_sets) > 1:
+            body_layout.addWidget(self._build_funscript_group(estim_sets))
         if self._entry.needs_video_choice:
             body_layout.addWidget(self._build_video_group())
         if self._entry.needs_audio_choice:
@@ -282,8 +306,9 @@ class SelectPicker(QDialog):
 
     # ── Radio group builders ──
 
-    def _build_funscript_group(self) -> QWidget:
-        """Funscript edit-variants (Magik-style)."""
+    def _build_funscript_group(self, sets: list[FunscriptSet]) -> QWidget:
+        """Funscript edit-variants (Magik-style). *sets* is the already-filtered
+        list of e-stim sets to offer (per-toy renders excluded by the caller)."""
         box = _group_box("Funscript set")
         layout = box.layout()
 
@@ -293,7 +318,7 @@ class SelectPicker(QDialog):
             if self._preselect and self._preselect.funscript_set
             else None
         )
-        for i, fset in enumerate(self._entry.funscript_sets):
+        for i, fset in enumerate(sets):
             label = fset.base_stem
             detail_bits: list[str] = []
             if fset.channels:
