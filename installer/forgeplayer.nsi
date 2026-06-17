@@ -34,15 +34,20 @@ Unicode true
 !define PROGID_DESC    "FunscriptForge bundle"
 !define UNINST_KEY     "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
+; All asset paths are resolved against the script's own directory
+; (installer\) via ${__FILEDIR__}, so the build is independent of whatever
+; working directory makensis is invoked from. Repo root is one level up.
+!define ROOT "${__FILEDIR__}\.."
+
 Name "${APP_NAME} ${VERSION}"
-OutFile "dist\ForgePlayer-Setup.exe"
+OutFile "${ROOT}\dist\ForgePlayer-Setup.exe"
 InstallDir "$PROGRAMFILES64\${APP_NAME}"
 InstallDirRegKey HKLM "Software\${APP_NAME}" "InstallDir"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 
-!define MUI_ICON   "branding\forgeplayer.ico"
-!define MUI_UNICON "branding\forgeplayer.ico"
+!define MUI_ICON   "${ROOT}\branding\forgeplayer.ico"
+!define MUI_UNICON "${ROOT}\branding\forgeplayer.ico"
 
 ; -----------------------------------------------------------------------------
 ; Pages
@@ -68,9 +73,9 @@ Section "ForgePlayer" SecMain
   SetOutPath "$INSTDIR"
 
   ; The whole PyInstaller onedir tree (exe + libmpv + Qt + Python runtime).
-  File /r "dist\ForgePlayer\*"
+  File /r "${ROOT}\dist\ForgePlayer\*"
   ; The association icon, alongside the exe so DefaultIcon resolves locally.
-  File "branding\forgeplayer.ico"
+  File "${ROOT}\branding\forgeplayer.ico"
 
   ; Shortcuts.
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
