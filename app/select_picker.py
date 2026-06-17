@@ -176,6 +176,13 @@ class SelectPicker(QDialog):
         body_layout.setContentsMargins(20, 16, 20, 16)
         body_layout.setSpacing(14)
 
+        # Always-on "what will play" summary so the dialog is never blank and
+        # the user can see which video + stim source is actually selected —
+        # even when nothing is ambiguous (the common case for a single-variant
+        # scene, where every group below is hidden). Answers the dogfood
+        # report: "the UI doesn't say which one it picked."
+        body_layout.addWidget(self._build_summary())
+
         if self._entry.needs_funscript_set_choice:
             body_layout.addWidget(self._build_funscript_group())
         if self._entry.needs_video_choice:
@@ -229,6 +236,49 @@ class SelectPicker(QDialog):
         footer_layout.addWidget(btn_play)
 
         root.addWidget(footer)
+
+    # ── Summary ──
+
+    def _build_summary(self) -> QWidget:
+        """Read-only 'what will play' — the resolved default selections. Makes
+        the picker self-explanatory even when there's nothing to choose."""
+        box = _group_box("What will play")
+        layout = box.layout()
+
+        def _row(label: str, value: str, *, warn: bool = False) -> None:
+            r = QLabel(f"{label}:  {value}")
+            r.setWordWrap(True)
+            r.setStyleSheet(
+                "color: #eab308;" if warn else f"color: {_TEXT_MUTED};"
+            )
+            layout.addWidget(r)
+
+        v = self._entry.default_video
+        _row("Video", v.filename if v else "(none)")
+
+        # Stim source: sound preference plays a stim audio file; otherwise the
+        # funscript set synthesises. None of either → the stim is missing
+        # (commonly because it's still inside a .forge / .output bundle the
+        # library scan doesn't unpack).
+        a = self._entry.default_audio
+        fs = self._entry.default_funscript_set
+        if a is not None:
+            _row("Stim", f"{Path(a.path).name}")
+        elif fs is not None:
+            chans = len(fs.channels) + (1 if fs.main_path else 0)
+            _row("Stim", f"{fs.base_stem}  ({chans} funscript channels)")
+        else:
+            _row(
+                "Stim",
+                "(none found in this folder — open the .forge bundle directly "
+                "to play its stim)",
+                warn=True,
+            )
+
+        if self._entry.has_prostate:
+            _row("Prostate", "available")
+
+        return box
 
     # ── Radio group builders ──
 
