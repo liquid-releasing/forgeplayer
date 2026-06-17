@@ -68,15 +68,34 @@ jobs:
             exit 1
           }
 
+      - name: Build Windows installer (NSIS)
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag -replace '^v',''
+          if (-not $ver) { $ver = "0.0.0" }
+          # NSIS is preinstalled on windows-latest; fall back to PATH.
+          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $nsis)) { $nsis = "makensis" }
+          Write-Host "makensis: $nsis  version: $ver"
+          & "$nsis" "/DVERSION=$ver" "installer\forgeplayer.nsi"
+          if ($LASTEXITCODE -ne 0) { Write-Error "makensis failed"; exit 1 }
+          if (-not (Test-Path "dist\ForgePlayer-Setup.exe")) {
+            Write-Error "Installer not produced"
+            exit 1
+          }
+
       - name: Zip artifact
         shell: pwsh
         run: Compress-Archive -Path dist\ForgePlayer -DestinationPath dist\ForgePlayer-windows.zip
 
-      - name: Upload Windows artifact
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ForgePlayer-windows
-          path: dist/ForgePlayer-windows.zip
+          path: |
+            dist/ForgePlayer-windows.zip
+            dist/ForgePlayer-Setup.exe
 
   # ---------------------------------------------------------------------------
   # macOS build
@@ -257,6 +276,7 @@ jobs:
           name: ${{ steps.relname.outputs.name }}
           prerelease: false
           files: |
+            artifacts/ForgePlayer-Setup.exe
             artifacts/ForgePlayer-windows.zip
             artifacts/ForgePlayer-macos.zip
             artifacts/ForgePlayer-linux.tar.gz
@@ -275,7 +295,8 @@ jobs:
             **Device compatibility:** mechanical, 2b, stereostim, FOC-stim — supported via pre-rendered stim audio (mp3) or live funscript synthesis (vendored restim).
 
             ## Downloads
-            - **Windows** — `ForgePlayer-windows.zip` — unzip and run `ForgePlayer.exe`
+            - **Windows (installer, recommended)** — `ForgePlayer-Setup.exe` — installs ForgePlayer and registers `.forge` bundles so a double-click opens them in the player
+            - **Windows (portable)** — `ForgePlayer-windows.zip` — unzip and run `ForgePlayer.exe`
             - **macOS** — `ForgePlayer-macos.zip` — unzip and open `ForgePlayer.app`
             - **Linux** — `ForgePlayer-linux.tar.gz` — extract and run `ForgePlayer/ForgePlayer`
 
