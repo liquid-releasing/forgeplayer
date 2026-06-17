@@ -15,6 +15,9 @@ You point it at a scene, hit play, and:
 
 It's built for the cockpit-style way people actually watch: big screen in front of you, controls on a laptop or a little touchscreen off to the side, hands free.
 
+[b]Set up once, then play:[/b]
+[img]https://forgeplayer.app/forgeplayer-setup.png[/img] [img]https://forgeplayer.app/forgeplayer-play.png[/img]
+
 [size=125][b]What you need (e-stim hardware)[/b][/size]
 
 You'll want [b]one or two USB audio dongles + one or two stim power boxes[/b]. Haptic 1 carries the three-phase / stereostim signal; Haptic 2 an optional prostate signal.

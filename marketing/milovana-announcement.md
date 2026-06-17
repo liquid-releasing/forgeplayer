@@ -50,6 +50,13 @@ You point it at a scene, hit play, and:
 It's built for the cockpit‑style way people actually watch: big screen in front
 of you, controls on a laptop or a little touchscreen off to the side, hands free.
 
+**Set up once, then play** (BBCode uses
+`[img]https://forgeplayer.app/forgeplayer-setup.png[/img]` and
+`…/forgeplayer-play.png`):
+
+![Setup tab](https://forgeplayer.app/forgeplayer-setup.png)
+![Playing a scene](https://forgeplayer.app/forgeplayer-play.png)
+
 ### What you need (e‑stim hardware)
 
 Each stim box plugs into **its own USB audio dongle** (separate from your

@@ -99,6 +99,8 @@ Library refresh and remembers it after that.
 The dropdowns show every audio output Windows reports. If your dongle
 isn't there, plug it in and click "Refresh".
 
+![ForgePlayer Setup tab — audio device roles and monitors](assets/forgeplayer-setup.png)
+
 ### 2. Choose a content preference (Preferences tab)
 
 - **Sound files (.wav / .mp3)** — default, recommended. ForgePlayer
@@ -131,6 +133,8 @@ back to the other form so you don't get silent stim.
   monitors. The control window stays where you have it.
 - Click **Play**. Video plays on your monitor; stim drives Haptic 1
   (and Haptic 2 if configured); audio plays on the scene-audio device.
+
+![ForgePlayer playing a scene — one timeline drives every screen and output](assets/forgeplayer-play.png)
 
 That's it. Seek with the timeline, ±5/10/30 s with the buttons, scene
 volume with the slider beside the timeline.
