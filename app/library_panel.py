@@ -6,7 +6,7 @@ Architecture (see `project_forgeplayer_folder_heuristics.md` for the full
 
 - `LibraryModel`      — Qt model wrapping a list of `SceneCatalogEntry`,
                         plus filter + sort state. Feeds QListView.
-- `LibraryCardDelegate` — paints one scene card (thumbnail placeholder,
+- `LibraryCardDelegate` — paints one scene card (video-frame thumbnail,
                           name, device badges, ambiguity indicator).
 - `LibraryPanel`      — composite widget: toolbar (root picker + search) +
                         virtualized QListView + filter chips.
@@ -15,8 +15,9 @@ The panel emits `scene_activated(entry)` when the user taps a card. Ambiguous
 scenes will eventually route through a select-picker overlay before loading;
 for alpha the signal just fires and the caller decides.
 
-No thumbnails / duration yet — those need ffprobe + caching (polish pass).
-For now cards show a filled placeholder rectangle and "—:—:—" duration.
+Thumbnails are lazy video frames via `app.thumbnails.ThumbnailService` (grabbed
+with mpv, cached to disk, loaded off the GUI thread). Duration is still a
+"—:—:—" placeholder (a future ffprobe/mpv pass).
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from PySide6.QtCore import (
     QAbstractListModel, QModelIndex, QRect, QSize, Qt, Signal,
 )
 from PySide6.QtGui import (
-    QBrush, QColor, QFont, QFontMetrics, QPainter, QPalette, QPen,
+    QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPalette, QPen,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
@@ -43,6 +44,7 @@ from app.library import (
 )
 from app.library.channels import GENERATION_BADGES, DeviceGeneration
 from app.library.pins import has_pin
+from app.thumbnails import ThumbnailService
 
 
 # ── Theme (matches app dark palette from main.py) ─────────────────────────────
@@ -178,11 +180,19 @@ class LibraryCardDelegate(QStyledItemDelegate):
 
     Layout (top-to-bottom inside the card's inner rect):
 
-        [     thumbnail placeholder     ]     ← _THUMB_H tall
+        [   thumbnail (video frame) ]     ← _THUMB_H tall
         {scene name — 1 line, elided}
         {duration placeholder · badges}
         {ambiguity indicator if needed}
+
+    The thumbnail is the scene's default video, one frame grabbed lazily by
+    `ThumbnailService`. Until it's ready (or for audio-only scenes) the card
+    shows a flat placeholder.
     """
+
+    def __init__(self, thumb_service=None, parent=None) -> None:
+        super().__init__(parent)
+        self._thumbs = thumb_service
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         return QSize(_CARD_W, _CARD_H)
@@ -216,12 +226,38 @@ class LibraryCardDelegate(QStyledItemDelegate):
         painter.setBrush(QBrush(bg))
         painter.drawRoundedRect(rect, 6, 6)
 
-        # Thumbnail placeholder
+        # Thumbnail — the scene's default video frame, lazily grabbed. Until
+        # it's ready (or for audio-only scenes) draw the flat placeholder.
         thumb_rect = QRect(rect.x() + _PAD, rect.y() + _PAD,
                            rect.width() - 2 * _PAD, _THUMB_H)
         painter.setBrush(QBrush(_BG))
         painter.setPen(Qt.NoPen)
         painter.drawRoundedRect(thumb_rect, 4, 4)
+
+        pixmap = None
+        if self._thumbs is not None:
+            default_video = entry.default_video
+            if default_video is not None:
+                pixmap = self._thumbs.pixmap_for(default_video.path)
+        if pixmap is not None and not pixmap.isNull():
+            # Cover-crop: scale the frame to fill the thumb rect, centered,
+            # clipped to the rounded rectangle so corners stay clean.
+            painter.save()
+            clip = QPainterPath()
+            clip.addRoundedRect(thumb_rect, 4, 4)
+            painter.setClipPath(clip)
+            scaled = pixmap.scaled(
+                thumb_rect.size(), Qt.KeepAspectRatioByExpanding,
+                Qt.SmoothTransformation,
+            )
+            sx = (scaled.width() - thumb_rect.width()) // 2
+            sy = (scaled.height() - thumb_rect.height()) // 2
+            painter.drawPixmap(
+                thumb_rect,
+                scaled,
+                QRect(sx, sy, thumb_rect.width(), thumb_rect.height()),
+            )
+            painter.restore()
 
         # Text zone below thumbnail
         text_y = thumb_rect.bottom() + 6
@@ -408,10 +444,16 @@ class LibraryPanel(QWidget):
         chip_row.addWidget(self._count_label)
         layout.addLayout(chip_row)
 
+        # Lazy video-frame thumbnails. Generated paint-driven (only for cards
+        # the user scrolls past) and cached to disk; a card repaints when its
+        # frame becomes ready.
+        self._thumbs = ThumbnailService(self)
+        self._thumbs.ready.connect(self._on_thumbnail_ready)
+
         # Scene grid (virtualized)
         self._view = QListView()
         self._view.setModel(self._model)
-        self._view.setItemDelegate(LibraryCardDelegate(self._view))
+        self._view.setItemDelegate(LibraryCardDelegate(self._thumbs, self._view))
         self._view.setViewMode(QListView.IconMode)
         self._view.setResizeMode(QListView.Adjust)
         self._view.setMovement(QListView.Static)
@@ -535,6 +577,12 @@ class LibraryPanel(QWidget):
             self._count_label.setText(f"{total} scenes")
         else:
             self._count_label.setText(f"{shown} of {total} scenes")
+
+    def _on_thumbnail_ready(self, _video_path: str) -> None:
+        """A lazily-grabbed frame finished — repaint the grid so the card
+        that requested it swaps its placeholder for the frame. viewport
+        update is cheap and Qt coalesces a burst of readys into one paint."""
+        self._view.viewport().update()
 
     def _on_activated(self, index: QModelIndex) -> None:
         entry = self._model.entry_at(index)
