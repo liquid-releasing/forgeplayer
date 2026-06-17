@@ -46,6 +46,24 @@ You point it at a scene, hit play, and:
 It's built for the cockpit‑style way people actually watch: big screen in front
 of you, controls on a laptop or a little touchscreen off to the side, hands free.
 
+### What you need (e‑stim hardware)
+
+Each stim box plugs into **its own USB audio dongle** (separate from your
+speakers). You'll want **one or two dongles + one or two stim power boxes** —
+Haptic 1 carries the three‑phase / stereostim signal, Haptic 2 an optional
+prostate signal.
+
+**Three‑phase / stereostim boxes** (use the Pulse‑based mode):
+[The Tingler — StimKit I](https://www.stimkits.com/) ·
+[EstimHero](https://shop.impudicus.net/products/estim-hero-stereo-basic) ·
+[ZC95 MKII](https://darkmatter69.com/collections/estim)
+
+**Classic boxes** (use Continuous mode):
+[MK‑312BT](https://erostek.com/products/mk-312bt-power-unit) ·
+[2B](https://estim.store/collections/2b)
+
+**Not yet supported:** Coyote (DG‑Lab) — it's Bluetooth, which isn't tested yet.
+
 ### This is a beta
 
 ForgePlayer is **pre‑1.0 software, actively developed**. It works and it's fun,
