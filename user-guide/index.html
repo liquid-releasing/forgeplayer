@@ -556,6 +556,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#opening-a-forge-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening a .forge bundle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Opening a .forge bundle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#double-click-to-play" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Double-click to play
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-finds-the-video" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it finds the video
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#live-tab" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -673,10 +712,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fullscreen-crop" class="md-nav__link">
+  <a href="#crop-per-monitor" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fullscreen / Crop
+        Crop (per monitor)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crop-position" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crop position
       
     </span>
   </a>
@@ -789,10 +839,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#known-limitations-v004" class="md-nav__link">
+  <a href="#known-limitations-v005" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Known limitations (v0.0.4)
+        Known limitations (v0.0.5)
       
     </span>
   </a>
@@ -982,6 +1032,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#opening-a-forge-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening a .forge bundle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Opening a .forge bundle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#double-click-to-play" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Double-click to play
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-finds-the-video" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it finds the video
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#live-tab" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1099,10 +1188,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fullscreen-crop" class="md-nav__link">
+  <a href="#crop-per-monitor" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fullscreen / Crop
+        Crop (per monitor)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crop-position" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crop position
       
     </span>
   </a>
@@ -1215,10 +1315,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#known-limitations-v004" class="md-nav__link">
+  <a href="#known-limitations-v005" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Known limitations (v0.0.4)
+        Known limitations (v0.0.5)
       
     </span>
   </a>
@@ -1268,7 +1368,7 @@
 
 
 <h1 id="forgeplayer-user-guide">ForgePlayer User Guide<a class="headerlink" href="#forgeplayer-user-guide" title="Permanent link">&para;</a></h1>
-<p>Feature-by-feature reference for v0.0.4. If you're brand new, start at
+<p>Feature-by-feature reference for v0.0.5. If you're brand new, start at
 <a href="../getting-started/">Getting Started</a> and come back here when you
 need detail.</p>
 <hr />
@@ -1279,7 +1379,8 @@ need detail.</p>
 <li><strong>Live</strong> — what's currently loaded, what's routing to which device,
   the timeline, transport, and scene-volume slider.</li>
 <li><strong>Setup</strong> — physical-device assignments (which audio device handles
-  which role, which monitor each player goes on, fullscreen vs windowed).</li>
+  which role, which monitor each player goes on, and per-monitor crop</li>
+<li>crop position).</li>
 <li><strong>Preferences</strong> — content preference (sound vs funscript), synthesis
   algorithm, haptic offset.</li>
 </ul>
@@ -1290,6 +1391,12 @@ need detail.</p>
 <p>Each tile shows the scene's video thumbnail, name, and small badges for
 "has funscript", "has stim audio", "has prostate". A green dot in the
 corner means there's a saved pin (your variant picks).</p>
+<p>Thumbnails are real frames pulled from the scene's video (one frame ~12 %
+in), generated <strong>lazily</strong> — only for tiles you actually scroll past — and
+cached to <code>~/.forgeplayer/thumb_cache/</code>, so the grid stays responsive even
+on a large library and the frames are instant on the next visit. A tile
+shows a flat placeholder until its frame is ready (or for audio-only
+scenes that have no video).</p>
 <h3 id="activating-a-scene">Activating a scene<a class="headerlink" href="#activating-a-scene" title="Permanent link">&para;</a></h3>
 <p><strong>Single-click</strong> a tile to activate. If the scene has multiple variants
 (more than one funscript set, or alternate video edits), a <strong>picker
@@ -1315,6 +1422,44 @@ overwrite the pin.</p>
 <h3 id="refresh">Refresh<a class="headerlink" href="#refresh" title="Permanent link">&para;</a></h3>
 <p>If you add or remove files in a scene folder while ForgePlayer is
 running, click <strong>Refresh</strong> to re-scan.</p>
+<hr />
+<h2 id="opening-a-forge-bundle">Opening a <code>.forge</code> bundle<a class="headerlink" href="#opening-a-forge-bundle" title="Permanent link">&para;</a></h2>
+<p>A <code>.forge</code> is a self-describing scene bundle exported from FunscriptForge —
+the motion track, every device channel, the stim audio, events, and a
+manifest, all in one file.</p>
+<h3 id="double-click-to-play">Double-click to play<a class="headerlink" href="#double-click-to-play" title="Permanent link">&para;</a></h3>
+<p>On Windows, the ForgePlayer <strong>installer</strong> registers the <code>.forge</code> file type,
+so <strong>double-clicking a <code>.forge</code> opens it straight in ForgePlayer and plays</strong>
+("Play in ForgePlayer"). Right-clicking offers "Edit in FunscriptForge" to
+re-open it for editing. (The portable zip build doesn't register the type —
+use the installer if you want the double-click association, or launch
+ForgePlayer with the bundle path, e.g. <code>ForgePlayer.exe "Scene.forge"</code>.)</p>
+<p><code>.forge</code> bundles don't appear as Library tiles — they're single files you
+open directly, not scanned scene folders.</p>
+<h3 id="how-it-finds-the-video">How it finds the video<a class="headerlink" href="#how-it-finds-the-video" title="Permanent link">&para;</a></h3>
+<p>A bundle is lean by default: it carries the funscripts, the channels, and
+the stim audio, but <strong>not</strong> the (potentially multi-GB) source video. When
+you open one, ForgePlayer relinks the video in this order:</p>
+<ol>
+<li><strong>Inside the bundle</strong> — if it was exported with <strong>"include media"</strong>, the
+   video rides inside the <code>.forge</code> and plays directly. Fully self-contained;
+   works on any machine, no external file needed.</li>
+<li><strong>The original location</strong> — the absolute path the video lived at when it
+   was exported (recorded in the bundle's manifest). On the same machine,
+   this resolves wherever the bundle itself happens to sit — the <code>.forge</code>
+   does <strong>not</strong> have to be next to the video.</li>
+<li><strong>Next to the bundle</strong> — a video with the recorded filename sitting in
+   the same folder as the <code>.forge</code> (or its parent). This is the case that
+   needs adjacency: it's how a <strong>shared</strong> lean bundle finds its video on
+   someone else's disk.</li>
+</ol>
+<p>If none of those resolve, the scene <strong>still opens and plays</strong> — funscripts,
+stim, everything — just with no picture, and ForgePlayer prompts you to
+attach a video manually.</p>
+<p><strong>Sharing tip:</strong> for a bundle that "just plays" anywhere with zero setup,
+export it with <strong>include media</strong> (option 1 — video inside). To share lean
+bundles, keep the video file beside the <code>.forge</code> (option 3). For your own
+machine, it finds the original wherever it is (option 2).</p>
 <hr />
 <h2 id="live-tab">Live tab<a class="headerlink" href="#live-tab" title="Permanent link">&para;</a></h2>
 <h3 id="output-panel">Output panel<a class="headerlink" href="#output-panel" title="Permanent link">&para;</a></h3>
@@ -1360,9 +1505,12 @@ funscript-driven carrier discontinuity that would otherwise click:</p>
 <p>Total perceived gap: ~1.2 s. Visible as a clean dip in the recording
 waveform if you record the output.</p>
 <h3 id="fullscreen">Fullscreen<a class="headerlink" href="#fullscreen" title="Permanent link">&para;</a></h3>
-<p>The Video panel has a <strong>Fullscreen</strong> toggle. Off → players open as
-windowed 1280×720 with title bars (good for adjusting). On → players
+<p>The Video panel has a <strong>Fullscreen players</strong> toggle. Off → players open
+as windowed 1280×720 with title bars (good for adjusting). On → players
 go kiosk-mode covering the whole monitor.</p>
+<p>The toggle is <strong>live</strong>: flip it while players are already open and every
+open window goes fullscreen (or back to windowed) immediately — you don't
+have to relaunch. New launches read the toggle's current state.</p>
 <p><code>F11</code> inside any player window also toggles fullscreen for that slot.</p>
 <hr />
 <h2 id="setup-tab">Setup tab<a class="headerlink" href="#setup-tab" title="Permanent link">&para;</a></h2>
@@ -1386,10 +1534,24 @@ through the scene-audio device.)</p>
 <p>For each player slot, pick which monitor it lands on. The dropdown
 auto-populates with whatever Qt enumerates. Helpful labels include
 the model name where the monitor reports it.</p>
-<h3 id="fullscreen-crop">Fullscreen / Crop<a class="headerlink" href="#fullscreen-crop" title="Permanent link">&para;</a></h3>
-<p>The Setup tab's "Fill" / "Crop" toggle determines how each video slot
-renders — letterboxed within window vs cropped to fill. (The Live tab
-has its own Fullscreen toggle for the kiosk-mode behaviour.)</p>
+<h3 id="crop-per-monitor">Crop (per monitor)<a class="headerlink" href="#crop-per-monitor" title="Permanent link">&para;</a></h3>
+<p>Under <strong>Monitor roles</strong>, each playback screen has a <strong>Crop</strong> checkbox. Off
+→ the video is letterboxed/pillarboxed to preserve its native aspect. On →
+the video is scaled up to fill that monitor's aspect (mpv panscan) — useful
+for 16:9 content on a 32:9 ultrawide instead of leaving black bars.</p>
+<p>(This is distinct from the Live tab's <strong>Fullscreen players</strong> toggle, which
+controls whether the <em>window</em> takes over the whole monitor.)</p>
+<h3 id="crop-position">Crop position<a class="headerlink" href="#crop-position" title="Permanent link">&para;</a></h3>
+<p>When a screen is cropping, the <strong>Crop position</strong> radios choose which part of
+the frame to keep in the cropped dimension:</p>
+<ul>
+<li><strong>Center</strong> (default) — keep the middle, trim equally top and bottom.</li>
+<li><strong>Top</strong> — keep the top of the frame (with about a ⅛ margin so a subject
+  near the top edge isn't sliced off).</li>
+<li><strong>Bottom</strong> — keep the bottom of the frame (same ⅛ margin off the bottom).</li>
+</ul>
+<p>One choice applies to every cropping screen, and it applies <strong>live</strong> to any
+open players whose monitor is cropping.</p>
 <hr />
 <h2 id="preferences-tab">Preferences tab<a class="headerlink" href="#preferences-tab" title="Permanent link">&para;</a></h2>
 <h3 id="content-preference">Content preference<a class="headerlink" href="#content-preference" title="Permanent link">&para;</a></h3>
@@ -1406,11 +1568,16 @@ is worse than wrong-form). Haptic 2 only ever plays prostate-specific
 sources for the matching preference, otherwise mirrors H1.</p>
 <h3 id="generation-algorithm-when-preference-is-funscript">Generation algorithm (when preference is funscript)<a class="headerlink" href="#generation-algorithm-when-preference-is-funscript" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Pulse-based</strong> <em>(default)</em> — power-efficient waveform with shaped
+  discrete pulses. Slower numbing. For modern audio-based stereostim
+  hardware (Tingler, EstimHero, and similar). ForgePlayer defaults to
+  this because that's what the FunscriptForge content pipeline targets.</li>
 <li><strong>Continuous</strong> — classic restim waveform. Best for 312 / 2B-style
-  hardware. Lower power efficiency. Works well at ~100 Hz.</li>
-<li><strong>Pulse-based</strong> — power-efficient waveform with shaped discrete
-  pulses. Slower numbing. For modern audio-based stereostim hardware.</li>
+  hardware. Lower power efficiency. Works well at ~100 Hz. Flip to this
+  once if that's your box.</li>
 </ul>
+<p>(The default applies to a fresh install; an existing <code>preferences.json</code>
+keeps whatever you last chose.)</p>
 <h3 id="haptic-offset-s">Haptic offset (s)<a class="headerlink" href="#haptic-offset-s" title="Permanent link">&para;</a></h3>
 <p>Shift the stim signal relative to the video. <strong>Positive</strong> = stim
 leads video; <strong>negative</strong> = stim lags. Compensates for USB / driver
@@ -1476,7 +1643,7 @@ session state (which scene is loaded, which monitors / devices are
 assigned) on changes. Re-opening ForgePlayer restores the last
 session unless you explicitly start a new one via the Library scan.</p>
 <hr />
-<h2 id="known-limitations-v004">Known limitations (v0.0.4)<a class="headerlink" href="#known-limitations-v004" title="Permanent link">&para;</a></h2>
+<h2 id="known-limitations-v005">Known limitations (v0.0.5)<a class="headerlink" href="#known-limitations-v005" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Control panel sizing on monitor change</strong> — moving the control
   window to a smaller secondary screen can leave it taller than
@@ -1495,6 +1662,7 @@ session unless you explicitly start a new one via the Library scan.</p>
 <ul>
 <li><strong>Per-scene pin file</strong> — <code>&lt;scene-folder&gt;/&lt;stem&gt;.forgeplayer.pin.json</code></li>
 <li><strong>App preferences</strong> — <code>~/.forgeplayer/preferences.json</code></li>
+<li><strong>Library thumbnails (cache)</strong> — <code>~/.forgeplayer/thumb_cache/*.jpg</code></li>
 <li><strong>Session state</strong> — <code>~/.forgeplayer/&lt;session-name&gt;.session.json</code></li>
 <li><strong>Debug logs (when enabled)</strong> — <code>~/.forgeplayer/debug-stream-*.jsonl</code></li>
 <li><strong>Stim recordings (when env var set)</strong> — <code>&lt;your-chosen-dir&gt;/stim-*.wav</code></li>
