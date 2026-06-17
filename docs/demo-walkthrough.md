@@ -39,6 +39,19 @@ to its own output. That's the whole hardware story.
 > to click through the app on a timer — but for a one-off marketing demo, you
 > driving it live is faster and looks more natural.
 
+### Pacing & pauses
+
+Each section ends with a **⏸ PAUSE** beat. These do two jobs: they give the
+TTS/voiceover a breath between topics, and they cover the moment the UI is
+switching tabs or windows are appearing (so narration never talks over a blank
+transition). If you're generating the voiceover as separate clips, render each
+section as its own clip and insert the pause as silence between them; if it's
+one continuous read, just hold for the marked beats.
+
+- **⏸ PAUSE ~1.5s** — between steps inside the same tab.
+- **⏸ PAUSE ~2.5s** — when switching tabs or launching windows (the longer beat
+  covers the UI settling: the Library scan, players appearing on the monitors).
+
 ---
 
 ## Cold open (0:00–0:20)
@@ -46,6 +59,8 @@ to its own output. That's the whole hardware story.
 | ON SCREEN | SAY |
 |---|---|
 | ForgePlayer launches. Empty Library with the "Welcome to ForgePlayer" panel. | "This is ForgePlayer. If you've ever tried to play a scene across two monitors and an e-stim box by juggling VLC windows and hoping they stay in sync — this is the fix. One scene folder, one play button, every screen and every haptic output locked together frame-for-frame." |
+
+> **⏸ PAUSE ~2.5s** — let the opening line land before you start clicking.
 
 ---
 
@@ -57,6 +72,8 @@ to its own output. That's the whole hardware story.
 | Library grid fills with cards. **Thumbnails** render in as the frames are grabbed. Device badges show on the card. | "…and it scans them into a library. Each card pulls a real frame from the video, and the little badges tell me which device families that scene already has scripts for — e-stim, Handy, OSR2, SR6." |
 | Hover/tap the Big Buck Bunny card. | "Everything about a scene — the video, the audio, the funscripts for every channel — travels together as one card." |
 
+> **⏸ PAUSE ~2.5s** — switch to the **Setup** tab; let it open before the next line.
+
 ---
 
 ## 2 · Setup → screens & crop (1:00–2:00)
@@ -67,6 +84,8 @@ to its own output. That's the whole hardware story.
 | Under **Playback screens**, check the monitors to play on. Leave the laptop unchecked so it stays free for the controls (set **Control panel screen** to the laptop). | "I pick which monitors are for playback — here, my two external screens — and keep the controls on my laptop. One decoder, several screens, all in sync." |
 | Tick **Crop** on the ultrawide screen. | "My middle screen is an ultrawide. Instead of black bars, I turn on **Crop** — it scales the video to fill the monitor's aspect." |
 | Show the **Crop position** radios: **Top / Center / Bottom**. Pick one. | "And I choose where the crop sits — keep the top of the frame, the center, or the bottom, each with a small margin so nobody gets sliced off at the edge. Center's the default." |
+
+> **⏸ PAUSE ~1.5s** — stay in Setup; move across to the **Audio device roles** column.
 
 ---
 
@@ -80,6 +99,8 @@ to its own output. That's the whole hardware story.
 | **Haptic 2 (alt stim)** → optional second dongle. | "Haptic 2 is an optional second stim output — a prostate channel, or a second device." |
 | Point at **Refresh devices**. | "Plugged something in after launch? Refresh devices re-scans — no restart." |
 
+> **⏸ PAUSE ~2.5s** — switch to the **Preferences** tab.
+
 ---
 
 ## 4 · Preferences → synthesis algorithm (2:50–3:30)
@@ -89,6 +110,8 @@ to its own output. That's the whole hardware story.
 | Open **Preferences** → **Audio synthesis** → **Generation algorithm**. | "One choice matters for how the stim *feels*: the generation algorithm." |
 | Show **Continuous** vs **Pulse-based** (Pulse-based is selected by default). | "**Continuous** is the classic waveform — pick it for a 312 or a 2B. **Pulse-based** is power-efficient and slower to numb — it's built for modern audio-based stereostim like the Tingler or EstimHero, and it's ForgePlayer's default. Two clicks, set once." |
 | (Optional) nudge **Haptic offset**. | "If your dongle or electrode placement runs a hair ahead or behind the video, this offset nudges the stim into sync." |
+
+> **⏸ PAUSE ~2.5s** — switch to the **Live** panel.
 
 ---
 
@@ -101,6 +124,8 @@ to its own output. That's the whole hardware story.
 | Toggle **Fullscreen players** on. | "Fullscreen players takes each window edge-to-edge on its monitor — kiosk mode. And it's live: I can flip it while playing." |
 | Click **Launch**. Player windows appear on the chosen monitors. | "Launch." |
 
+> **⏸ PAUSE ~3s** — hold while the player windows open on the monitors; don't talk over the launch.
+
 ---
 
 ## 6 · Play (4:40–5:30)
@@ -110,6 +135,8 @@ to its own output. That's the whole hardware story.
 | Press **Play**. Big Buck Bunny plays across both screens, the ultrawide cropped to fill, in sync. | "And there it is — one scene, every screen, in lockstep." |
 | Scrub the seek bar; hit **next/previous chapter**. All windows track together. | "Seek anywhere, jump chapters — every window and every output stays frame-accurate. No resync, no drift." |
 | (If audible) bring up the e-stim carrier in the capture. | "And on the haptic outputs, the stim carrier is running right alongside the picture — the same scene driving what you see and what you'd feel." |
+
+> **⏸ PAUSE ~3s** — let the synced playback (and the carrier) play clean before the closing line.
 
 ---
 
