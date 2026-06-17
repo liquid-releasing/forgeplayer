@@ -19,9 +19,9 @@
                      else the sibling dev build funscriptforge.exe
   The "Edit" verb is only registered when a FunscriptForge launcher is found.
 
-  NOTE: the Edit verb opens FunscriptForge with the bundle path; FSF acting on
-  that path on launch (auto-import) is a separate FSF task - until then Edit
-  simply opens the editor.
+  NOTE: the Edit verb opens FunscriptForge with the bundle path; FSF drains
+  that launch path on first mount and auto-imports the bundle into a
+  re-editable project (get_launch_bundle -> importForgeBundle).
 
 .PARAMETER Unregister
   Remove the association instead of installing it.
