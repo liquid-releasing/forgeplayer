@@ -205,6 +205,18 @@ class PlayerWindow(QWidget):
         else:
             self.showFullScreen()
 
+    def set_fullscreen(self, on: bool) -> None:
+        """Apply fullscreen state explicitly. Driven by the Live panel's
+        'Fullscreen players' toggle so flipping it acts on already-open
+        windows (not just the next launch). The window is already realized
+        on its target screen by now, so showFullScreen() resolves to the
+        correct monitor without the windowed-flash dance place_on_screen
+        needs at launch time."""
+        if on and not self.isFullScreen():
+            self.showFullScreen()
+        elif not on and self.isFullScreen():
+            self.showNormal()
+
     # ── Placement ─────────────────────────────────────────────────────────────
 
     def place_on_screen(self, screen: QScreen, fullscreen: bool = False) -> None:

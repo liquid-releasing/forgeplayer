@@ -25,11 +25,12 @@ def temp_prefs_path(tmp_path: Path):
 
 
 class TestDefaults:
-    def test_audio_algorithm_default_is_continuous(self):
-        # Restim's own default is continuous. Match it so the .mp3
-        # baseline experience is what the user gets out of the box.
+    def test_audio_algorithm_default_is_pulse(self):
+        # ForgePlayer defaults to pulse-based: our content pipeline
+        # (FunscriptForge + modern audio-based stereostim) lives on pulse.
+        # 312/2B owners flip to Continuous once in Setup.
         p = Preferences()
-        assert p.audio_algorithm == "continuous"
+        assert p.audio_algorithm == "pulse"
 
     def test_haptic_offset_default_is_zero(self):
         p = Preferences()
@@ -74,7 +75,7 @@ class TestLoadValidation:
         temp_prefs_path.write_text(json.dumps({"audio_algorithm": "garbage"}))
 
         loaded = Preferences.load()
-        assert loaded.audio_algorithm == "continuous"
+        assert loaded.audio_algorithm == "pulse"
 
     def test_offset_clamped_to_safety_range(self, temp_prefs_path):
         # 10000ms is wildly out of range — almost certainly hand-edited
@@ -102,5 +103,5 @@ class TestLoadValidation:
     def test_missing_file_returns_defaults(self, temp_prefs_path):
         # File doesn't exist yet — first run.
         loaded = Preferences.load()
-        assert loaded.audio_algorithm == "continuous"
+        assert loaded.audio_algorithm == "pulse"
         assert loaded.haptic_offset_ms == 0

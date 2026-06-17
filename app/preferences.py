@@ -23,11 +23,13 @@ _PREFS_PATH = Path.home() / ".forgeplayer" / "preferences.json"
 
 
 # Audio synthesis algorithm. Mirrors restim's "Select generation algorithm"
-# wizard: continuous is restim's default ("Best for 312/2B"); pulse-based
+# wizard: continuous is restim's own default ("Best for 312/2B"); pulse-based
 # targets modern audio-based stereostim hardware ("Power-efficient
 # waveform. Slower numbing"). One global setting; both haptic roles use
 # the same algorithm in v0.0.2 since real users don't run mixed device
-# families on one rig.
+# families on one rig. ForgePlayer DEFAULTS TO pulse (below) — our content
+# pipeline (FunscriptForge + modern stereostim) lives on pulse-based; 312/2B
+# owners flip to Continuous once in Setup.
 AudioAlgorithm = Literal["continuous", "pulse"]
 
 # When a scene ships BOTH a pre-rendered sound file (.wav/.mp3) and a
@@ -62,8 +64,9 @@ class Preferences:
     scene_audio_secondary_device: str = ""
     haptic1_audio_device: str = ""
     haptic2_audio_device: str = ""
-    # Synthesis algorithm — see AudioAlgorithm above.
-    audio_algorithm: AudioAlgorithm = "continuous"
+    # Synthesis algorithm — see AudioAlgorithm above. Defaults to pulse:
+    # ForgePlayer's content pipeline targets modern audio-based stereostim.
+    audio_algorithm: AudioAlgorithm = "pulse"
     # Constant offset applied to the haptic stream's media-time. Positive
     # ms = stim leads video; negative = stim lags. Compensates for USB
     # dongle / driver / electrode-placement latency. Restim and CHPlayer

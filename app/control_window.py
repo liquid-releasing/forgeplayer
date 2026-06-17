@@ -497,9 +497,26 @@ class ControlWindow(QMainWindow):
         # restores visibility without changing size or any other
         # checkbox visuals.
         self._fullscreen_toggle.setStyleSheet(_CHECKBOX_ON_DARK_STYLE)
+        # Apply the choice LIVE to any open player windows. Before this the
+        # checkbox was read only at launch, so flipping it while players
+        # were already up did nothing (the reported "clicking Fullscreen
+        # players doesn't make the videos full screen" bug). Newly launched
+        # windows still read isChecked() in _launch_players.
+        self._fullscreen_toggle.toggled.connect(self._on_fullscreen_toggled)
         layout.addWidget(self._fullscreen_toggle)
 
         return box
+
+    def _on_fullscreen_toggled(self, checked: bool) -> None:
+        """Flip fullscreen on every open player window right now."""
+        DebugLog.record(
+            "live.fullscreen_toggle",
+            checked=checked,
+            open_players=sum(1 for w in self._player_windows if w),
+        )
+        for w in self._player_windows:
+            if w is not None:
+                w.set_fullscreen(checked)
 
     def _build_output_panel(self) -> QGroupBox:
         """Read-only Output panel. One row per audio destination
@@ -800,13 +817,30 @@ class ControlWindow(QMainWindow):
         self._setup_status.setStyleSheet("color: #9ba3c4; font-size: 11px;")
 
         columns = QHBoxLayout()
+        columns.setContentsMargins(0, 0, 0, 0)
         columns.setSpacing(16)
         # Two equal columns. Audio device roles on the left (the more
         # frequent reconfiguration when the user plugs in a new dongle);
         # Monitor roles on the right.
         columns.addWidget(self._build_setup_audio_page(), 1)
         columns.addWidget(self._build_setup_monitors_page(), 1)
-        outer.addLayout(columns, 1)
+
+        # Host the columns in a vertical scroll area. The audio column grew
+        # a fourth role row ("Scene audio (also)") past the three the column
+        # was sized for, so at a short window height the role rows compressed
+        # below their natural height and the word-wrapped helper text painted
+        # over the dropdown beneath it (the reported overlap). The scroll area
+        # always gives the content its natural height — invisible at a normal
+        # window height, a scrollbar instead of overlap when the window is short.
+        cols_host = QWidget()
+        cols_host.setLayout(columns)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        scroll.setWidget(cols_host)
+        outer.addWidget(scroll, 1)
 
         outer.addWidget(self._setup_status)
         return container
@@ -887,12 +921,12 @@ class ControlWindow(QMainWindow):
         return page
 
     def _build_setup_audio_page(self) -> QWidget:
-        """Audio-device-roles column. Natural height — no scroll
-        wrapper. Three role rows + helper text fit cleanly at the
-        1090×720 minimum. Scrolling on a Setup column is unwelcome
-        friction; if a future expansion blows past available height,
-        we'll restructure (e.g., move haptic offset / extra haptic
-        roles to Preferences) rather than reintroducing scroll.
+        """Audio-device-roles column: four role rows (Scene audio, Scene
+        audio also, Haptic 1, Haptic 2) + a Refresh button. The Setup tab
+        hosts both columns in a vertical scroll area (see _build_setup_tab),
+        so at a short window height the rows keep their natural height and
+        the column scrolls instead of the helper text overlapping the
+        dropdown beneath it.
         """
         page = QWidget()
         root = QVBoxLayout(page)
@@ -1034,10 +1068,9 @@ class ControlWindow(QMainWindow):
         """Audio synthesis settings — algorithm picker + latency offset.
 
         Wording mirrors restim's device wizard so users who already know
-        restim's UI immediately recognize the controls. Continuous is the
-        default (matches FunscriptForge's MP3 baseline + restim's own
-        out-of-the-box choice); modern stereostim users flip to pulse
-        once.
+        restim's UI immediately recognize the controls. Pulse-based is
+        ForgePlayer's default (our content pipeline targets modern
+        audio-based stereostim); 312/2B owners flip to Continuous once.
         """
         box = QGroupBox("Audio synthesis")
         layout = QVBoxLayout(box)
