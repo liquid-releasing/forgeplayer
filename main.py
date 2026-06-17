@@ -17,7 +17,9 @@ from app.control_window import ControlWindow
 _HERE = Path(__file__).parent
 _ICON_CANDIDATES = (
     _HERE / "branding" / "forgeplayer.ico",
-    _HERE / "branding" / "forgeplayer_icon.png",
+    # Square hero source (fills the frame). The old forgeplayer_icon.png was
+    # non-square and letterboxed into a tiny title-bar icon.
+    _HERE / "branding" / "forgeplayer_hero_for_icon.png",
 )
 
 
