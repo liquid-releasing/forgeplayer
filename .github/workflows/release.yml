@@ -274,7 +274,7 @@ jobs:
           repository: liquid-releasing/forgeplayer-releases
           token: ${{ secrets.RELEASES_PAT }}
           name: ${{ steps.relname.outputs.name }}
-          prerelease: false
+          prerelease: true
           files: |
             artifacts/ForgePlayer-Setup.exe
             artifacts/ForgePlayer-windows.zip
@@ -286,11 +286,12 @@ jobs:
             ForgePlayer is a synchronized multi-screen player with per-port device routing. Drop a FunscriptForge or ForgeAssembler scene pack into the Library and ForgePlayer plays it across your screens — with audio routed separately to scene speakers, your Haptic 1 stim port, and (optionally) a Haptic 2 prostate port — all from the same timeline.
 
             **What's new since the last cut:**
-            - Live tab cockpit — per-port pre-flight calibrate, lock-on-Play, single-click scene activation
-            - Dual-port stim routing — Haptic 1 main stim + Haptic 2 prostate-specific channel
-            - Sound vs Funscript content preference — pre-rendered stim audio (mp3) or live funscript synthesis
-            - WASAPI exclusive mode for stim streams on Windows (avoids shared-mixer artifacts)
-            - Pop fixes — multi-block envelope ramp, close-pop fix, post-seek settle hold
+            - **Windows installer** — `ForgePlayer-Setup.exe` registers the `.forge` file type, so a **double-click plays a bundle straight in ForgePlayer** (right-click → Edit in FunscriptForge)
+            - **Opens `.forge` bundles** — relinks the source video automatically (bundled media → original path → sibling); plays funscripts + stim even when no video is found
+            - **Library thumbnails** — real video frames, generated lazily and cached
+            - **Crop position** — Top / Center / Bottom for cropped (ultrawide) screens, applied live
+            - **Live Fullscreen toggle** — flip players fullscreen/windowed without relaunching
+            - **Pulse-based is now the default** synthesis algorithm (312/2B owners flip to Continuous in Setup)
 
             **Device compatibility:** mechanical, 2b, stereostim, FOC-stim — supported via pre-rendered stim audio (mp3) or live funscript synthesis (vendored restim).
 
