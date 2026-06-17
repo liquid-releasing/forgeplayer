@@ -93,12 +93,27 @@ def fake_sd_with_devices(monkeypatch):
 
 
 class TestResolveAudioDevice:
-    def test_returns_int_index_when_unique_wasapi_match(self, fake_sd_with_devices):
+    def test_returns_int_index_when_unique_wasapi_match(self, fake_sd_with_devices, monkeypatch):
+        # The Windows default now redirects WASAPI → DirectSound (WASAPI leaks
+        # the device handle on close). Pin WASAPI explicitly via the override so
+        # this asserts the WASAPI host-filtered match (idx 4) deterministically.
+        monkeypatch.setenv("FORGEPLAYER_STIM_HOST", "wasapi")
         mpv_devices = [
             {"name": "wasapi/{aaa}", "description": "Speakers (USB Audio Device)"},
         ]
-        # Filtered by WASAPI host → only idx 4 matches.
         assert resolve_audio_device("wasapi/{aaa}", mpv_devices) == 4
+
+    def test_windows_defaults_stim_to_directsound(self, fake_sd_with_devices, monkeypatch):
+        # On Windows a WASAPI stim device resolves to its DirectSound
+        # enumeration by default — WASAPI doesn't release the handle on close
+        # (close→reopen -9996/-9999 + pops; DirectSound is clean). idx 2-3 are
+        # the DirectSound copies; first wins.
+        monkeypatch.delenv("FORGEPLAYER_STIM_HOST", raising=False)
+        monkeypatch.setattr("os.name", "nt")
+        mpv_devices = [
+            {"name": "wasapi/{aaa}", "description": "Speakers (USB Audio Device)"},
+        ]
+        assert resolve_audio_device("wasapi/{aaa}", mpv_devices) == 2
 
     def test_picks_first_when_multiple_wasapi_matches(self, monkeypatch):
         """Two physically-identical dongles both on WASAPI — pick first

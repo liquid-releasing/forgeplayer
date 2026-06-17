@@ -64,6 +64,26 @@ _EXPORT_BUNDLE_SUFFIXES = (".output", ".forge", ".forgeplay")
 def _is_export_bundle_dir(name: str) -> bool:
     return name.lower().endswith(_EXPORT_BUNDLE_SUFFIXES)
 
+
+# When a scene folder carries its haptics inside an export bundle (rather than
+# as loose funscripts), we record the bundle on the entry so activation can
+# import it. If several are present, prefer the richest/most-canonical form.
+_BUNDLE_SUFFIX_PRIORITY = (
+    (".forge", 3),       # canonical self-contained bundle (zip file or dir)
+    (".forgeplay", 2),
+    (".output", 1),      # loose device-organized output folder
+)
+
+
+def _bundle_priority(name: str) -> int:
+    """Higher wins; 0 = not a bundle name. The hidden flatten subfolder named
+    exactly `.forge` is NOT a bundle — callers must exclude it first."""
+    low = name.lower()
+    for sfx, prio in _BUNDLE_SUFFIX_PRIORITY:
+        if low.endswith(sfx):
+            return prio
+    return 0
+
 # Configurable limit so a malicious folder with millions of files doesn't hang
 # the scanner. Scenes exceeding this cap are still scanned but over-cap items
 # are skipped with a deterministic ordering.
@@ -189,12 +209,23 @@ def scan_scene_folder(folder: str | os.PathLike) -> SceneCatalogEntry | None:
         name=folder_path.name,
     )
 
-    # Collect file paths from the scene folder and any `.forge` subfolder
+    # Collect file paths from the scene folder and any `.forge` subfolder.
+    # Alongside, spot a FunscriptForge export bundle (`<stem>.forge` zip/dir or
+    # `<stem>.output/` folder) — its contents are packaged, not loose, so the
+    # rest of the scan won't see its funscripts. We record the best one on
+    # `entry.bundle_path` for lazy import at activation time.
     all_files: list[Path] = []
+    best_bundle: str | None = None
+    best_bundle_prio = 0
     try:
         for item in sorted(folder_path.iterdir()):
             if item.is_file():
                 all_files.append(item)
+                # `.forge` / `.forgeplay` zip FILES are bundles (`.output` is
+                # a folder form, handled in the dir branch).
+                prio = _bundle_priority(item.name)
+                if prio >= 2 and prio > best_bundle_prio:
+                    best_bundle, best_bundle_prio = str(item), prio
             elif item.is_dir() and item.name == _FORGE_FLATTEN_SUBFOLDER:
                 # Flatten .forge contents as additional scene files
                 try:
@@ -203,8 +234,14 @@ def scan_scene_folder(folder: str | os.PathLike) -> SceneCatalogEntry | None:
                             all_files.append(sub)
                 except OSError:
                     pass
+            elif item.is_dir():
+                prio = _bundle_priority(item.name)
+                if prio and prio > best_bundle_prio:
+                    best_bundle, best_bundle_prio = str(item), prio
     except OSError:
         return None
+
+    entry.bundle_path = best_bundle
 
     if len(all_files) > _MAX_FILES_PER_SCENE:
         all_files = all_files[:_MAX_FILES_PER_SCENE]

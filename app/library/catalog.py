@@ -187,6 +187,15 @@ class SceneCatalogEntry:
     """Path to `{base_stem}.forgeplayer.json` if present in the folder.
     When loaded, its pinned choices override the scanner's defaults."""
 
+    bundle_path: str | None = None
+    """Path to a FunscriptForge export bundle (`<stem>.forge` zip / dir, or
+    `<stem>.output/` folder) sitting in this scene folder. The scanner skips a
+    bundle's *contents* (they're packaged, not loose), so a folder that only
+    carries its haptics inside a bundle scans as video-only. When set AND the
+    folder has no loose funscript sets, activation imports the bundle via
+    `bundle_importer.load_bundle` so the card plays WITH its e-stim channels —
+    grafted onto the user's own loose video variants."""
+
     @property
     def default_video(self) -> VideoVariant | None:
         """First entry in self.videos — the scanner's default-pick."""
@@ -298,5 +307,9 @@ class SceneCatalogEntry:
         inert from ForgePlayer's perspective — the user is expected to
         unzip them before adding to the library. ForgePlayer is a player,
         not an unzip utility.
+
+        A FunscriptForge export bundle (`bundle_path`) also makes a folder
+        playable on its own: even with no loose media, the bundle carries a
+        relinkable video + e-stim channels (loaded lazily on activation).
         """
-        return bool(self.videos) or bool(self.audio_tracks)
+        return bool(self.videos) or bool(self.audio_tracks) or bool(self.bundle_path)

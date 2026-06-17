@@ -176,10 +176,41 @@ def resolve_audio_device(
     if not desc:
         return None
 
-    target_host = _host_api_from_mpv_id(mpv_device_id)
+    original_host = _host_api_from_mpv_id(mpv_device_id)
+    target_host = original_host
+
+    # WASAPI (exclusive AND shared) fails to release some USB DACs on close:
+    # close→reopen raises -9996/-9999 until the process exits — and it's
+    # ramp/seek-triggered, which also produced the audible pops we chased for
+    # days. DirectSound releases cleanly and (dogfood 2026-06-17) survived the
+    # full launch/play/close/relaunch/calibrate/ramp/seek gauntlet — "can't get
+    # it to fail", with the seek pops gone too. So on Windows we DEFAULT stim +
+    # calibrate to DirectSound (video still uses mpv's own device id). Slightly
+    # higher latency, absorbed by haptic_offset_ms.
+    #
+    # FORGEPLAYER_STIM_HOST overrides (e.g. =wasapi to go back, =mme to try MME).
+    _host_override = os.environ.get("FORGEPLAYER_STIM_HOST", "").strip().lower()
+    if _host_override:
+        target_host = {
+            "wasapi": "Windows WASAPI",
+            "directsound": "Windows DirectSound",
+            "ds": "Windows DirectSound",
+            "mme": "MME",
+            "wdmks": "Windows WDM-KS",
+            "wdm-ks": "Windows WDM-KS",
+        }.get(_host_override, target_host)
+    elif os.name == "nt" and target_host == "Windows WASAPI":
+        target_host = "Windows DirectSound"
+
     try:
         sd = _load_sounddevice()
         sd_indices = _find_sounddevice_indices(sd, desc, target_host)
+        # If the preferred host doesn't expose this device (e.g. no DirectSound
+        # enumeration), fall back to the device's original host rather than
+        # dropping to fragile name-substring matching.
+        if not sd_indices and target_host != original_host:
+            target_host = original_host
+            sd_indices = _find_sounddevice_indices(sd, desc, target_host)
         if sd_indices:
             # Position-aware match: pair the N-th mpv entry sharing
             # (desc, host) with the N-th sounddevice index sharing the
@@ -651,19 +682,26 @@ class StimAudioStream:
             self._open_recording_if_requested()
 
     def _open_stream_with_fallback(self, sd):
-        """Try WASAPI exclusive; fall back to shared on failure.
+        """Open the output stream on whatever host the resolved device uses.
 
-        Lifted out of `start()` so the fallback logic stays readable.
         Returns an UNstarted stream — caller calls `.start()`.
-        """
-        # Best-effort exclusive mode. WasapiSettings only matters on
-        # WASAPI host APIs; on other hosts sounddevice ignores it.
-        try:
-            wasapi = sd.WasapiSettings(exclusive=True)
-        except Exception:
-            wasapi = None
 
-        if wasapi is not None:
+        Stim now resolves to a DirectSound device on Windows by default (see
+        resolve_audio_device) because WASAPI — exclusive AND shared — fails to
+        release some USB DACs on close: every reopen raised -9996/-9999 for the
+        life of the process, ramp/seek-triggered, and produced the pops we
+        chased for days. DirectSound releases cleanly (2026-06-17 dogfood:
+        full gauntlet, "can't get it to fail", seek pops gone). A *bare* open
+        honors the resolved device's native host (DirectSound here).
+
+        FORGEPLAYER_WASAPI_EXCLUSIVE=1 forces WASAPI exclusive for anyone who
+        prefers it (and whose DAC releases it cleanly).
+        """
+        want_exclusive = os.environ.get(
+            "FORGEPLAYER_WASAPI_EXCLUSIVE", ""
+        ).strip().lower() in ("1", "true", "yes", "on")
+
+        if want_exclusive:
             try:
                 return sd.OutputStream(
                     samplerate=self._synth.sample_rate,
@@ -673,15 +711,16 @@ class StimAudioStream:
                     latency=self.LATENCY,
                     device=self._device_name,
                     callback=self._callback,
-                    extra_settings=wasapi,
+                    extra_settings=sd.WasapiSettings(exclusive=True),
                 )
             except Exception as exc:
                 _log.warning(
-                    "WASAPI exclusive open failed (device=%r): %s — "
-                    "retrying in shared mode",
+                    "WASAPI exclusive open failed (device=%r): %s — bare fallback",
                     self._device_name, exc,
                 )
 
+        # Default: a bare open uses the resolved device's native host API
+        # (DirectSound on Windows for stim). Clean close→reopen, no endpoint lock.
         try:
             return sd.OutputStream(
                 samplerate=self._synth.sample_rate,
@@ -1125,6 +1164,31 @@ def _load_sounddevice():
     import sounddevice  # noqa: PLC0415
 
     return sounddevice
+
+
+def refresh_audio_devices() -> bool:
+    """Force PortAudio to re-enumerate the system audio devices.
+
+    Windows re-enumerates a USB audio device when an exclusive-mode stream
+    closes (the endpoint briefly drops and re-appears). PortAudio caches its
+    device list at initialize time, so after a close→reopen the cached device
+    index for a name goes stale and the next OutputStream(device=name) raises
+    'Invalid device' (-9996) — even in shared mode. Tearing PortAudio down and
+    re-initializing rebuilds the list against the device's current state, which
+    is what actually clears the -9996 (a bare retry can't — it keeps using the
+    stale list).
+
+    Best-effort: returns True if the re-init ran, False otherwise. MUST only be
+    called when no sounddevice stream is currently open (it invalidates them).
+    """
+    try:
+        sd = _load_sounddevice()
+        sd._terminate()
+        sd._initialize()
+        return True
+    except Exception as exc:  # noqa: BLE001 — never let a refresh attempt crash launch
+        _log.warning("PortAudio device re-enumeration failed: %s", exc)
+        return False
 
 
 def _query_mpv_audio_devices() -> list[dict]:

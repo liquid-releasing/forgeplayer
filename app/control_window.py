@@ -25,6 +25,7 @@ from app.library.catalog import SceneCatalogEntry
 from app.select_picker import SelectPicker, SelectionChoices
 from app.library.pins import has_pin, load_pin, resolve_pin, save_pin
 from app.debug_log import DebugLog
+from app.version import __version__
 from app.widgets import ClickableSlider
 from app.preferences import Preferences
 from app.audio_test import play_tone_on_device
@@ -186,7 +187,8 @@ class ControlWindow(QMainWindow):
             self._library_panel.set_root(self._prefs.library_root)
         self._library_panel.root_changed.connect(self._on_library_root_changed)
         self._tabs.addTab(self._library_panel, "Library")
-        self._tabs.addTab(self._build_live_tab(), "Live")
+        self._live_tab = self._build_live_tab()
+        self._tabs.addTab(self._live_tab, "Live")
         self._tabs.addTab(self._build_setup_tab(), "Setup")
         self._tabs.addTab(self._build_preferences_tab(), "Preferences")
 
@@ -324,9 +326,16 @@ class ControlWindow(QMainWindow):
         self._btn_play.setFixedWidth(140)
         self._btn_play.setFixedHeight(52)
         self._btn_play.setStyleSheet(
-            "background: #ff4b4b; color: white; font-weight: bold; "
-            "font-size: 16px; border-radius: 6px;"
+            "QPushButton { background: #ff4b4b; color: white; font-weight: bold; "
+            "font-size: 16px; border-radius: 6px; }"
+            "QPushButton:disabled { background: #4a3236; color: #8a8a8a; }"
         )
+        # Disabled until players are launched — Play before Launch does nothing,
+        # and a live dogfooder hit it every time. Re-enabled in
+        # _update_calibrate_buttons_enabled once players are active. (Post-beta,
+        # Play should just auto-launch and the separate Launch button goes away.)
+        self._btn_play.setEnabled(False)
+        self._btn_play.setToolTip("Launch Players first")
         self._btn_play.clicked.connect(self._on_play_pause)
         transport.addWidget(self._btn_play)
 
@@ -388,6 +397,9 @@ class ControlWindow(QMainWindow):
             "QPushButton { font-size: 13px; }"
             "QPushButton:checked { background: #ff4b4b; color: white; "
             "font-weight: bold; border-radius: 6px; }"
+            # Visibly dim when locked (players launched) so it reads as
+            # "unavailable now", not "broken / unresponsive".
+            "QPushButton:disabled { background: #2c2f3a; color: #6b7194; }"
         )
 
         self._btn_calibrate_h1 = QPushButton("Calibrate H1")
@@ -428,6 +440,9 @@ class ControlWindow(QMainWindow):
             "five seconds. Safer when dialing in dongle volume from a "
             "high knob setting."
         )
+        # On by default — a gentle fade-in beats jolting the user (and the
+        # device) to full intensity instantly. User-requested 2026-06-17.
+        self._chk_calibrate_ramp.setChecked(True)
         calib_row.addWidget(self._chk_calibrate_ramp)
 
         calib_row.addStretch()
@@ -1717,6 +1732,56 @@ class ControlWindow(QMainWindow):
             return
         self._on_scene_activated(entry)
 
+    def _resolve_bundle_backed(self, entry: SceneCatalogEntry) -> SceneCatalogEntry:
+        """Turn a video-only library card that's actually backed by a
+        FunscriptForge export bundle into a fully playable scene WITH its
+        e-stim channels.
+
+        The scanner skips a bundle's packaged contents, so a folder whose
+        haptics live only inside `<stem>.forge` / `<stem>.output/` scans as
+        video-only (no funscripts → Haptic 1 'no source' → Calibrate refuses).
+        When such a card is activated we import the bundle via the SAME
+        `load_bundle` path the double-click uses, then graft the user's own
+        loose video variants (their real 4K/1080p files) onto the bundle's
+        haptics so they still pick the video they want and get stim.
+
+        Only fires when the card has a bundle AND no loose funscripts of its
+        own — a folder with loose funscripts already plays via the normal path
+        and must take precedence. Any failure falls back to the original
+        video-only entry (never worse than today).
+        """
+        bundle_path = getattr(entry, "bundle_path", None)
+        if not bundle_path or entry.funscript_sets:
+            return entry
+
+        from app.bundle_importer import load_bundle  # noqa: PLC0415
+        try:
+            bundled = load_bundle(bundle_path)
+        except Exception as exc:  # noqa: BLE001 — never break activation on a bad bundle
+            DebugLog.record("library.activate.bundle_failed", scene=entry.name, error=str(exc))
+            return entry
+        if bundled is None or not bundled.funscript_sets:
+            return entry  # unreadable / no haptics — keep the video-only card
+
+        # Keep the user's own loose media (better variants, real on-disk paths);
+        # take only the haptics from the bundle. Preserve folder identity so
+        # pins persist against the scene folder, not the extracted cache.
+        if entry.videos:
+            bundled.videos = entry.videos
+        if entry.audio_tracks:
+            bundled.audio_tracks = entry.audio_tracks
+        bundled.name = entry.name
+        bundled.folder_path = entry.folder_path
+        bundled.preset_path = entry.preset_path
+        DebugLog.record(
+            "library.activate.bundle_resolved",
+            scene=entry.name,
+            bundle=bundle_path,
+            sets=len(bundled.funscript_sets),
+            videos=len(bundled.videos),
+        )
+        return bundled
+
     def _on_scene_activated(
         self, entry: SceneCatalogEntry, *, force_picker: bool = False,
     ) -> None:
@@ -1729,7 +1794,12 @@ class ControlWindow(QMainWindow):
         - Otherwise (first play, stale pin, or explicit "change picks"),
           show the picker pre-filled with defaults or the existing pin,
           then persist the new choices on accept.
+
+        A library card backed by a `.forge`/`.output` bundle (haptics packaged,
+        not loose) is imported here so it plays WITH its e-stim channels — see
+        _resolve_bundle_backed.
         """
+        entry = self._resolve_bundle_backed(entry)
         choices: SelectionChoices | None = None
 
         pin = load_pin(entry) if not force_picker else None
@@ -1781,6 +1851,24 @@ class ControlWindow(QMainWindow):
                     funscript_set=entry.default_funscript_set,
                     subtitle=None,
                 )
+
+        # Self-heal: a scene can end up with no haptics selected even though it
+        # HAS a funscript set — most often a bundle-backed card whose pin was
+        # saved (funscript_set_stem empty) back when it scanned video-only,
+        # before bundle import existed. When stim is available, play it; this
+        # also rewrites the stale pin below so the fix sticks.
+        if (
+            choices is not None
+            and choices.funscript_set is None
+            and entry.funscript_sets
+        ):
+            from dataclasses import replace  # noqa: PLC0415
+            choices = replace(choices, funscript_set=entry.default_funscript_set)
+            DebugLog.record(
+                "library.activate.haptics_autofilled",
+                scene=entry.name,
+                set=entry.default_funscript_set.base_stem,
+            )
 
         # Persist the picks — auto-save on every successful activation.
         try:
@@ -2009,7 +2097,11 @@ class ControlWindow(QMainWindow):
         # has to happen first). Live now shows the loaded scene's
         # video + output mapping; the user explicitly hits Launch
         # Players when ready.
-        self._tabs.setCurrentIndex(0)
+        #
+        # Live is tab index 1 (Library=0, Live=1). This used to be 0, which
+        # silently dropped the user back on the card grid after they picked a
+        # scene — they had to find and tap Live themselves. Land them on Live.
+        self._tabs.setCurrentWidget(self._live_tab)
         DebugLog.record("library.activate.loaded", scene=entry.name)
 
     # _select_slot_monitor / _populate_monitor_combo / _apply_setup_roles_to_slots
@@ -2062,12 +2154,23 @@ class ControlWindow(QMainWindow):
 
         h.addStretch()
 
-        # ── Debug cluster (dogfood only — hide for release) ─────────────
+        # Version label — so a dogfooder always knows which build is running.
+        # (The #1 "did my fix land?" confusion: an old installed build vs. a
+        # fresh one look identical without this.)
+        version_label = QLabel(f"v{__version__}")
+        version_label.setStyleSheet("color: #6b7194; font-size: 11px;")
+        version_label.setToolTip("ForgePlayer build version")
+        h.addWidget(version_label)
+
+        # ── Debug cluster (visible during beta) ─────────────────────────
+        # Mark/Export/Clear stay visible and Debug defaults ON, so a dogfooder
+        # can always grab a log without remembering to arm anything first. The
+        # owner explicitly wants these shipped during beta ("we're in beta!").
         self._debug_toggle = QCheckBox("Debug")
         self._debug_toggle.setToolTip(
             "Record clicks, key events, and player lifecycle to an event log.\n"
-            "Use Mark to flag a moment, then Export to write the log to\n"
-            "~/.forgeplayer/debug-<timestamp>.json for bug reports."
+            "On by default in beta. Use Mark to flag a moment, then Export\n"
+            "writes ~/.forgeplayer/debug-<timestamp>.json for bug reports."
         )
         self._debug_toggle.setStyleSheet("color: #9ba3c4;")
         self._debug_toggle.toggled.connect(self._on_debug_toggled)
@@ -2095,6 +2198,13 @@ class ControlWindow(QMainWindow):
         )
         self._btn_debug_clear.clicked.connect(self._on_debug_clear)
         h.addWidget(self._btn_debug_clear)
+
+        self._debug_buttons = (
+            self._btn_mark, self._btn_debug_export, self._btn_debug_clear,
+        )
+        # Beta: Debug ON by default so logs auto-capture (and stream live to
+        # ~/.forgeplayer/debug-stream-*.jsonl). setChecked fires _on_debug_toggled.
+        self._debug_toggle.setChecked(True)
 
         return bar
 
@@ -2176,6 +2286,9 @@ class ControlWindow(QMainWindow):
         self._debug_toggle.setStyleSheet(
             "color: #ff6b30; font-weight: bold;" if checked else "color: #9ba3c4;"
         )
+        # Reveal Mark/Export/Clear only while Debug is on.
+        for _b in getattr(self, "_debug_buttons", ()):  # noqa: SIM118
+            _b.setVisible(checked)
         if checked and DebugLog.stream_path():
             self._debug_toggle.setToolTip(
                 f"Debug events are also streaming live to:\n{DebugLog.stream_path()}"
@@ -2477,6 +2590,40 @@ class ControlWindow(QMainWindow):
     def _on_calibrate_h2(self) -> None:
         self._toggle_calibrate(port="h2")
 
+    def _stop_calibration_streams(self) -> str | None:
+        """Stop any running Calibrate streams and free their haptic devices.
+
+        Calibrate opens the Haptic device in WASAPI-*exclusive* mode, so it
+        holds the device handle. If it's still running when Launch opens the
+        stim playback stream on that same device, the open fails with
+        PaErrorCode -9996 ('Invalid device') and you get NO haptic audio for
+        the whole session. Launch calls this first so the device is free.
+
+        Returns a human label of what was stopped (for messaging), or None.
+        """
+        stopped: list[str] = []
+        for port, attr, btn, label in (
+            ("h1", "_calib_h1", self._btn_calibrate_h1, "Haptic 1"),
+            ("h2", "_calib_h2", self._btn_calibrate_h2, "Haptic 2"),
+        ):
+            stream = getattr(self, attr, None)
+            if stream is None:
+                continue
+            try:
+                stream.stop()
+            except Exception as exc:  # noqa: BLE001 — must not block launch
+                DebugLog.record("calibrate.auto_stop_error", port=port, error=repr(exc))
+            setattr(self, attr, None)
+            try:
+                btn.setChecked(False)
+            except Exception:
+                pass
+            stopped.append(label)
+        if stopped:
+            DebugLog.record("calibrate.auto_stopped_for_launch", ports=stopped)
+            return " & ".join(stopped)
+        return None
+
     def _toggle_calibrate(self, port: str) -> None:
         """Tap-toggle one calibrate session for `port` ("h1" or "h2").
 
@@ -2591,13 +2738,18 @@ class ControlWindow(QMainWindow):
 
         ramp_seconds = 5.0 if self._chk_calibrate_ramp.isChecked() else 0.0
         try:
-            stream = CalibrationStream(
-                channels, device_id,
-                mpv_devices=mpv_devices,
-                waveform=self._prefs.audio_algorithm,
-                ramp_seconds=ramp_seconds,
+            # Retry/backoff: calibrating right after closing players races
+            # Windows' async release of the just-closed exclusive device
+            # (the -9996 a dogfooder hit). See _open_audio_stream_with_retry.
+            stream = self._open_audio_stream_with_retry(
+                lambda: CalibrationStream(
+                    channels, device_id,
+                    mpv_devices=mpv_devices,
+                    waveform=self._prefs.audio_algorithm,
+                    ramp_seconds=ramp_seconds,
+                ),
+                label=f"calibrate/{port}",
             )
-            stream.start()
         except Exception as exc:
             btn.setChecked(False)
             DebugLog.record(
@@ -2630,12 +2782,14 @@ class ControlWindow(QMainWindow):
         """Sync the Calibrate button state to current scene + Setup +
         engine state.
 
-        Calibrate is a pre-flight tool: locked between the first Play
-        and Close (the launched stim streams own the haptic devices
-        once playback has started; calibrate would fight them for the
-        same handle). Allowed pre-Launch, allowed in the post-Launch /
-        pre-first-Play window so the user can Calibrate after opening
-        the player windows but before starting the scene.
+        Calibrate is a PRE-LAUNCH-only tool: locked from Launch to Close.
+        The launched stim stream opens the haptic device (WASAPI-exclusive)
+        at Launch — not at first Play — so it owns the handle the moment
+        players are up. A calibrate attempt in that window fails with
+        'Invalid device' (-9996). So: enabled before Launch, disabled while
+        any players are active. (Earlier this also allowed a post-Launch /
+        pre-first-Play window, but that assumed stim opened on Play; it
+        doesn't, so that window produced the -9996 a dogfooder hit.)
 
         Called at __init__-time, on launch, on close, on play, on
         scene change, and on Setup change. Cheap; safe to call
@@ -2646,9 +2800,9 @@ class ControlWindow(QMainWindow):
         if not hasattr(self, "_btn_calibrate_h1"):
             return
 
-        if self._engine.has_active_players() and self._has_played_since_launch:
-            # Once Play has been hit, hard-stop any in-flight calibrate
-            # — the launched stim stream is now driving the device.
+        if self._engine.has_active_players():
+            # Players are up → the stim stream owns the device. Hard-stop any
+            # in-flight calibrate and lock the buttons.
             for slot, stream in (
                 ("h1", self._calib_h1), ("h2", self._calib_h2),
             ):
@@ -2666,6 +2820,10 @@ class ControlWindow(QMainWindow):
             self._btn_calibrate_h2.setChecked(False)
             self._btn_calibrate_h1.setEnabled(False)
             self._btn_calibrate_h2.setEnabled(False)
+            # Players are up → Play is live.
+            if hasattr(self, "_btn_play"):
+                self._btn_play.setEnabled(True)
+                self._btn_play.setToolTip("")
             return
 
         # Pre-launch: enable iff the matching device is set. We DON'T
@@ -2680,6 +2838,63 @@ class ControlWindow(QMainWindow):
         self._btn_calibrate_h2.setEnabled(
             bool(self._prefs.haptic2_audio_device)
         )
+        # Pre-launch → no players to drive yet, so Play stays disabled until
+        # the user hits Launch Players.
+        if hasattr(self, "_btn_play"):
+            self._btn_play.setEnabled(False)
+            self._btn_play.setToolTip("Launch Players first")
+
+    @staticmethod
+    def _open_audio_stream_with_retry(make_stream, *, label: str, attempts: int = 1):
+        """Create + start an exclusive-WASAPI audio stream, retrying on the
+        transient PortAudio -9996 'Invalid device' that happens when a
+        just-closed device hasn't been released by Windows yet.
+
+        WASAPI-exclusive endpoints free *asynchronously* a beat after close(),
+        so a fast close→reopen (close players → relaunch, or close → calibrate)
+        races the OS and the open raises -9996. We retry over ~2s, which clears
+        it in practice. A genuinely unavailable device (unplugged / wrong pick)
+        fails every attempt and the final exception propagates to the caller's
+        existing error dialog.
+
+        `make_stream` must return a FRESH stream object whose `.start()` opens
+        the device (a failed open can leave the object unusable, so each
+        attempt builds a new one). Returns the started stream.
+        """
+        import time as _time  # noqa: PLC0415
+        from app.stim_audio_output import refresh_audio_devices  # noqa: PLC0415
+        last_exc: Exception | None = None
+        for attempt in range(attempts):
+            stream = make_stream()
+            try:
+                stream.start()
+            except Exception as exc:  # noqa: BLE001 — retry transient device-open
+                last_exc = exc
+                DebugLog.record(
+                    "audio.open_retry", label=label, attempt=attempt, error=repr(exc),
+                )
+                try:
+                    stream.stop()
+                except Exception:
+                    pass
+                if attempt < attempts - 1:
+                    # THE key step: re-enumerate PortAudio's device list. After
+                    # an exclusive stream closes, Windows re-enumerates the USB
+                    # device and PortAudio's cached index goes stale → -9996
+                    # even in shared mode. A bare retry keeps hitting the stale
+                    # list; refreshing rebuilds it so the next open finds the
+                    # device. (Safe here — no sd stream is open mid-failure.)
+                    refreshed = refresh_audio_devices()
+                    DebugLog.record(
+                        "audio.devices_refreshed", label=label, attempt=attempt,
+                        ok=refreshed,
+                    )
+                    _time.sleep(0.15 + 0.05 * attempt)  # 0.15..0.50, ~2.2s total
+                continue
+            if attempt > 0:
+                DebugLog.record("audio.open_recovered", label=label, attempt=attempt)
+            return stream
+        raise last_exc if last_exc is not None else RuntimeError("audio stream open failed")
 
     def _launch_stim_synth(
         self,
@@ -2810,16 +3025,21 @@ class ControlWindow(QMainWindow):
             def time_source(_get=engine.get_position, _off=offset_seconds):
                 return _get() + _off
 
-        stream = StimAudioStream(
-            synth=synth,
-            time_source=time_source,
-            device_id=audio_device or None,
-            mpv_devices=mpv_devices,
-            is_playing_source=is_playing_source,
-        )
+        # Open the device with retry/backoff — _on_launch closes then
+        # immediately re-opens, racing Windows' async release of the exclusive
+        # endpoint (see _open_audio_stream_with_retry).
         try:
-            stream.start()
-        except Exception as exc:
+            stream = self._open_audio_stream_with_retry(
+                lambda: StimAudioStream(
+                    synth=synth,
+                    time_source=time_source,
+                    device_id=audio_device or None,
+                    mpv_devices=mpv_devices,
+                    is_playing_source=is_playing_source,
+                ),
+                label=f"h1-stim/slot{slot_idx}",
+            )
+        except Exception as exc:  # noqa: BLE001
             DebugLog.record(
                 "stim.stream_open_failed", slot=slot_idx, error=repr(exc),
                 device_id=audio_device,
@@ -3308,12 +3528,14 @@ class ControlWindow(QMainWindow):
             )
 
     def _on_launch(self) -> None:
-        # Reset the "has played" flag — calibrate is allowed in the
-        # post-Launch / pre-first-Play window so the user can verify
-        # haptic dongle levels with the player windows already up.
-        # Calibrate streams from before launch survive into this
-        # window and continue running; the next Play will stop them.
         self._has_played_since_launch = False
+
+        # Free the haptic devices BEFORE opening any stim stream. Calibrate
+        # holds the Haptic device in WASAPI-exclusive mode; if it's still
+        # running, the stim open below fails with 'Invalid device' (-9996) and
+        # you get no haptic audio all session. Stop it for the user rather than
+        # erroring out — they shouldn't have to remember to toggle it off.
+        self._stop_calibration_streams()
 
         # Snapshot every screen Qt currently knows about. Multi-monitor
         # placement bugs almost always trace back to either (a) Qt not
@@ -3829,6 +4051,16 @@ class ControlWindow(QMainWindow):
                 except Exception:
                     pass
                 setattr(self, port_attr, None)
+        # Tear down the player windows + their stim streams. closeEvent used to
+        # call only _engine.terminate_all(), which kills the mpv instances but
+        # leaves the PlayerWindow widgets on screen (and any stim stream still
+        # holding its device) after the controller closes. _close_players does
+        # the full teardown: stops every stim/aux stream, terminates each
+        # engine slot, and w.close()s every window.
+        try:
+            self._close_players()
+        except Exception as exc:  # noqa: BLE001 — never block app close
+            DebugLog.record("app.close_players_error", error=repr(exc))
         # Auto-export captured debug events. Saves the user from the
         # "did I click Export before closing?" friction that's bitten
         # multiple dogfood sessions. Best-effort — if export fails for

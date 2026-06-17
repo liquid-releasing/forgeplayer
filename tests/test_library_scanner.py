@@ -571,3 +571,75 @@ class TestPerGroupAmbiguityFlags:
         ])
         entry = scan_scene_folder(scene_dir)
         assert entry.needs_subtitle_choice is True
+
+
+class TestBundleDetection:
+    """A FunscriptForge export folder carries its haptics inside a `.forge`
+    bundle / `.output` folder, not as loose funscripts. The scanner must flag
+    that bundle on the entry so activation can import it (bundle-as-card)."""
+
+    def test_forge_file_recorded_as_bundle_path(self, tmp_path):
+        scene_dir = _make_scene(tmp_path, "WetDreams", [
+            "WetDreams 4k.mp4",
+            "WetDreams 1080p.mp4",
+            "WetDreams.forge",  # the packaged bundle (zip file)
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry is not None
+        assert entry.bundle_path is not None
+        assert entry.bundle_path.endswith("WetDreams.forge")
+        # No loose funscripts → still video-only at scan time (haptics load lazily)
+        assert entry.funscript_sets == []
+        assert entry.videos  # the loose videos are still the card's media
+
+    def test_output_dir_recorded_as_bundle_path(self, tmp_path):
+        scene_dir = tmp_path / "Scene"
+        scene_dir.mkdir()
+        _touch(scene_dir, "Scene.mp4")
+        # A loose device-organized output folder with a channel inside.
+        _touch(scene_dir / "Scene.output", "stations/estim3p/Scene.alpha.funscript")
+        entry = scan_scene_folder(scene_dir)
+        assert entry is not None
+        assert entry.bundle_path is not None
+        assert entry.bundle_path.endswith("Scene.output")
+
+    def test_forge_beats_output_when_both_present(self, tmp_path):
+        scene_dir = tmp_path / "Scene"
+        scene_dir.mkdir()
+        _touch(scene_dir, "Scene.mp4")
+        _touch(scene_dir, "Scene.forge")
+        _touch(scene_dir / "Scene.output", "stations/estim3p/Scene.alpha.funscript")
+        entry = scan_scene_folder(scene_dir)
+        assert entry.bundle_path.endswith("Scene.forge")  # .forge (prio 3) > .output (prio 1)
+
+    def test_loose_funscripts_take_precedence_no_bundle_flag_needed(self, tmp_path):
+        # A normal downloaded scene: loose funscripts present. bundle_path may
+        # be None (no bundle here) and the loose sets drive playback as before.
+        scene_dir = _make_scene(tmp_path, "Normal", [
+            "scene.mp4", "scene.funscript", "scene.alpha.funscript",
+        ])
+        entry = scan_scene_folder(scene_dir)
+        assert entry.bundle_path is None
+        assert entry.funscript_sets  # the loose set is what plays
+
+    def test_forge_only_folder_is_playable(self, tmp_path):
+        # No loose video at all — just the bundle. The folder should still
+        # become a playable card (video relinks from the bundle on activation).
+        scene_dir = tmp_path / "BundleOnly"
+        scene_dir.mkdir()
+        _touch(scene_dir, "BundleOnly.forge")
+        entry = scan_scene_folder(scene_dir)
+        assert entry is not None
+        assert entry.bundle_path.endswith("BundleOnly.forge")
+        assert entry.is_playable is True
+
+    def test_flatten_forge_subfolder_not_treated_as_bundle(self, tmp_path):
+        # A hidden `.forge/` working subfolder (exact name) flattens its
+        # contents into the parent — it is NOT an export bundle.
+        scene_dir = tmp_path / "Flat"
+        scene_dir.mkdir()
+        _touch(scene_dir, "Flat.mp4")
+        _touch(scene_dir / ".forge", "Flat.funscript")
+        entry = scan_scene_folder(scene_dir)
+        assert entry.bundle_path is None  # the exact-name .forge is flatten, not a bundle
+        assert entry.funscript_sets  # its contents flattened in as a loose set
