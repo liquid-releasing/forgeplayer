@@ -9,6 +9,14 @@ from typing import Optional
 import mpv
 
 
+# Crop position → mpv video-align-y. -1 = flush top, +1 = flush bottom.
+# top/bottom land at ∓0.75: with the video filling via panscan, that crops
+# 1/8 of the vertical overflow off the near edge and 7/8 off the far edge,
+# i.e. keeps the top (or bottom) of the frame with a ~1/8 margin. Mirrors the
+# margins the user asked for; center (0.0) is mpv's own default.
+_CROP_ALIGN_Y = {"top": -0.75, "center": 0.0, "bottom": 0.75}
+
+
 class SyncEngine:
     """Manages up to 3 mpv instances.
 
@@ -46,6 +54,7 @@ class SyncEngine:
         audio_device: str = "",
         *,
         fill: bool = False,
+        crop_align: str = "center",
     ) -> mpv.MPV:
         """Create an mpv instance embedded in *wid* (native window handle).
 
@@ -55,6 +64,11 @@ class SyncEngine:
         monitors (e.g. 5120×1440 Odyssey) where 16:9 4K content would
         otherwise leave large black bars on each side. ``fill=False``
         is the default fit (preserve aspect with letterbox/pillarbox).
+
+        ``crop_align`` ("top"/"center"/"bottom") positions the kept region
+        when cropping — center is classic; top/bottom back the crop off the
+        opposite edge by ~1/8 (mpv video-align-y ∓0.75) so a subject high or
+        low in the frame isn't sliced at the edge. Ignored unless ``fill``.
         """
         with self._lock:
             if self._players[slot]:
@@ -87,9 +101,31 @@ class SyncEngine:
                 # config kwarg keeps mpv happy across versions where
                 # numeric vs string handling has varied.
                 kwargs["panscan"] = "1.0"
+                # video-align-y positions the kept region in the cropped
+                # dimension: -1 = flush top, 0 = center, +1 = flush bottom.
+                # top/bottom land at ∓0.75 — crop 1/8 of the overflow off
+                # the near edge so the subject keeps a margin (see
+                # _CROP_ALIGN_Y). center (0.0) is mpv's own default.
+                align_y = _CROP_ALIGN_Y.get(crop_align, 0.0)
+                if align_y:
+                    kwargs["video_align_y"] = str(align_y)
             p = mpv.MPV(**kwargs)
             self._players[slot] = p
             return p
+
+    def set_crop_align(self, slot: int, crop_align: str) -> None:
+        """Re-position the crop on an already-running player. Lets the Setup
+        radios act on open windows immediately. No-op on a slot that isn't a
+        cropping video player (setting video-align-y on a letterboxed video
+        has no visible effect anyway)."""
+        p = self._players[slot]
+        if p is None:
+            return
+        try:
+            p.video_align_y = _CROP_ALIGN_Y.get(crop_align, 0.0)
+        except Exception:
+            # Headless/audio-only players have no video output; ignore.
+            pass
 
     def init_player_audio_only(self, slot: int, audio_device: str = "") -> mpv.MPV:
         """Create a headless mpv instance with no window.

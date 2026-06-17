@@ -36,6 +36,11 @@ class TestDefaults:
         p = Preferences()
         assert p.haptic_offset_ms == 0
 
+    def test_crop_align_default_is_center(self):
+        # Center matches the pre-v0.0.5 crop behavior; top/bottom are opt-in.
+        p = Preferences()
+        assert p.crop_align == "center"
+
     def test_scene_audio_secondary_device_default_is_empty(self):
         # Empty means feature off — no mirror spawned. Makes the
         # feature opt-in for users who actually have a second
@@ -76,6 +81,20 @@ class TestLoadValidation:
 
         loaded = Preferences.load()
         assert loaded.audio_algorithm == "pulse"
+
+    def test_invalid_crop_align_falls_back_to_center(self, temp_prefs_path):
+        temp_prefs_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_prefs_path.write_text(json.dumps({"crop_align": "diagonal"}))
+
+        loaded = Preferences.load()
+        assert loaded.crop_align == "center"
+
+    def test_valid_crop_align_preserved(self, temp_prefs_path):
+        temp_prefs_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_prefs_path.write_text(json.dumps({"crop_align": "bottom"}))
+
+        loaded = Preferences.load()
+        assert loaded.crop_align == "bottom"
 
     def test_offset_clamped_to_safety_range(self, temp_prefs_path):
         # 10000ms is wildly out of range — almost certainly hand-edited

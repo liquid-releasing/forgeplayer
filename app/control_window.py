@@ -1276,9 +1276,64 @@ class ControlWindow(QMainWindow):
 
             ml.addLayout(row)
 
+        # ── Crop position ──────────────────────────────────────────────────
+        # Where to keep the frame when a screen crop-fills. One global choice
+        # (the rig's monitors share an aspect-mismatch pattern). Only affects
+        # screens with Crop on — no overflow to position when letterboxed.
+        crop_pos_label = QLabel("Crop position")
+        cpl_font = crop_pos_label.font(); cpl_font.setBold(True)
+        crop_pos_label.setFont(cpl_font)
+        ml.addWidget(crop_pos_label)
+
+        crop_pos_helper = QLabel(
+            "When Crop is on, which part of the frame to keep. Top / Bottom "
+            "back the crop off the near edge by about 1/8 so a subject high "
+            "or low in the frame isn't sliced at the edge."
+        )
+        crop_pos_helper.setStyleSheet("color: #6b7280; font-size: 11px;")
+        crop_pos_helper.setWordWrap(True)
+        ml.addWidget(crop_pos_helper)
+
+        self._setup_crop_group = QButtonGroup(self)
+        crop_row = QHBoxLayout()
+        crop_row.setSpacing(14)
+        self._setup_crop_radios: dict[str, QRadioButton] = {}
+        for value, text in (("top", "Top"), ("center", "Center"), ("bottom", "Bottom")):
+            rb = QRadioButton(text)
+            rb.setStyleSheet(_CHECKBOX_ON_DARK_STYLE)
+            self._setup_crop_group.addButton(rb)
+            self._setup_crop_radios[value] = rb
+            crop_row.addWidget(rb)
+            rb.toggled.connect(
+                lambda checked, v=value: self._on_crop_align_changed(v) if checked else None
+            )
+        crop_row.addStretch(1)
+        self._setup_crop_radios.get(
+            self._prefs.crop_align, self._setup_crop_radios["center"]
+        ).setChecked(True)
+        ml.addLayout(crop_row)
+
         root.addWidget(monitor_box)
         root.addStretch()
         return page
+
+    def _on_crop_align_changed(self, value: str) -> None:
+        """Persist the global crop position and apply it to any open players
+        whose screen is cropping — so the choice is visible immediately, like
+        the Fullscreen toggle, not only on the next launch."""
+        self._prefs.crop_align = value  # type: ignore[assignment]
+        self._prefs.save()
+        DebugLog.record("setup.crop_align", value=value)
+        self._setup_status.setText(f"Saved to {Preferences.path()}")
+        QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
+        for i, w in enumerate(self._player_windows):
+            if w is None:
+                continue
+            screen_idx = self._screen_index_for_slot(i)
+            if screen_idx is None or screen_idx >= len(self._screens):
+                screen_idx = 0
+            if self._fill_for_screen_index(screen_idx):
+                self._engine.set_crop_align(i, value)
 
     def _on_control_screen_changed(self) -> None:
         idx = self._setup_control_screen_combo.currentData()
@@ -3392,6 +3447,7 @@ class ControlWindow(QMainWindow):
             fill = self._fill_for_screen_index(screen_idx)
             self._engine.init_player(
                 i, pw.native_wid(), audio_device, fill=fill,
+                crop_align=self._prefs.crop_align,
             )
             DebugLog.record(
                 "player.fill_mode",

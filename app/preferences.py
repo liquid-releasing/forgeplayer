@@ -44,6 +44,14 @@ AudioAlgorithm = Literal["continuous", "pulse"]
 # tie-breaker, never a filter).
 ContentPreference = Literal["sound", "funscript"]
 
+# When a screen crop-fills (panscan), which part of the frame to keep in the
+# cropped dimension. "center" is the classic behavior; "top"/"bottom" back the
+# crop off the opposite edge by ~1/8, so a subject anchored high or low in the
+# frame isn't sliced at the very edge. Applies only when Crop is on for the
+# screen (no overflow to position when letterboxed). See sync_engine's
+# _CROP_ALIGN_Y for the mpv video-align-y mapping.
+CropAlign = Literal["top", "center", "bottom"]
+
 @dataclass
 class Preferences:
     """User-configurable cross-session preferences.
@@ -85,6 +93,10 @@ class Preferences:
     # Live; the v0.0.4 redesign moves it to Setup so Live stays read-only.
     # Empty list = no screens fill (today's default).
     fill_screen_indices: List[int] = field(default_factory=list)
+    # Vertical crop position for cropped screens — see CropAlign above.
+    # One global choice (the rig's monitors share an aspect mismatch
+    # pattern); default center matches the pre-v0.0.5 behavior.
+    crop_align: CropAlign = "center"
     # Sound vs Funscript tie-breaker when both forms exist for a haptic
     # destination. See ContentPreference docstring above for rationale.
     content_preference: ContentPreference = "sound"
@@ -104,6 +116,9 @@ class Preferences:
         # Same coercion for content_preference. Default is "sound".
         if clean.get("content_preference") not in ("sound", "funscript"):
             clean.pop("content_preference", None)
+        # Coerce crop_align enum. Default is "center".
+        if clean.get("crop_align") not in ("top", "center", "bottom"):
+            clean.pop("crop_align", None)
         # Stale `haptic2_fallback` keys from pre-cascade prefs files are
         # silently dropped — the cascade is now policy, no user pick.
         clean.pop("haptic2_fallback", None)
