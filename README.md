@@ -43,6 +43,37 @@ feature reference.
 
 ---
 
+## Supported e-stim hardware
+
+ForgePlayer drives e-stim by sending an audio signal to a stim power box
+through an audio output. Each stim box plugs into **its own audio output —
+a USB sound-card dongle** (e.g. a [VENTION USB sound
+card](https://www.amazon.com/dp/B08LGPKFN5); any standard USB audio output
+works), separate from your speakers. You assign which dongle each role uses in
+**Setup**:
+
+- **Haptic 1 (main stim)** — the optional **three-phase / stereostim** signal.
+- **Haptic 2 (optional)** — an optional **prostate** signal to a second box.
+
+So you'll want **one or two USB audio dongles + one or two stim boxes.**
+
+**Three-phase / stereostim boxes** (modern, audio-driven — use the **Pulse-based**
+algorithm):
+
+- [The Tingler — StimKit I](https://www.stimkits.com/)
+- [EstimHero (Stereo Basic)](https://shop.impudicus.net/products/estim-hero-stereo-basic)
+- [ZC95 MKII E-stim Box](https://darkmatter69.com/collections/estim)
+
+**Classic boxes** (use the **Continuous** algorithm):
+
+- [MK-312BT](https://erostek.com/products/mk-312bt-power-unit)
+- [2B](https://estim.store/collections/2b)
+
+**Not yet supported:** Coyote (DG-Lab) — it's Bluetooth-based, and Bluetooth
+devices haven't been tested yet.
+
+---
+
 ## The Problem It Solves
 
 VLC plays video. restim plays estim. Your haptic device has its own app. None of them talk to each other. Syncing them is a manual nightmare and full-screen doesn't survive it.
