@@ -2202,9 +2202,10 @@ class ControlWindow(QMainWindow):
         self._debug_buttons = (
             self._btn_mark, self._btn_debug_export, self._btn_debug_clear,
         )
-        # Beta: Debug ON by default so logs auto-capture (and stream live to
-        # ~/.forgeplayer/debug-stream-*.jsonl). setChecked fires _on_debug_toggled.
-        self._debug_toggle.setChecked(True)
+        # Debug is OFF by default — on, it writes a stream + an auto-export per
+        # session to ~/.forgeplayer/, which adds up. The buttons stay visible
+        # (beta) so a user can tick Debug, reproduce a bug, and Export a log.
+        # (DebugLog also self-prunes ~/.forgeplayer to the last N on enable.)
 
         return bar
 
@@ -2286,9 +2287,6 @@ class ControlWindow(QMainWindow):
         self._debug_toggle.setStyleSheet(
             "color: #ff6b30; font-weight: bold;" if checked else "color: #9ba3c4;"
         )
-        # Reveal Mark/Export/Clear only while Debug is on.
-        for _b in getattr(self, "_debug_buttons", ()):  # noqa: SIM118
-            _b.setVisible(checked)
         if checked and DebugLog.stream_path():
             self._debug_toggle.setToolTip(
                 f"Debug events are also streaming live to:\n{DebugLog.stream_path()}"

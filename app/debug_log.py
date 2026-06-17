@@ -39,6 +39,31 @@ class DebugLog:
     _started_at: float = time.time()
     _stream_path: Path | None = None
 
+    # Keep only the most recent N of each debug file. Debug is ON by default in
+    # beta, so without this the folder grows unbounded (~2 files per session).
+    # N=25 is a few KB-to-MB total — plenty of history for a bug report.
+    _MAX_KEPT_LOGS: int = 25
+
+    @classmethod
+    def _prune_old_logs(cls, target: Path) -> None:
+        """Trim ~/.forgeplayer to the most recent _MAX_KEPT_LOGS of each debug
+        file type. Best-effort; never raises (instrumentation must not break
+        the app)."""
+        for pattern in ("debug-stream-*.jsonl", "debug-*.json"):
+            try:
+                files = sorted(
+                    target.glob(pattern),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                for old in files[cls._MAX_KEPT_LOGS:]:
+                    try:
+                        old.unlink()
+                    except OSError:
+                        pass
+            except Exception:
+                pass
+
     @classmethod
     def _stream_append(cls, event: dict) -> None:
         """Best-effort disk write. Never raises — debug instrumentation must
@@ -57,6 +82,7 @@ class DebugLog:
         target = Path.home() / ".forgeplayer"
         try:
             target.mkdir(parents=True, exist_ok=True)
+            cls._prune_old_logs(target)
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             cls._stream_path = target / f"debug-stream-{stamp}.jsonl"
             cls._stream_append({
