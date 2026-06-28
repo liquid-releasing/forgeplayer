@@ -43,11 +43,29 @@ _CACHE_DIR = Path.home() / ".forgeplayer" / "thumb_cache"
 # HiDPI displays without bloating the cache (a 448px JPEG is a few KB).
 _THUMB_W = 448
 
-# Where in the clip to grab — 12% in skips intros/black leaders and lands on
-# representative content for most scenes. Clamped to a few seconds minimum so
-# very long files don't seek past a slow-to-decode keyframe needlessly.
-_SEEK_FRAC = 0.12
+# Bump when the frame-SELECTION logic changes so old cached thumbnails (grabbed
+# by a prior algorithm — e.g. the single fixed 12% frame) regenerate instead of
+# serving a stale dark/flat frame. Folded into the cache key.
+_THUMB_ALGO = 3
+
+# Preferred early grab point — ~10s in usually clears the intro/leader and
+# lands on the first real content, which is the frame users expect on the card.
+# Tried first; the body samples below are fallbacks so a dark/flat 10s frame
+# (fade-in, title card) can lose to a better one rather than becoming the thumb.
+_SEEK_EARLY_S = 10.0
+
+# Candidate seek points (fractions of duration) sampled across the body of the
+# clip. We grab a frame at each, score it, and keep the best — so a dark shot or
+# a face-against-black at any one point doesn't become the card thumbnail. The
+# spread skips intros/leaders (≥15%) and outros/credits (≤78%) and otherwise
+# walks the middle where representative content lives.
+_SEEK_FRACS = (0.15, 0.30, 0.45, 0.60, 0.78)
 _SEEK_MIN_S = 3.0
+
+# When the early 10s frame is decent (not a near-black/flat title card), prefer
+# it even if a busier mid-clip frame scores marginally higher — the user asked
+# for "about 10 seconds in". This is the score it must clear to win outright.
+_EARLY_GOOD_SCORE = 12.0
 
 
 def _cache_key(video_path: str) -> str:
@@ -55,9 +73,9 @@ def _cache_key(video_path: str) -> str:
     the same path regenerates instead of serving a stale frame."""
     try:
         st = os.stat(video_path)
-        sig = f"{os.path.abspath(video_path)}|{int(st.st_mtime)}|{st.st_size}|{_THUMB_W}"
+        sig = f"{os.path.abspath(video_path)}|{int(st.st_mtime)}|{st.st_size}|{_THUMB_W}|{_THUMB_ALGO}"
     except OSError:
-        sig = f"{os.path.abspath(video_path)}|0|0|{_THUMB_W}"
+        sig = f"{os.path.abspath(video_path)}|0|0|{_THUMB_W}|{_THUMB_ALGO}"
     return hashlib.sha1(sig.encode("utf-8")).hexdigest()
 
 
@@ -69,8 +87,55 @@ def cached_path(video_path: str) -> Path:
     return _CACHE_DIR / f"{_cache_key(video_path)}.png"
 
 
+def _frame_score(img: QImage) -> float:
+    """Heuristic 'is this a good thumbnail' score for a decoded frame.
+
+    Rewards detail/contrast (luma standard deviation) so flat near-black
+    leaders, fade-to-black cuts, and uniform shots score near zero. Penalises
+    frames that are too dark or blown out — a face lit against black reads as a
+    low mean with modest spread, which loses to a brighter, busier frame
+    elsewhere in the clip. Computed on a tiny downscaled copy so it's cheap to
+    run on every candidate.
+    """
+    if img.isNull():
+        return -1.0
+    # 32×18 ≈ 576 samples — enough to characterise brightness/detail, trivial
+    # to iterate in Python on the worker thread.
+    small = img.scaled(32, 18, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    w, h = small.width(), small.height()
+    if w == 0 or h == 0:
+        return -1.0
+    n = w * h
+    total = 0.0
+    total_sq = 0.0
+    for y in range(h):
+        for x in range(w):
+            c = small.pixelColor(x, y)
+            luma = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+            total += luma
+            total_sq += luma * luma
+    mean = total / n
+    var = max(0.0, total_sq / n - mean * mean)
+    std = var ** 0.5
+    # Brightness gate: a soft window centred on mid-tones. Frames whose mean
+    # luma sits in [40, 220] keep their full detail score; darker/brighter
+    # frames are scaled down so a black-with-a-face frame can't win on the
+    # little contrast its highlight carries.
+    if mean < 40:
+        bright = mean / 40.0
+    elif mean > 220:
+        bright = max(0.0, (255 - mean) / 35.0)
+    else:
+        bright = 1.0
+    return std * (0.35 + 0.65 * bright)
+
+
 def _grab_frame_to(video_path: str, out_path: Path) -> bool:
-    """Headless single-frame grab via libmpv. Returns True on success.
+    """Headless multi-candidate frame grab via libmpv. Returns True on success.
+
+    Grabs a frame at each of several seek points across the body of the clip,
+    scores them (see ``_frame_score``), and writes the best one — so a dark or
+    flat frame at any single offset doesn't become the card thumbnail.
 
     vo='null' + screenshot-to-file 'video' renders just the decoded frame (no
     OSD, no window). Kept fully self-contained so it can run on a worker
@@ -95,44 +160,78 @@ def _grab_frame_to(video_path: str, out_path: Path) -> bool:
             return False
 
         dur = player.duration or 0.0
-        target = max(_SEEK_MIN_S, dur * _SEEK_FRAC) if dur else _SEEK_MIN_S
+        # Build the candidate seek list, early frame FIRST. ~10s in is the
+        # preferred grab; the body samples are fallbacks for when 10s is a
+        # near-black fade-in / title card. With no known duration (some
+        # streams) we fall back to a single grab a few seconds in.
         if dur:
-            target = min(target, max(0.0, dur - 0.5))
-        try:
-            player.command("seek", target, "absolute", "exact")
-            # Let the seek settle on a decoded frame before the screenshot.
-            seek_deadline = time.monotonic() + 3.0
-            while time.monotonic() < seek_deadline:
-                if player.time_pos is not None and player.time_pos >= target - 1.0:
-                    break
-                time.sleep(0.03)
-        except Exception:
-            pass  # un-seekable / very short clip: screenshot wherever we are
+            targets = []
+            if dur > _SEEK_EARLY_S + 2.0:
+                targets.append(_SEEK_EARLY_S)
+            targets += [
+                min(max(_SEEK_MIN_S, dur * f), max(0.0, dur - 0.5))
+                for f in _SEEK_FRACS
+            ]
+        else:
+            targets = [_SEEK_MIN_S]
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = Path(tempfile.mktemp(suffix=".png", dir=str(out_path.parent)))
-        player.command("screenshot-to-file", str(tmp), "video")
-        # screenshot-to-file is async-ish in libmpv — wait for the file.
-        shot_deadline = time.monotonic() + 3.0
-        while time.monotonic() < shot_deadline:
-            if tmp.exists() and tmp.stat().st_size > 0:
-                break
-            time.sleep(0.03)
-        if not (tmp.exists() and tmp.stat().st_size > 0):
-            return False
 
-        # Scale down (QImage is safe off the GUI thread) and write the small
-        # cache file, then drop the full-res temp.
-        img = QImage(str(tmp))
-        ok = False
-        if not img.isNull():
-            scaled = img.scaledToWidth(_THUMB_W, Qt.SmoothTransformation)
-            ok = scaled.save(str(out_path), "PNG")
+        best_img: QImage | None = None
+        best_score = -1.0
+        for idx, target in enumerate(targets):
+            try:
+                player.command("seek", target, "absolute", "exact")
+                seek_deadline = time.monotonic() + 2.5
+                while time.monotonic() < seek_deadline:
+                    if player.time_pos is not None and player.time_pos >= target - 1.0:
+                        break
+                    time.sleep(0.03)
+            except Exception:
+                pass  # un-seekable / very short clip: shoot wherever we are
+
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            try:
+                player.command("screenshot-to-file", str(tmp), "video")
+            except Exception:
+                continue
+            # screenshot-to-file is async-ish in libmpv — wait for the file.
+            shot_deadline = time.monotonic() + 2.5
+            while time.monotonic() < shot_deadline:
+                if tmp.exists() and tmp.stat().st_size > 0:
+                    break
+                time.sleep(0.03)
+            if not (tmp.exists() and tmp.stat().st_size > 0):
+                continue
+
+            img = QImage(str(tmp))
+            if img.isNull():
+                continue
+            score = _frame_score(img)
+            if score > best_score:
+                best_score = score
+                # Keep the scaled copy now; the next iteration overwrites tmp.
+                best_img = img.scaledToWidth(_THUMB_W, Qt.SmoothTransformation)
+
+            # The first candidate is the preferred ~10s frame (when duration
+            # allowed it). If it's decent, take it and skip the body samples —
+            # honours "about 10 seconds in" and avoids decoding 5 more frames.
+            if idx == 0 and target == _SEEK_EARLY_S and score >= _EARLY_GOOD_SCORE:
+                break
+
         try:
             tmp.unlink()
         except OSError:
             pass
-        return ok
+
+        if best_img is None or best_img.isNull():
+            return False
+        return bool(best_img.save(str(out_path), "PNG"))
     except Exception:
         return False
     finally:

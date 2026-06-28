@@ -82,15 +82,24 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ForgePlayer")
         self.setMinimumWidth(980)
-        # Initial size targets the 1090×720 touchpad as the spiritual
-        # minimum + a bit of breathing room. On larger displays the
-        # user can drag to resize; we don't auto-maximize.
-        self.resize(1280, 760)
+        # Initial size fits the 1920×720 touchpad (Screen 3) — the hard
+        # constraint the Live layout is built around. Opening at 700 tall
+        # leaves the whole control panel on-screen there; on larger
+        # displays the user can drag to resize. We don't auto-maximize.
+        self.resize(1280, 700)
 
         self._engine = SyncEngine()
         self._player_windows: list[PlayerWindow | None] = [None] * _NUM_SLOTS
         self._seek_dragging = False
         self._session_path: str = ""
+
+        # The scene currently applied to the Live slots + the exact choices it
+        # was launched with. Tracked so Setup changes (audio device / None /
+        # source picks) can re-route the live scene immediately via
+        # _reload_current_scene, instead of only taking effect on the next
+        # Library click. None until the first scene is activated.
+        self._current_entry: "SceneCatalogEntry | None" = None
+        self._current_choices: "SelectionChoices | None" = None
 
         # Discover screens and audio devices (HDMI phantom devices filtered
         # out — they confuse the Scene/Haptic role picker).
@@ -219,18 +228,27 @@ class ControlWindow(QMainWindow):
         """
         tab = QWidget()
         vbox = QVBoxLayout(tab)
-        vbox.setSpacing(10)
-        vbox.setContentsMargins(10, 10, 10, 10)
+        # Tight inter-section spacing keeps the transport/timeline ("play
+        # panel") pulled up close under the panels, so the panels_row (which
+        # holds the bulleted haptic channel lists) gets the leftover height.
+        vbox.setSpacing(6)
+        vbox.setContentsMargins(10, 8, 10, 8)
 
         # ── Video + Output panels (read-only) ──
         # Side-by-side on the 1090×720 touchpad. Stacked at narrower
         # widths is a future polish; for now both panels share the
         # window width 50/50.
+        # The video source picker lives in the Video panel (left); the stim
+        # source picker lives in the Output panel (right, above Haptic 1) —
+        # each next to the thing it controls. The old standalone "Sources"
+        # box was folded in so the panel fits the 1920×720 touchpad.
         panels_row = QHBoxLayout()
         panels_row.setSpacing(10)
         panels_row.addWidget(self._build_video_panel(), 1)
         panels_row.addWidget(self._build_output_panel(), 1)
         vbox.addLayout(panels_row, 1)
+        # Both source combos now exist — populate them from the active scene.
+        self._refresh_source_combos()
 
         # ── Timeline + Scene volume row ──
         # Side-by-side: timeline takes ~75 %, volume the right ~25 %.
@@ -497,8 +515,22 @@ class ControlWindow(QMainWindow):
         layout.setSpacing(8)
         layout.setContentsMargins(14, 14, 14, 14)
 
+        # Video source picker — pick the 4K over a 1080p, or an aspect
+        # variant, and the live scene re-routes (one video, all monitors).
+        # Folded in from the old standalone Sources box.
+        self._setup_video_source_combo = self._make_source_combo(
+            self._on_video_source_changed
+        )
+        layout.addLayout(self._labeled_row(
+            "Video source", self._setup_video_source_combo,
+            "Plays in sync across all your selected monitors.",
+        ))
+
+        # Muted confirm line — the exact file the picker resolved to (full
+        # path on hover). Redundant with the combo text but reassures the
+        # user which variant is actually queued.
         self._video_file_label = QLabel("(no scene loaded)")
-        self._video_file_label.setStyleSheet("font-size: 14px;")
+        self._video_file_label.setStyleSheet("color: #9ba3c4; font-size: 12px;")
         self._video_file_label.setWordWrap(True)
         layout.addWidget(self._video_file_label)
 
@@ -507,6 +539,27 @@ class ControlWindow(QMainWindow):
         self._video_monitors_label.setStyleSheet("color: #9ba3c4; font-size: 13px;")
         self._video_monitors_label.setWordWrap(True)
         layout.addWidget(self._video_monitors_label)
+
+        # ── Scene Audio ──────────────────────────────────────────────
+        # The video's own embedded audio belongs on the Video side, not in
+        # Output — so the Output panel is freed up entirely for the haptic
+        # funscript channel lists (shown as bullets). Primary + an optional
+        # secondary "(also)" port mirror the same scene audio.
+        self._output_scene_port = self._make_port_label()
+        self._output_scene_source = self._make_source_label()
+        layout.addLayout(self._make_output_row(
+            self._output_scene_port, self._output_scene_source,
+        ))
+        self._output_scene_secondary_port = self._make_port_label()
+        self._output_scene_secondary_source = self._make_source_label()
+        self._output_scene_secondary_row_widgets = (
+            self._output_scene_secondary_port,
+            self._output_scene_secondary_source,
+        )
+        layout.addLayout(self._make_output_row(
+            self._output_scene_secondary_port,
+            self._output_scene_secondary_source,
+        ))
 
         layout.addStretch(1)
 
@@ -547,45 +600,66 @@ class ControlWindow(QMainWindow):
             if w is not None:
                 w.set_fullscreen(checked)
 
-    def _build_output_panel(self) -> QGroupBox:
-        """Read-only Output panel. One row per audio destination
-        (Scene / Haptic 1 / Haptic 2). Each row shows:
-          → <Role>: <Port> (set in Setup)
-              <filename> or `(silent — <reason>)`
+    def _apply_launch_fullscreen(self) -> None:
+        """Send every open video player window fullscreen after launch.
+
+        Deferred from _on_launch so mpv is embedded at the windowed size
+        first; the subsequent showFullScreen() then resizes the already-
+        embedded surface and the resize propagates to mpv correctly (the
+        manual-toggle path). Doing it at launch time instead left the video
+        cropped into the top-left with black margins until the next resize.
         """
-        box = QGroupBox("Output")
+        for w in self._player_windows:
+            if w is not None:
+                w.set_fullscreen(True)
+        # Keep the control panel on top after the players go fullscreen —
+        # otherwise the fullscreen windows bury it and the Play/transport
+        # controls are unreachable. It used to sit on top at launch; the
+        # deferred fullscreen (which runs after the launch-time raise) was
+        # covering it. Qt fullscreen is borderless-windowed (composited, not
+        # exclusive DirectX), so raising the control window doesn't minimize
+        # the players — they keep rendering behind it.
+        self.raise_()
+        self.activateWindow()
+
+    def _build_output_panel(self) -> QGroupBox:
+        """Read-only Haptic Output panel. Scene audio moved to the Video panel,
+        so this panel is dedicated to the haptics: the Stim source picker plus
+        one block per haptic destination (Haptic 1 / Haptic 2). Each block:
+          → Haptic N: <Port> (set in Setup)
+              restim:
+                • channel.funscript    (one bullet per e-stim channel)
+        """
+        box = QGroupBox("Haptic output")
         layout = QVBoxLayout(box)
         layout.setSpacing(10)
         layout.setContentsMargins(14, 14, 14, 14)
 
-        # Each row is a (port_label, source_label) pair so refresh can
-        # update the source line independently of the port assignment.
-        self._output_scene_port = self._make_port_label()
-        self._output_scene_source = self._make_source_label()
-        layout.addLayout(self._make_output_row(
-            self._output_scene_port, self._output_scene_source,
-        ))
-
-        # Optional second port for the same scene audio (drives a stim
-        # device that accepts an audio input). Hidden until configured
-        # in Setup so the panel stays uncluttered for the common case.
-        self._output_scene_secondary_port = self._make_port_label()
-        self._output_scene_secondary_source = self._make_source_label()
-        self._output_scene_secondary_row_widgets = (
-            self._output_scene_secondary_port,
-            self._output_scene_secondary_source,
+        # Stim source picker — which file drives the haptics (funscript set,
+        # an audio file, or None for silent). Sits above the haptic blocks it
+        # feeds. Folded in from the old standalone Sources box.
+        self._setup_stim_source_combo = self._make_source_combo(
+            self._on_stim_source_changed
         )
-        layout.addLayout(self._make_output_row(
-            self._output_scene_secondary_port,
-            self._output_scene_secondary_source,
+        layout.addLayout(self._labeled_row(
+            "Stim source", self._setup_stim_source_combo,
+            "Funscript or audio file that drives the haptics. "
+            "Choose None for silent stim.",
         ))
 
+        # Haptic 1 carries the full e-stim channel set (FOC_STIM scenes can run
+        # 6+ channels). Its bullet list goes in a height-capped scroll area so a
+        # long list scrolls instead of pushing the control panel past 720px.
         self._output_h1_port = self._make_port_label()
         self._output_h1_source = self._make_source_label()
-        layout.addLayout(self._make_output_row(
-            self._output_h1_port, self._output_h1_source,
-        ))
+        self._output_h1_scroll = self._make_scrollable_source(self._output_h1_source)
+        h1_block = QVBoxLayout()
+        h1_block.setSpacing(2)
+        h1_block.addWidget(self._output_h1_port)
+        h1_block.addWidget(self._output_h1_scroll)
+        layout.addLayout(h1_block)
 
+        # Haptic 2 is the prostate side-chain (≤2 channels) — short, no scroll.
         self._output_h2_port = self._make_port_label()
         self._output_h2_source = self._make_source_label()
         layout.addLayout(self._make_output_row(
@@ -594,6 +668,31 @@ class ControlWindow(QMainWindow):
 
         layout.addStretch(1)
         return box
+
+    def _make_scrollable_source(self, label: QLabel) -> QScrollArea:
+        """Wrap a haptic source label in a height-capped, top-aligned scroll
+        area. Short lists size to content (see _fit_source_scroll, called on
+        refresh); long channel lists scroll rather than growing the panel."""
+        label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        area.setStyleSheet("QScrollArea { background: transparent; }")
+        area.setWidget(label)
+        area.setFixedHeight(22)  # collapsed until refresh sizes it to content
+        return area
+
+    @staticmethod
+    def _fit_source_scroll(area: QScrollArea, label: QLabel, cap: int = 144) -> None:
+        """Size a source scroll area to its text's line count, capped so a long
+        list scrolls. Line-count based (not heightForWidth) so it's correct
+        regardless of when in the build/show cycle it runs — filenames are short
+        and don't wrap at the panel's width."""
+        text = label.text()
+        lines = text.count("\n") + 1 if text else 1
+        needed = lines * label.fontMetrics().lineSpacing() + 10
+        area.setFixedHeight(min(cap, max(22, needed)))
 
     @staticmethod
     def _make_port_label() -> QLabel:
@@ -660,7 +759,7 @@ class ControlWindow(QMainWindow):
                     aspect = "crop" if screen_idx in fill else "letterbox"
                     lines.append(
                         f"→ Screen {screen_idx + 1}  ·  "
-                        f"{geo.width()}×{geo.height()}  ·  {aspect}"
+                        f"{self._screen_res_str(s)}  ·  {aspect}"
                     )
                 else:
                     lines.append(f"→ Screen {screen_idx + 1}  (not detected)")
@@ -716,6 +815,8 @@ class ControlWindow(QMainWindow):
             self._output_h1_source.setText("(silent — no device set in Setup)")
         else:
             self._output_h1_source.setText(h1_label)
+        # Resize the scroll area to the (possibly multi-bullet) list, capped.
+        self._fit_source_scroll(self._output_h1_scroll, self._output_h1_source)
 
         # Haptic 2 — uses slot 1's aux_resolved_source / aux_silent_reason
         # populated by _maybe_launch_haptic2_aux. Pre-launch we fall back
@@ -735,16 +836,51 @@ class ControlWindow(QMainWindow):
         # funscript path that's still on slot_data for prostate
         # detection.
         if slot1_data.get("primary_dispatch") == "audio_file" and ap:
-            return os.path.basename(ap)
-        if fs is not None and getattr(fs, "main_path", None):
-            return os.path.basename(fs.main_path)
-        if fs is not None and getattr(fs, "channels", {}):
-            # Native stereostim — name from the first channel file.
-            first_path = next(iter(fs.channels.values()))
-            return os.path.basename(first_path)
+            return f"audio player · {os.path.basename(ap)}"
+        if fs is not None:
+            # MIRROR load_stim_channels: Haptic 1 is e-stim, so restim synths
+            # the NATIVE e-stim channels (alpha/beta + carriers) — NOT the
+            # motion/stroke `main` track (mechanical haptics, unsupported here).
+            # List exactly the channel files restim plays. The old code showed
+            # `main_path` (motion.funscript) first, mislabeling every e-stim
+            # scene as if it played motion.
+            estim = self._estim_channel_files(fs, prostate=False)
+            if estim:
+                return self._bulleted_sources("restim:", estim)
+            if getattr(fs, "main_path", None):
+                # ONLY a motion/stroke track exists — no e-stim channels for
+                # this scene. Flag it rather than presenting motion as e-stim.
+                return f"⚠ no e-stim channels (motion only: {os.path.basename(fs.main_path)})"
         if ap:
-            return os.path.basename(ap)
+            return f"audio player · {os.path.basename(ap)}"
         return "(no source loaded)"
+
+    @staticmethod
+    def _estim_channel_files(fs, *, prostate: bool) -> list[str]:
+        """Basenames of the e-stim channel funscripts restim plays for this
+        set — the main e-stim channels, or the `-prostate` side-chain when
+        prostate=True. Sorted, alpha/beta first so the list reads naturally.
+        Empty when the set has no matching e-stim channels."""
+        chans = getattr(fs, "channels", {}) or {}
+        if prostate:
+            keys = [k for k in chans if k.endswith("-prostate")]
+        else:
+            keys = [k for k in chans if not k.endswith("-prostate")]
+
+        def _rank(k: str) -> tuple[int, str]:
+            order = {"alpha": 0, "beta": 1, "alpha-prostate": 0, "beta-prostate": 1}
+            return (order.get(k, 2), k)
+
+        return [os.path.basename(chans[k]) for k in sorted(keys, key=_rank)]
+
+    @staticmethod
+    def _bulleted_sources(header: str, files: list[str]) -> str:
+        """Header line + one bullet per file, for the haptic source labels.
+        The source QLabel has word-wrap on and renders the embedded newlines;
+        the leading spaces indent each bullet under the header so a multi-
+        channel restim set reads as a tidy list rather than a comma run-on."""
+        bullets = "\n".join(f"   • {f}" for f in files)
+        return f"{header}\n{bullets}" if files else header
 
     def _h2_source_label(self, slot1_data: dict) -> str:
         """Render Haptic 2's resolved-or-silent state for the Output
@@ -757,13 +893,21 @@ class ControlWindow(QMainWindow):
             return "(silent — no device set in Setup)"
         if h2_device == self._prefs.haptic1_audio_device:
             return "(silent — same device as Haptic 1)"
-        resolved = slot1_data.get("aux_resolved_source")
         silent_reason = slot1_data.get("aux_silent_reason")
         if silent_reason:
             return f"(silent — {silent_reason})"
+        resolved = slot1_data.get("aux_resolved_source")
         if resolved:
             return resolved.get("label", "(resolved)")
-        # Pre-launch: nothing has resolved yet.
+        # Pre-launch: list the prostate e-stim files Haptic 2 will play, if the
+        # scene ships a `-prostate` side-chain (alpha-prostate, …). H2 is e-stim
+        # prostate — it only ever plays the prostate-specific channels (or
+        # mirrors H1), never the motion track.
+        fs = slot1_data.get("funscript_set")
+        if fs is not None:
+            prostate = self._estim_channel_files(fs, prostate=True)
+            if prostate:
+                return self._bulleted_sources("restim prostate:", prostate)
         if slot1_data.get("funscript_set") or slot1_data.get("audio_path"):
             return "(resolves at launch)"
         return "(no source loaded)"
@@ -834,12 +978,12 @@ class ControlWindow(QMainWindow):
         """
         container = QWidget()
         outer = QVBoxLayout(container)
-        outer.setContentsMargins(20, 16, 20, 16)
+        outer.setContentsMargins(20, 12, 20, 12)
         outer.setSpacing(10)
 
-        title = QLabel("Setup")
-        tf = title.font(); tf.setPointSize(18); tf.setBold(True); title.setFont(tf)
-        outer.addWidget(title)
+        # No in-page "Setup" title — the tab label already says it, and the
+        # ~35px it cost pushed the two columns into a scrollbar on the
+        # 1920×720 control screen. Dropping it lets the content fit unscrolled.
 
         # Save-status line (shared across all columns)
         self._setup_status = QLabel("")
@@ -989,6 +1133,19 @@ class ControlWindow(QMainWindow):
         self._setup_scene_secondary_combo.currentIndexChanged.connect(self._on_setup_changed)
         self._setup_haptic1_combo.currentIndexChanged.connect(self._on_setup_changed)
         self._setup_haptic2_combo.currentIndexChanged.connect(self._on_setup_changed)
+        # `activated` fires only on a USER pick (not programmatic restore/rebuild),
+        # and after currentIndexChanged has persisted the new device pref — so the
+        # live scene re-routes with the saved prefs. This is what makes choosing a
+        # device, or clearing one back to "— not set —", actually apply now
+        # instead of silently waiting for the next scene load (#3).
+        self._setup_scene_combo.activated.connect(self._reload_current_scene)
+        self._setup_scene_secondary_combo.activated.connect(self._reload_current_scene)
+        self._setup_haptic1_combo.activated.connect(self._reload_current_scene)
+        self._setup_haptic2_combo.activated.connect(self._reload_current_scene)
+        # Grey a device out of the other roles once it's assigned (block
+        # e-stim + other audio sharing one port). Re-applied on every change
+        # via _on_setup_changed.
+        self._apply_device_exclusions()
 
         rl.addLayout(self._labeled_row_with_test(
             "Scene audio", self._setup_scene_combo,
@@ -1034,6 +1191,125 @@ class ControlWindow(QMainWindow):
         root.addWidget(role_box)
         root.addStretch()
         return page
+
+    def _make_source_combo(self, on_activated) -> QComboBox:
+        """Styled per-scene source-picker combo (drop-below popup, gray rows).
+        Shared by the Video panel's video picker and the Output panel's stim
+        picker. Picking re-routes the live scene immediately (the caller's
+        `on_activated` handler calls _reload_current_scene). The standalone
+        "Sources" box this used to live in was folded into the Live Video /
+        Output panels so the control panel fits the 1920×720 touchpad."""
+        combo = QComboBox()
+        combo.setMinimumHeight(32)
+        combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        combo.setMinimumContentsLength(12)
+        combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._style_combo_dropdown(combo)
+        combo.activated.connect(on_activated)
+        return combo
+
+    def _refresh_source_combos(self) -> None:
+        """Repopulate the Sources dropdowns from the active scene + choices.
+        Programmatic (setCurrentIndex) so it never emits `activated` — no
+        reload loop. Disabled with a placeholder when no scene is loaded."""
+        if not hasattr(self, "_setup_video_source_combo"):
+            return  # Setup tab not built yet
+        entry = self._current_entry
+        choices = self._current_choices
+
+        vc = self._setup_video_source_combo
+        vc.blockSignals(True)
+        vc.clear()
+        if entry is None or not entry.videos:
+            vc.addItem("— load a scene —", None)
+            vc.setEnabled(False)
+        else:
+            vc.setEnabled(True)
+            cur_path = choices.video.path if choices and choices.video else None
+            for v in entry.videos:
+                vc.addItem(self._video_variant_label(v), v.path)
+            for i in range(vc.count()):
+                if vc.itemData(i) == cur_path:
+                    vc.setCurrentIndex(i)
+                    break
+        vc.blockSignals(False)
+
+        sc = self._setup_stim_source_combo
+        sc.blockSignals(True)
+        sc.clear()
+        if entry is None or (not entry.funscript_sets and not entry.audio_tracks):
+            sc.addItem("— load a scene —", None)
+            sc.setEnabled(False)
+        else:
+            sc.setEnabled(True)
+            sc.addItem("None (silent stim)", ("none", None))
+            for fset in entry.funscript_sets:
+                sc.addItem(f"{fset.base_stem}  (funscript)", ("fs", fset.base_stem))
+            for a in entry.audio_tracks:
+                sc.addItem(f"{a.filename}  (audio)", ("audio", a.path))
+            # Reflect the current dispatch: a picked audio file wins, else the
+            # funscript set, else None.
+            sel = ("none", None)
+            if choices and choices.audio is not None:
+                sel = ("audio", choices.audio.path)
+            elif choices and choices.funscript_set is not None:
+                sel = ("fs", choices.funscript_set.base_stem)
+            for i in range(sc.count()):
+                if sc.itemData(i) == sel:
+                    sc.setCurrentIndex(i)
+                    break
+        sc.blockSignals(False)
+
+    @staticmethod
+    def _video_variant_label(v) -> str:
+        """Compact label for a video variant: filename + a tier hint."""
+        bits = []
+        if v.is_upscaled:
+            ups = v.tags & {"iris", "chf", "topaz", "rhea", "proteus", "nyx"}
+            bits.append(f"upscaled: {', '.join(sorted(ups))}" if ups else "upscaled")
+        if v.is_aspect_variant:
+            bits.append("aspect variant")
+        if not bits:
+            bits.append("original")
+        return f"{v.filename}  ({', '.join(bits)})"
+
+    def _on_video_source_changed(self) -> None:
+        """User picked a different video variant → re-route the live scene."""
+        if self._current_entry is None or self._current_choices is None:
+            return
+        path = self._setup_video_source_combo.currentData()
+        new_video = next((v for v in self._current_entry.videos if v.path == path), None)
+        if new_video is None:
+            return
+        from dataclasses import replace  # noqa: PLC0415
+        self._current_choices = replace(self._current_choices, video=new_video)
+        self._reload_current_scene()
+
+    def _on_stim_source_changed(self) -> None:
+        """User picked a stim source (funscript / audio file / None) → set the
+        matching choice fields and re-route. Maps onto the existing dispatch:
+        a set audio file plays as the stim audio; a set funscript_set synths;
+        both None = silent stim."""
+        if self._current_entry is None or self._current_choices is None:
+            return
+        data = self._setup_stim_source_combo.currentData()
+        if not data:
+            return
+        kind, key = data
+        from dataclasses import replace  # noqa: PLC0415
+        if kind == "audio":
+            audio = next((a for a in self._current_entry.audio_tracks if a.path == key), None)
+            self._current_choices = replace(self._current_choices, audio=audio, funscript_set=None)
+        elif kind == "fs":
+            fset = next((f for f in self._current_entry.funscript_sets if f.base_stem == key), None)
+            self._current_choices = replace(self._current_choices, audio=None, funscript_set=fset)
+        else:  # none
+            self._current_choices = replace(self._current_choices, audio=None, funscript_set=None)
+        self._reload_current_scene()
 
     def _build_setup_content_pref_box(self) -> QGroupBox:
         """Content preference — picks the form when a scene ships both.
@@ -1242,7 +1518,7 @@ class ControlWindow(QMainWindow):
         for idx, s in enumerate(self._screens):
             geo = s.geometry()
             self._setup_control_screen_combo.addItem(
-                f"Screen {idx + 1}  —  {geo.width()}×{geo.height()}  ({s.name()})",
+                f"Screen {idx + 1}  —  {self._screen_res_str(s)}  ({s.name()})",
                 idx,
             )
         for i in range(self._setup_control_screen_combo.count()):
@@ -1283,7 +1559,7 @@ class ControlWindow(QMainWindow):
             row.setSpacing(8)
 
             cb = QCheckBox(
-                f"Screen {idx + 1}  —  {geo.width()}×{geo.height()}  ({s.name()})"
+                f"Screen {idx + 1}  —  {self._screen_res_str(s)}  ({s.name()})"
             )
             cb.setChecked(idx in self._prefs.playback_screen_indices)
             cb.toggled.connect(self._on_playback_screens_changed)
@@ -1556,6 +1832,70 @@ class ControlWindow(QMainWindow):
         )
         QTimer.singleShot(3000, lambda: self._setup_status.setText(""))
 
+    # Full combo stylesheet. Setting it on the QComboBox itself (not just the
+    # popup view) forces Qt's NON-NATIVE popup, which (a) drops DOWN below the
+    # box like a normal dropdown instead of overlapping it with the current item,
+    # and (b) lets us colour every row the same mid-grey with a soft grey-blue
+    # selection — replacing the default alternating near-black rows + harsh red
+    # highlight the user couldn't read. A custom CSS down-arrow keeps the closed
+    # box looking right (a bare QComboBox stylesheet otherwise drops the arrow).
+    _COMBO_QSS = (
+        "QComboBox {"
+        " background-color: #1a1d27; border: 1px solid #3a3f55;"
+        " border-radius: 4px; padding: 4px 10px; color: #e6e6e6; }"
+        "QComboBox:hover { border-color: #4a5275; }"
+        "QComboBox::drop-down { border: none; width: 24px; }"
+        "QComboBox::down-arrow {"
+        " image: none; width: 0; height: 0; margin-right: 9px;"
+        " border-left: 5px solid transparent; border-right: 5px solid transparent;"
+        " border-top: 6px solid #9ba3c4; }"
+        "QComboBox QAbstractItemView {"
+        " background-color: #232733; border: 1px solid #3a3f55;"
+        " color: #e6e6e6; outline: 0; padding: 2px; }"
+        "QComboBox QAbstractItemView::item {"
+        " min-height: 30px; padding: 5px 12px; border-radius: 3px; }"
+        "QComboBox QAbstractItemView::item:selected,"
+        "QComboBox QAbstractItemView::item:hover {"
+        " background-color: #3a4163; color: #ffffff; }"
+    )
+
+    def _style_combo_dropdown(self, combo: QComboBox) -> None:
+        """Apply the readable, drop-below combo style (see _COMBO_QSS)."""
+        combo.setStyleSheet(self._COMBO_QSS)
+        view = combo.view()
+        if view is not None:
+            view.setAlternatingRowColors(False)
+
+    def _apply_device_exclusions(self) -> None:
+        """Block routing collisions: a physical device already assigned to one
+        audio role is disabled (greyed, unselectable) in the OTHER roles'
+        dropdowns — so e-stim and scene/other audio can't accidentally share a
+        port. '— not set —' (data '') and each combo's OWN current pick stay
+        enabled. Re-run after any device change so the greying tracks live."""
+        combos = [
+            getattr(self, "_setup_scene_combo", None),
+            getattr(self, "_setup_scene_secondary_combo", None),
+            getattr(self, "_setup_haptic1_combo", None),
+            getattr(self, "_setup_haptic2_combo", None),
+        ]
+        combos = [c for c in combos if c is not None]
+        # device id -> the combo that currently owns it
+        owner: dict[str, QComboBox] = {}
+        for c in combos:
+            dev = c.currentData()
+            if dev:  # skip "" (not set) — sharing 'none' is fine
+                owner[dev] = c
+        for c in combos:
+            model = c.model()
+            for i in range(c.count()):
+                item = model.item(i) if hasattr(model, "item") else None
+                if item is None:
+                    continue
+                dev = c.itemData(i)
+                # Enabled unless this device is taken by a DIFFERENT combo.
+                taken_by = owner.get(dev)
+                item.setEnabled((not dev) or taken_by is None or taken_by is c)
+
     def _build_role_combo(self, *, saved_value: str) -> QComboBox:
         combo = QComboBox()
         combo.setMinimumHeight(32)
@@ -1572,6 +1912,7 @@ class ControlWindow(QMainWindow):
         combo.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
+        self._style_combo_dropdown(combo)
         combo.addItem("— not set —", "")
         for name, desc in self._audio_devices:
             combo.addItem(desc, name)
@@ -1675,6 +2016,21 @@ class ControlWindow(QMainWindow):
         )
         QTimer.singleShot(2000, lambda: self._setup_status.setText(""))
 
+    def _reload_current_scene(self) -> None:
+        """Re-apply the currently-loaded scene so a Setup change (audio device
+        role, clearing to None/off, a source pick) takes effect immediately
+        instead of only on the next Library click. Re-launching the players
+        re-reads the device prefs + slot media, so the routing updates. No-op
+        when nothing is loaded yet (configuring Setup before playing)."""
+        if self._current_entry is None or self._current_choices is None:
+            return
+        DebugLog.record("setup.reload_current_scene", scene=self._current_entry.name)
+        # Stay on the current tab — a re-route from Setup/Sources must not yank
+        # the user over to Live mid-configuration.
+        self._apply_scene_choices(
+            self._current_entry, self._current_choices, switch_to_live=False,
+        )
+
     def _on_setup_changed(self) -> None:
         self._prefs.scene_audio_device = self._setup_scene_combo.currentData() or ""
         self._prefs.scene_audio_secondary_device = (
@@ -1705,6 +2061,10 @@ class ControlWindow(QMainWindow):
         # Calibrate buttons depend on haptic1/haptic2 device prefs being
         # set; flip enable state if the user just (un)configured a port.
         self._update_calibrate_buttons_enabled()
+        # Re-grey the just-assigned device out of the other roles (and free up
+        # any device the user just cleared). Haptic outputs are e-stim only —
+        # they never carry scene audio — so two roles must not share a port.
+        self._apply_device_exclusions()
 
     def open_path(self, path: str) -> None:
         """Open a file passed on the command line / via file association.
@@ -1891,6 +2251,8 @@ class ControlWindow(QMainWindow):
         self,
         entry: SceneCatalogEntry,
         choices: SelectionChoices,
+        *,
+        switch_to_live: bool = True,
     ) -> None:
         """Populate Live slots from a scene + the user's picker choices,
         then switch to Live and launch.
@@ -1920,6 +2282,13 @@ class ControlWindow(QMainWindow):
             has_video=bool(choices.video),
             has_audio=bool(choices.audio),
         )
+
+        # Remember what's playing + the exact choices, so a Setup change can
+        # re-route this same scene live (see _reload_current_scene). Refresh the
+        # Setup Sources dropdowns to reflect the now-active scene + selection.
+        self._current_entry = entry
+        self._current_choices = choices
+        self._refresh_source_combos()
 
         slot1 = self._slot_data(0)
         slot2 = self._slot_data(1)
@@ -2101,7 +2470,10 @@ class ControlWindow(QMainWindow):
         # Live is tab index 1 (Library=0, Live=1). This used to be 0, which
         # silently dropped the user back on the card grid after they picked a
         # scene — they had to find and tap Live themselves. Land them on Live.
-        self._tabs.setCurrentWidget(self._live_tab)
+        # A re-apply from a Setup/Sources change passes switch_to_live=False so
+        # it stays on the user's current tab instead of yanking them to Live.
+        if switch_to_live:
+            self._tabs.setCurrentWidget(self._live_tab)
         DebugLog.record("library.activate.loaded", scene=entry.name)
 
     # _select_slot_monitor / _populate_monitor_combo / _apply_setup_roles_to_slots
@@ -2247,6 +2619,16 @@ class ControlWindow(QMainWindow):
     def _slot_data(self, index: int) -> dict:
         return self._slots[index]
 
+    @staticmethod
+    def _screen_res_str(s) -> str:
+        """Physical resolution of a screen as 'W×H'. QScreen.geometry() is in
+        LOGICAL (DPI-scaled) pixels — a 4K monitor at 200% Windows scaling
+        reports 1920×1080 — so multiply by devicePixelRatio to show the real
+        panel resolution the user recognizes (3840×2160)."""
+        geo = s.geometry()
+        dpr = s.devicePixelRatio()
+        return f"{round(geo.width() * dpr)}×{round(geo.height() * dpr)}"
+
     def _screen_sizes(self) -> list[tuple[int, int]]:
         return [(s.geometry().width(), s.geometry().height()) for s in self._screens]
 
@@ -2325,9 +2707,7 @@ class ControlWindow(QMainWindow):
 
     def _on_scan_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(
-            self, "Select media folder", "",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
+            self, "Select media folder", "",        )
         if not folder:
             return
         assignments = auto_assign(folder, self._screen_sizes())
@@ -2383,9 +2763,7 @@ class ControlWindow(QMainWindow):
     def _on_session_open(self) -> None:
         DebugLog.record("session.open.dialog_open")
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open session", "", _SESSION_FILTER,
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
+            self, "Open session", "", _SESSION_FILTER,        )
         DebugLog.record("session.open.dialog_closed", picked=bool(path))
         if path:
             self._load_session_from(path)
@@ -2472,9 +2850,7 @@ class ControlWindow(QMainWindow):
         DebugLog.record("session.save_as.dialog_open")
         path, _ = QFileDialog.getSaveFileName(
             self, "Save session as", self._default_session_save_path(),
-            _SESSION_FILTER,
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
+            _SESSION_FILTER,        )
         DebugLog.record("session.save_as.dialog_closed", picked=bool(path))
         if path:
             if not path.endswith(".forgeplayer-session"):
@@ -3669,10 +4045,15 @@ class ControlWindow(QMainWindow):
 
             pw = PlayerWindow(i, self._engine)
             pw.close_all_requested.connect(self._close_players)
-            pw.place_on_screen(
-                screen,
-                fullscreen=self._fullscreen_toggle.isChecked(),
-            )
+            # Always place WINDOWED at launch — even when "Fullscreen players"
+            # is on. Going fullscreen here embeds mpv at the windowed size
+            # (Windows applies the showFullScreen resize asynchronously, after
+            # this returns), so mpv computes its viewport + crop/panscan for the
+            # smaller rect and the video paints top-left with black on the
+            # bottom/right. Fullscreen is applied AFTER mpv is embedded, via the
+            # deferred _apply_launch_fullscreen below — the same code path the
+            # manual toggle uses, which always sizes correctly.
+            pw.place_on_screen(screen, fullscreen=False)
             pw.show()
             pw.raise_()
             self._player_windows[i] = pw
@@ -3682,6 +4063,14 @@ class ControlWindow(QMainWindow):
             self._engine.init_player(
                 i, pw.native_wid(), audio_device, fill=fill,
                 crop_align=self._prefs.crop_align,
+                # Double-click the video = Escape (tear all players down). mpv
+                # owns the video surface's input, so this binds inside mpv;
+                # emitting the signal queues the teardown onto the GUI thread.
+                on_double_click=pw.close_all_requested.emit,
+                # Single-click the video = toggle the on-screen control bar
+                # (hidden by default). Same mpv-owns-the-surface reason; the
+                # signal queues the toggle onto the GUI thread.
+                on_single_click=pw.toggle_controls_requested.emit,
             )
             DebugLog.record(
                 "player.fill_mode",
@@ -3729,6 +4118,12 @@ class ControlWindow(QMainWindow):
         if launched:
             self._timer.start()
             self.raise_()
+            # Apply fullscreen now that mpv is embedded + the files are loaded
+            # — never at place_on_screen time (see the windowed-launch comment
+            # above). Deferred a beat so the windowed geometry settles first,
+            # then the fullscreen resize propagates cleanly to mpv's surface.
+            if self._fullscreen_toggle.isChecked():
+                QTimer.singleShot(180, self._apply_launch_fullscreen)
         # Re-render the Live panels so the Output panel picks up
         # aux_resolved_source / aux_silent_reason set during launch.
         self._refresh_live_panels()

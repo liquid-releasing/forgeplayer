@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 import mpv
 
@@ -55,6 +55,8 @@ class SyncEngine:
         *,
         fill: bool = False,
         crop_align: str = "center",
+        on_double_click: Optional[Callable[[], None]] = None,
+        on_single_click: Optional[Callable[[], None]] = None,
     ) -> mpv.MPV:
         """Create an mpv instance embedded in *wid* (native window handle).
 
@@ -110,6 +112,34 @@ class SyncEngine:
                 if align_y:
                     kwargs["video_align_y"] = str(align_y)
             p = mpv.MPV(**kwargs)
+            # Double-click the video surface = the Escape teardown. mpv owns the
+            # video's native child window, so a Qt mouseDoubleClickEvent on the
+            # PlayerWindow never sees clicks over the video — bind it at the mpv
+            # level instead. on_key_press fires once on the press transition.
+            # The callback runs on mpv's event thread; it just emits a Qt signal
+            # (queued to the GUI thread), so it's safe to tear down from here.
+            if on_double_click is not None:
+                try:
+                    @p.on_key_press("MBTN_LEFT_DBL")
+                    def _on_video_double_click() -> None:
+                        on_double_click()
+                except Exception:
+                    # python-mpv without on_key_press — fall back to the
+                    # Qt-level handler (control bar / chrome only).
+                    pass
+            # Single-click the video surface = toggle the on-screen control
+            # bar (hidden by default). Same rationale as the double-click
+            # binding: mpv owns the video child window, so Qt mousePressEvent
+            # never sees clicks over the video. A double-click fires MBTN_LEFT
+            # then MBTN_LEFT_DBL — the stray single-toggle is invisible because
+            # the double-click tears the window down immediately after.
+            if on_single_click is not None:
+                try:
+                    @p.on_key_press("MBTN_LEFT")
+                    def _on_video_single_click() -> None:
+                        on_single_click()
+                except Exception:
+                    pass
             self._players[slot] = p
             return p
 

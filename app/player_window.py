@@ -43,6 +43,10 @@ class PlayerWindow(QWidget):
     """
 
     close_all_requested = Signal()
+    # Emitted from the mpv event thread (single-click on the video surface);
+    # queued to the GUI thread where it flips the control bar. A plain method
+    # call from mpv's thread would touch Qt widgets off the GUI thread.
+    toggle_controls_requested = Signal()
 
     def __init__(self, slot_index: int, engine: SyncEngine) -> None:
         super().__init__()
@@ -71,7 +75,14 @@ class PlayerWindow(QWidget):
         root.addWidget(self._video_widget, stretch=1)
 
         # ── Control bar ───────────────────────────────────────────────────────
-        root.addWidget(self._build_ctrl())
+        # Hidden by default — the displays read as clean video walls. A single
+        # click anywhere in the window (via the mpv MBTN_LEFT binding for the
+        # video surface, or mousePressEvent for the letterbox chrome) toggles
+        # it; clicking again hides it. Double-click still closes all players.
+        self._ctrl_bar = self._build_ctrl()
+        self._ctrl_bar.setVisible(False)
+        root.addWidget(self._ctrl_bar)
+        self.toggle_controls_requested.connect(self._toggle_controls)
 
         # ── Poll timer ────────────────────────────────────────────────────────
         self._timer = QTimer(self)
@@ -187,6 +198,37 @@ class PlayerWindow(QWidget):
             self._on_play_pause()
         else:
             super().keyPressEvent(event)
+
+    def _toggle_controls(self) -> None:
+        """Flip the on-screen control bar. Runs on the GUI thread (driven by
+        toggle_controls_requested for video-surface clicks, or directly for
+        chrome clicks)."""
+        self._ctrl_bar.setVisible(not self._ctrl_bar.isVisible())
+        DebugLog.record(
+            "player.toggle_controls",
+            slot=self.slot_index,
+            visible=self._ctrl_bar.isVisible(),
+        )
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        """Single-click on the non-mpv chrome (letterbox bars, window
+        background) toggles the control bar — mirrors the mpv MBTN_LEFT
+        binding that covers clicks over the video surface itself. Clicks on
+        the control bar's own buttons/slider are consumed by those child
+        widgets and never reach here, so interacting with the bar doesn't
+        hide it."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._toggle_controls()
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        """Double-click = Escape — tear all players down together. mpv owns the
+        video surface (handled by an mpv MBTN_LEFT_DBL binding in
+        SyncEngine.init_player); this Qt handler covers double-clicks on the
+        non-mpv chrome (control bar, window frame, letterbox edges)."""
+        DebugLog.record("mouse.double_click", slot=self.slot_index)
+        self.close_all_requested.emit()
+        event.accept()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         """User clicked the window's X — route through the group teardown so
