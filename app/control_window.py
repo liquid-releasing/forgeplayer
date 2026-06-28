@@ -21,7 +21,9 @@ from app.sync_engine import SyncEngine
 from app.session import Session, SlotConfig
 from app.folder_scanner import auto_assign
 from app.library_panel import LibraryPanel
-from app.library.catalog import SceneCatalogEntry
+from app.library.catalog import (
+    SceneCatalogEntry, VideoVariant, AudioVariant, FunscriptSet,
+)
 from app.select_picker import SelectPicker, SelectionChoices
 from app.library.pins import has_pin, load_pin, resolve_pin, save_pin
 from app.debug_log import DebugLog
@@ -83,10 +85,12 @@ class ControlWindow(QMainWindow):
         self.setWindowTitle("ForgePlayer")
         self.setMinimumWidth(980)
         # Initial size fits the 1920×720 touchpad (Screen 3) — the hard
-        # constraint the Live layout is built around. Opening at 700 tall
-        # leaves the whole control panel on-screen there; on larger
-        # displays the user can drag to resize. We don't auto-maximize.
-        self.resize(1280, 700)
+        # constraint the Live layout is built around. The 720 budget must also
+        # cover this window's OWN title bar (~30px) AND the Windows taskbar
+        # (~48px), so the client area can be at most ~640px or the bottom
+        # action row falls behind the taskbar. Open at 632 to stay fully
+        # on-screen there; on larger displays the user can drag to resize.
+        self.resize(1280, 632)
 
         self._engine = SyncEngine()
         self._player_windows: list[PlayerWindow | None] = [None] * _NUM_SLOTS
@@ -281,7 +285,7 @@ class ControlWindow(QMainWindow):
         self._seek_bar = ClickableSlider(Qt.Orientation.Horizontal)
         self._seek_bar.setRange(0, 10000)
         # Tall enough for a thumb hit on a touchscreen.
-        self._seek_bar.setMinimumHeight(48)
+        self._seek_bar.setMinimumHeight(42)
         self._seek_bar.sliderPressed.connect(self._on_seek_press)
         self._seek_bar.sliderReleased.connect(self._on_seek_release)
         timeline_col.addWidget(self._seek_bar)
@@ -299,7 +303,7 @@ class ControlWindow(QMainWindow):
         self._scene_volume_slider = ClickableSlider(Qt.Orientation.Horizontal)
         self._scene_volume_slider.setRange(0, 100)
         self._scene_volume_slider.setValue(100)
-        self._scene_volume_slider.setMinimumHeight(48)
+        self._scene_volume_slider.setMinimumHeight(42)
         self._scene_volume_slider.valueChanged.connect(self._on_scene_volume_changed)
         volume_col.addWidget(self._scene_volume_slider)
 
@@ -317,7 +321,7 @@ class ControlWindow(QMainWindow):
         transport.addStretch()
 
         self._btn_prev_chapter = QPushButton("⏮  Prev")
-        self._btn_prev_chapter.setFixedHeight(52)
+        self._btn_prev_chapter.setFixedHeight(46)
         self._btn_prev_chapter.setMinimumWidth(80)
         self._btn_prev_chapter.setStyleSheet("font-size: 13px;")
         self._btn_prev_chapter.setToolTip(
@@ -334,7 +338,7 @@ class ControlWindow(QMainWindow):
             ("−5s",  lambda: self._skip(-5)),
         ]:
             b = QPushButton(label)
-            b.setFixedHeight(52)
+            b.setFixedHeight(46)
             b.setMinimumWidth(64)
             b.setStyleSheet("font-size: 13px;")
             b.clicked.connect(fn)
@@ -342,7 +346,7 @@ class ControlWindow(QMainWindow):
 
         self._btn_play = QPushButton("▶  Play")
         self._btn_play.setFixedWidth(140)
-        self._btn_play.setFixedHeight(52)
+        self._btn_play.setFixedHeight(46)
         self._btn_play.setStyleSheet(
             "QPushButton { background: #ff4b4b; color: white; font-weight: bold; "
             "font-size: 16px; border-radius: 6px; }"
@@ -358,7 +362,7 @@ class ControlWindow(QMainWindow):
         transport.addWidget(self._btn_play)
 
         btn_stop = QPushButton("⏹  Stop")
-        btn_stop.setFixedHeight(52)
+        btn_stop.setFixedHeight(46)
         btn_stop.setMinimumWidth(80)
         btn_stop.setStyleSheet("font-size: 13px;")
         btn_stop.clicked.connect(self._on_stop)
@@ -370,14 +374,14 @@ class ControlWindow(QMainWindow):
             ("+30s", lambda: self._skip(30)),
         ]:
             b = QPushButton(label)
-            b.setFixedHeight(52)
+            b.setFixedHeight(46)
             b.setMinimumWidth(64)
             b.setStyleSheet("font-size: 13px;")
             b.clicked.connect(fn)
             transport.addWidget(b)
 
         self._btn_next_chapter = QPushButton("Next  ⏭")
-        self._btn_next_chapter.setFixedHeight(52)
+        self._btn_next_chapter.setFixedHeight(46)
         self._btn_next_chapter.setMinimumWidth(80)
         self._btn_next_chapter.setStyleSheet("font-size: 13px;")
         self._btn_next_chapter.setToolTip(
@@ -421,7 +425,7 @@ class ControlWindow(QMainWindow):
         )
 
         self._btn_calibrate_h1 = QPushButton("Calibrate H1")
-        self._btn_calibrate_h1.setFixedHeight(44)
+        self._btn_calibrate_h1.setFixedHeight(40)
         self._btn_calibrate_h1.setMinimumWidth(120)
         self._btn_calibrate_h1.setCheckable(True)
         self._btn_calibrate_h1.setStyleSheet(_calib_style)
@@ -429,7 +433,7 @@ class ControlWindow(QMainWindow):
         calib_row.addWidget(self._btn_calibrate_h1)
 
         self._btn_calibrate_h2 = QPushButton("Calibrate H2")
-        self._btn_calibrate_h2.setFixedHeight(44)
+        self._btn_calibrate_h2.setFixedHeight(40)
         self._btn_calibrate_h2.setMinimumWidth(120)
         self._btn_calibrate_h2.setCheckable(True)
         self._btn_calibrate_h2.setStyleSheet(_calib_style)
@@ -471,14 +475,14 @@ class ControlWindow(QMainWindow):
         action_row.addStretch()
 
         btn_close_players = QPushButton("Close Players")
-        btn_close_players.setFixedHeight(56)
+        btn_close_players.setFixedHeight(48)
         btn_close_players.setMinimumWidth(140)
         btn_close_players.setStyleSheet("font-size: 14px;")
         btn_close_players.clicked.connect(self._close_players)
         action_row.addWidget(btn_close_players)
 
         btn_launch = QPushButton("Launch Players")
-        btn_launch.setFixedHeight(56)
+        btn_launch.setFixedHeight(48)
         btn_launch.setFixedWidth(200)
         btn_launch.setStyleSheet(
             "background: #2d6a4f; color: white; font-weight: bold; "
@@ -521,8 +525,8 @@ class ControlWindow(QMainWindow):
         self._setup_video_source_combo = self._make_source_combo(
             self._on_video_source_changed
         )
-        layout.addLayout(self._labeled_row(
-            "Video source", self._setup_video_source_combo,
+        layout.addLayout(self._labeled_row_with_browse(
+            "Video source", self._setup_video_source_combo, self._on_browse_video,
             "Plays in sync across all your selected monitors.",
         ))
 
@@ -641,8 +645,8 @@ class ControlWindow(QMainWindow):
         self._setup_stim_source_combo = self._make_source_combo(
             self._on_stim_source_changed
         )
-        layout.addLayout(self._labeled_row(
-            "Stim source", self._setup_stim_source_combo,
+        layout.addLayout(self._labeled_row_with_browse(
+            "Stim source", self._setup_stim_source_combo, self._on_browse_stim,
             "Funscript or audio file that drives the haptics. "
             "Choose None for silent stim.",
         ))
@@ -684,7 +688,7 @@ class ControlWindow(QMainWindow):
         return area
 
     @staticmethod
-    def _fit_source_scroll(area: QScrollArea, label: QLabel, cap: int = 144) -> None:
+    def _fit_source_scroll(area: QScrollArea, label: QLabel, cap: int = 112) -> None:
         """Size a source scroll area to its text's line count, capped so a long
         list scrolls. Line-count based (not heightForWidth) so it's correct
         regardless of when in the build/show cycle it runs — filenames are short
@@ -697,16 +701,20 @@ class ControlWindow(QMainWindow):
     @staticmethod
     def _make_port_label() -> QLabel:
         lbl = QLabel("")
-        lbl.setStyleSheet("font-size: 13px; font-weight: bold;")
+        lbl.setStyleSheet("font-size: 12px; font-weight: bold;")
         lbl.setWordWrap(True)
         return lbl
 
     @staticmethod
     def _make_source_label() -> QLabel:
+        # Compact (11px) so a multi-bullet funscript channel list stays short
+        # enough to keep the whole control panel visible on the 1920×720
+        # display. Tight line-height comes for free from the smaller font
+        # (_fit_source_scroll sizes off fontMetrics).
         lbl = QLabel("")
-        lbl.setStyleSheet("color: #9ba3c4; font-size: 12px;")
+        lbl.setStyleSheet("color: #9ba3c4; font-size: 11px;")
         lbl.setWordWrap(True)
-        lbl.setContentsMargins(16, 0, 0, 0)
+        lbl.setContentsMargins(14, 0, 0, 0)
         return lbl
 
     @staticmethod
@@ -1211,6 +1219,127 @@ class ControlWindow(QMainWindow):
         self._style_combo_dropdown(combo)
         combo.activated.connect(on_activated)
         return combo
+
+    def _labeled_row_with_browse(
+        self, label_text: str, combo: QComboBox, on_browse, help_text: str = "",
+    ) -> QVBoxLayout:
+        """Source-picker row: bold label, then [combo | Browse…], then help.
+        Browse opens the native picker at the current scene folder so the user
+        can grab a file the scanner didn't surface (a 4K alongside the scene,
+        an alternate audio/funscript) without re-importing from the Library."""
+        row = QVBoxLayout()
+        row.setSpacing(2)
+        label = QLabel(label_text)
+        lf = label.font(); lf.setBold(True); label.setFont(lf)
+        row.addWidget(label)
+        h = QHBoxLayout()
+        h.setSpacing(6)
+        h.addWidget(combo, 1)
+        btn = QPushButton("Browse…")
+        btn.setMinimumHeight(32)
+        btn.setFixedWidth(86)
+        btn.clicked.connect(on_browse)
+        h.addWidget(btn)
+        row.addLayout(h)
+        if help_text:
+            helper = QLabel(help_text)
+            helper.setStyleSheet("color: #6b7280; font-size: 11px;")
+            helper.setWordWrap(True)
+            row.addWidget(helper)
+        return row
+
+    def _browse_start_dir(self) -> str:
+        """Folder the source-Browse dialogs open at — the active scene's folder
+        first (where its variants live), else the current video's folder, else
+        home."""
+        entry = self._current_entry
+        if entry is not None and getattr(entry, "folder_path", ""):
+            return entry.folder_path
+        ch = self._current_choices
+        if ch is not None and ch.video is not None:
+            return os.path.dirname(ch.video.path)
+        return os.path.expanduser("~")
+
+    def _on_browse_video(self) -> None:
+        """Pick any video file as the scene's video → route the live scene to
+        it (one video, all monitors). Added to the scene so it shows in the
+        Video source combo too."""
+        if self._current_entry is None or self._current_choices is None:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a video", self._browse_start_dir(),
+            "Video files (*.mp4 *.mkv *.mov *.avi *.webm *.m4v *.ts);;All files (*)",
+        )
+        if not path:
+            return
+        path = os.path.normpath(path)
+        var = next(
+            (v for v in self._current_entry.videos
+             if os.path.normpath(v.path) == path),
+            None,
+        )
+        if var is None:
+            var = VideoVariant(path=path)
+            self._current_entry.videos.append(var)
+        from dataclasses import replace  # noqa: PLC0415
+        self._current_choices = replace(self._current_choices, video=var)
+        self._reload_current_scene()
+
+    def _on_browse_stim(self) -> None:
+        """Pick any funscript or audio file as the stim source → route the
+        haptics to it. A `.funscript` is classified into a full channel set
+        (scanning its folder); anything else plays as a stim audio file."""
+        if self._current_entry is None or self._current_choices is None:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a stim source", self._browse_start_dir(),
+            "Stim sources (*.funscript *.wav *.mp3 *.flac *.m4a *.ogg);;"
+            "All files (*)",
+        )
+        if not path:
+            return
+        path = os.path.normpath(path)
+        from dataclasses import replace  # noqa: PLC0415
+        if path.lower().endswith(".funscript"):
+            fset = self._funscript_set_from_path(path)
+            if fset is None:
+                return
+            if not any(f.base_stem == fset.base_stem
+                       for f in self._current_entry.funscript_sets):
+                self._current_entry.funscript_sets.append(fset)
+            self._current_choices = replace(
+                self._current_choices, funscript_set=fset, audio=None,
+            )
+        else:
+            track = next(
+                (a for a in self._current_entry.audio_tracks
+                 if os.path.normpath(a.path) == path),
+                None,
+            )
+            if track is None:
+                track = AudioVariant(path=path)
+                self._current_entry.audio_tracks.append(track)
+            self._current_choices = replace(
+                self._current_choices, audio=track, funscript_set=None,
+            )
+        self._reload_current_scene()
+
+    @staticmethod
+    def _funscript_set_from_path(path: str) -> FunscriptSet | None:
+        """Build a FunscriptSet for a browsed `.funscript` by scanning its
+        folder — so its channel siblings (alpha/beta/pulse_* / -prostate) come
+        along, not just the bare main track. Falls back to the folder's first
+        set, then None if the folder has no funscripts."""
+        from app.library.scanner import scan_scene_folder  # noqa: PLC0415
+        entry = scan_scene_folder(os.path.dirname(path))
+        if entry is None or not entry.funscript_sets:
+            return None
+        npath = os.path.normpath(path)
+        for s in entry.funscript_sets:
+            members = [s.main_path, *s.channels.values()]
+            if any(p and os.path.normpath(p) == npath for p in members):
+                return s
+        return entry.funscript_sets[0]
 
     def _refresh_source_combos(self) -> None:
         """Repopulate the Sources dropdowns from the active scene + choices.
@@ -1840,31 +1969,87 @@ class ControlWindow(QMainWindow):
     # highlight the user couldn't read. A custom CSS down-arrow keeps the closed
     # box looking right (a bare QComboBox stylesheet otherwise drops the arrow).
     _COMBO_QSS = (
+        # Closed box matches the popup-row gray (#232733) so the control reads
+        # as one cohesive piece — the old near-black (#1a1d27) closed box looked
+        # detached/"weird" against the gray dropdown it opened. Hover lightens;
+        # `:on` (popup open) + `:focus` highlight the border so the open state
+        # visibly connects to the list dropping below it.
         "QComboBox {"
-        " background-color: #1a1d27; border: 1px solid #3a3f55;"
-        " border-radius: 4px; padding: 4px 10px; color: #e6e6e6; }"
-        "QComboBox:hover { border-color: #4a5275; }"
-        "QComboBox::drop-down { border: none; width: 24px; }"
-        "QComboBox::down-arrow {"
-        " image: none; width: 0; height: 0; margin-right: 9px;"
-        " border-left: 5px solid transparent; border-right: 5px solid transparent;"
-        " border-top: 6px solid #9ba3c4; }"
-        "QComboBox QAbstractItemView {"
         " background-color: #232733; border: 1px solid #3a3f55;"
-        " color: #e6e6e6; outline: 0; padding: 2px; }"
+        " border-radius: 6px; padding: 5px 12px; color: #e6e6e6; }"
+        "QComboBox:hover { background-color: #2a2f3e; border-color: #4a5275; }"
+        "QComboBox:focus { border-color: #5663a0; }"
+        "QComboBox:on {"
+        " background-color: #2a2f3e; border-color: #5663a0;"
+        # Square the bottom corners while open so the box visually merges into
+        # the list that drops directly beneath it.
+        " border-bottom-left-radius: 0; border-bottom-right-radius: 0; }"
+        "QComboBox::drop-down {"
+        " border: none; width: 28px;"
+        " subcontrol-origin: padding; subcontrol-position: center right; }"
+        # The down-arrow itself is set in _style_combo_dropdown via a generated
+        # PNG (image: url(...)). Qt's QSS border-triangle trick renders as a
+        # tiny BOX on Windows, not a triangle — a real image is reliable.
+        "QComboBox QAbstractItemView {"
+        " background-color: #232733; border: 1px solid #5663a0;"
+        " border-top: none; color: #e6e6e6; outline: 0; padding: 2px; }"
         "QComboBox QAbstractItemView::item {"
         " min-height: 30px; padding: 5px 12px; border-radius: 3px; }"
         "QComboBox QAbstractItemView::item:selected,"
         "QComboBox QAbstractItemView::item:hover {"
         " background-color: #3a4163; color: #ffffff; }"
+        # Disabled rows (a device already routed to another role) read as muted,
+        # not invisible — they stay listed so the user sees why a pick is taken.
+        "QComboBox QAbstractItemView::item:disabled { color: #5b6178; }"
     )
 
     def _style_combo_dropdown(self, combo: QComboBox) -> None:
-        """Apply the readable, drop-below combo style (see _COMBO_QSS)."""
-        combo.setStyleSheet(self._COMBO_QSS)
+        """Apply the readable, drop-below combo style (see _COMBO_QSS) plus a
+        REAL down-arrow image. Qt's QSS border-triangle idiom renders as a box
+        on Windows, so we draw a triangle PNG once and reference it via url()."""
+        arrow = self._arrow_image_path().replace("\\", "/")
+        combo.setStyleSheet(
+            self._COMBO_QSS
+            + ("QComboBox::down-arrow {"
+               f" image: url('{arrow}'); width: 12px; height: 12px;"
+               " margin-right: 9px; }")
+        )
         view = combo.view()
         if view is not None:
             view.setAlternatingRowColors(False)
+
+    @classmethod
+    def _arrow_image_path(cls) -> str:
+        """Path to a small downward-triangle PNG for the combo drop-down arrow,
+        drawn once and cached. A real image avoids the QSS border-triangle
+        rendering as a box on Windows."""
+        cached = getattr(cls, "_ARROW_PNG_PATH", None)
+        if cached and os.path.exists(cached):
+            return cached
+        from PySide6.QtGui import QPixmap, QPainter, QPolygon, QColor, QBrush  # noqa: PLC0415
+        from PySide6.QtCore import QPoint  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+
+        size = 16
+        pm = QPixmap(size, size)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor("#c6cdf0")))
+        tw, th = 11, 6  # triangle width / height
+        cx = size // 2
+        top = (size - th) // 2
+        p.drawPolygon(QPolygon([
+            QPoint(cx - tw // 2, top),
+            QPoint(cx + tw // 2, top),
+            QPoint(cx, top + th),
+        ]))
+        p.end()
+        path = os.path.join(tempfile.gettempdir(), "forgeplayer_combo_arrow.png")
+        pm.save(path, "PNG")
+        cls._ARROW_PNG_PATH = path
+        return path
 
     def _apply_device_exclusions(self) -> None:
         """Block routing collisions: a physical device already assigned to one

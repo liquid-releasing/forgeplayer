@@ -59,12 +59,30 @@ _ACCENT          = QColor(255, 107, 48)          # ForgePlayer orange
 _AMBIGUOUS       = QColor(234, 179, 8)           # yellow-amber for "pick"
 _BADGE_BG        = QColor(56, 64, 92)
 
+# Content-type pill colors — matched to the FunscriptForge library pills so the
+# two apps read consistently (video=blue, audio=green, funscript=amber).
+_PILL_VIDEO      = QColor("#4dabf7")
+_PILL_AUDIO      = QColor("#3ed598")
+_PILL_FUNSCRIPT  = QColor("#ffb547")
 
-# Card geometry — generous for touch but still grid-dense
+
+# Card geometry — generous for touch but still grid-dense. Height carries the
+# name + duration/device-badge row + the content-pill row.
 _CARD_W  = 240
-_CARD_H  = 210
+_CARD_H  = 232
 _THUMB_H = 130
 _PAD     = 12
+
+
+def _fmt_card_duration(seconds: float) -> str:
+    """Running time for a Library card: H:MM:SS for hour-plus clips, M:SS
+    otherwise. Mirrors the player's transport formatting."""
+    s = max(0, int(seconds))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
 
 
 class LibraryFilter(str, Enum):
@@ -288,9 +306,16 @@ class LibraryCardDelegate(QStyledItemDelegate):
         painter.setFont(small_font)
         small_fm = QFontMetrics(small_font)
 
-        # Duration placeholder (lazy ffprobe later)
+        # Duration — the real running time, probed by the thumbnail pass (same
+        # mpv open) and cached. Shows the placeholder until that lands, then the
+        # `ready` repaint swaps in the real time.
         painter.setPen(QPen(_TEXT_MUTED))
         duration = "—:—:—"
+        dv = entry.default_video
+        if self._thumbs is not None and dv is not None:
+            secs = self._thumbs.duration_for(dv.path)
+            if secs:
+                duration = _fmt_card_duration(secs)
         painter.drawText(
             text_rect.x(), line2_y + small_fm.ascent(),
             duration,
@@ -313,6 +338,32 @@ class LibraryCardDelegate(QStyledItemDelegate):
             painter.setPen(QPen(_TEXT))
             painter.drawText(badge_x, line2_y + small_fm.ascent(), badge)
             badge_x += w + 8
+
+        # Content-type pills (line 3) — what the scene actually carries:
+        # video / audio / funscript. Same palette + outlined-translucent look
+        # as the FunscriptForge library pills so the two apps read the same.
+        line3_y = line2_y + small_fm.height() + 5
+        content_pills: list[tuple[str, QColor]] = []
+        if entry.videos:
+            content_pills.append(("VIDEO", _PILL_VIDEO))
+        if entry.audio_tracks:
+            content_pills.append(("AUDIO", _PILL_AUDIO))
+        if entry.funscript_sets or entry.bundle_path:
+            content_pills.append(("FUNSCRIPT", _PILL_FUNSCRIPT))
+        pill_x = text_rect.x()
+        pill_h = small_fm.height() + 2
+        for label, color in content_pills:
+            w = small_fm.horizontalAdvance(label)
+            pill_w = w + 10
+            pill_rect = QRect(pill_x, line3_y, pill_w, pill_h)
+            fill = QColor(color); fill.setAlpha(0x26)
+            border = QColor(color); border.setAlpha(0x66)
+            painter.setPen(QPen(border))
+            painter.setBrush(QBrush(fill))
+            painter.drawRoundedRect(pill_rect, 3, 3)
+            painter.setPen(QPen(color))
+            painter.drawText(pill_x + 5, line3_y + small_fm.ascent() + 1, label)
+            pill_x += pill_w + 5
 
         # Top-right corner tags: "pick" (ambiguous, no pin yet) or "📌"
         # (pinned — user's choices are saved and replayed on next click).

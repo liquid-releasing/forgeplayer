@@ -99,7 +99,11 @@ class Preferences:
     crop_align: CropAlign = "center"
     # Sound vs Funscript tie-breaker when both forms exist for a haptic
     # destination. See ContentPreference docstring above for rationale.
-    content_preference: ContentPreference = "sound"
+    # Default is "funscript": the funscript IS the authored intent, and live
+    # restim synthesis plays cleanly now that the DirectSound-default fix
+    # (v0.0.6) ended the USB-DAC pops/clicks that made pre-rendered sound the
+    # safer pick. Users with 312/2B hardware can flip to "sound" in Preferences.
+    content_preference: ContentPreference = "funscript"
     # Last library root folder the user scanned. Persisted so the Library
     # tab reopens on the same folder next launch (empty = none chosen yet).
     library_root: str = ""
@@ -116,7 +120,7 @@ class Preferences:
         # back to default rather than crash the synth at launch time.
         if clean.get("audio_algorithm") not in ("continuous", "pulse"):
             clean.pop("audio_algorithm", None)
-        # Same coercion for content_preference. Default is "sound".
+        # Same coercion for content_preference. Default is "funscript".
         if clean.get("content_preference") not in ("sound", "funscript"):
             clean.pop("content_preference", None)
         # Coerce crop_align enum. Default is "center".

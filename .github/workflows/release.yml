@@ -299,11 +299,11 @@ jobs:
             ForgePlayer is a synchronized multi-screen player with per-port device routing. Drop a FunscriptForge or ForgeAssembler scene pack into the Library and ForgePlayer plays it across your screens — with audio routed separately to scene speakers, your Haptic 1 stim port, and (optionally) a Haptic 2 prostate port — all from the same timeline.
 
             **What's new since the last cut:**
-            - **Cleaner displays** — on-screen player controls are now hidden by default (the screens read as a clean video wall); a single click in any display reveals its control bar, click again to hide, double-click to close
-            - **Fullscreen fixed** — launching straight into Fullscreen now fills each screen correctly (no more video cropped into the top-left with black margins), the control panel stays on top so Play is always reachable, and brightness is correct from the first frame
-            - **Live panel redesign** — Video source + scene audio on the left; the haptic output on the right now lists exactly which e-stim channels each port plays, as a tidy (scrollable) bullet list. Fits a 1920×720 control screen without scrolling
-            - **Smarter thumbnails** — grabs a frame ~10s in and skips near-black frames, so cards show real content instead of a black leader
-            - **Pick your video + stim source in Live** — swap the 4K for a 1080p, or change the stim source / go silent, and the scene re-routes without re-opening from the Library
+            - **Browse for any source** — Video and Stim source pickers each get a **Browse…** button (native file dialog, opens at the scene folder) so you can grab a video, audio, or funscript the scanner didn't surface — handy for non-standard folder layouts
+            - **Library content pills** — every card shows **video / audio / funscript** pills (matching FunscriptForge), plus the scene's real **running time** instead of a placeholder
+            - **Funscripts are now the default** haptic source — live restim synthesis plays cleanly since the v0.0.6 DirectSound fix, and the funscript is the authored intent (312/2B owners flip to sound files in Preferences)
+            - **Control panel fits a 1920×720 screen** — accounting for the title bar and taskbar; tighter haptic channel list and dropdowns
+            - **Readable dropdowns** — cohesive gray combo boxes with a real triangle arrow and a clean drop-below list
 
             **Device compatibility:** mechanical, 2b, stereostim, FOC-stim — supported via pre-rendered stim audio (mp3) or live funscript synthesis (vendored restim).
 

@@ -79,6 +79,23 @@ def _cache_key(video_path: str) -> str:
     return hashlib.sha1(sig.encode("utf-8")).hexdigest()
 
 
+def duration_cache_path(video_path: str) -> Path:
+    """Sidecar holding the probed duration (seconds) for this video. Written in
+    the same mpv pass that grabs the thumbnail, so the Library card can show the
+    real running time instead of the `—:—:—` placeholder — no extra decode."""
+    return _CACHE_DIR / f"{_cache_key(video_path)}.dur"
+
+
+def cached_duration(video_path: str) -> float | None:
+    """Read the cached duration (seconds), or None if not probed yet."""
+    try:
+        raw = duration_cache_path(video_path).read_text(encoding="utf-8").strip()
+        val = float(raw)
+        return val if val > 0 else None
+    except (OSError, ValueError):
+        return None
+
+
 def cached_path(video_path: str) -> Path:
     # PNG, not JPEG: Qt's PNG codec is built into QtGui, while JPEG read/write
     # needs the `qjpeg` imageformats plugin — which isn't always bundled in the
@@ -160,6 +177,14 @@ def _grab_frame_to(video_path: str, out_path: Path) -> bool:
             return False
 
         dur = player.duration or 0.0
+        # Cache the running time now that mpv has demuxed it — same pass, so the
+        # Library card gets a real duration for free (see duration_cache_path).
+        if dur > 0:
+            try:
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                duration_cache_path(video_path).write_text(f"{dur:.3f}", encoding="utf-8")
+            except OSError:
+                pass
         # Build the candidate seek list, early frame FIRST. ~10s in is the
         # preferred grab; the body samples are fallbacks for when 10s is a
         # near-black fade-in / title card. With no known duration (some
@@ -276,6 +301,7 @@ class ThumbnailService(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._pixmaps: dict[str, QPixmap] = {}
+        self._durations: dict[str, float] = {}
         self._inflight: set[str] = set()
         self._failed: set[str] = set()
         self._pool = QThreadPool(self)
@@ -298,6 +324,21 @@ class ThumbnailService(QObject):
         self._inflight.add(video_path)
         self._pool.start(_GrabJob(video_path, self._signals))
         return None
+
+    def duration_for(self, video_path: str | None) -> float | None:
+        """Cached running time (seconds) for a video, or None if not probed
+        yet. Probed in the same pass as the thumbnail, so it becomes available
+        when the card's thumbnail does (the `ready` signal triggers a repaint).
+        Reading `pixmap_for` first kicks off generation on a miss."""
+        if not video_path:
+            return None
+        hit = self._durations.get(video_path)
+        if hit is not None:
+            return hit
+        disk = cached_duration(video_path)
+        if disk is not None:
+            self._durations[video_path] = disk
+        return disk
 
     @Slot(str, object)
     def _on_done(self, video_path: str, image: object) -> None:
