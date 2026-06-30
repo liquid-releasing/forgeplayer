@@ -31,6 +31,7 @@ from typing import Callable, Literal
 import numpy as np
 
 from app.funscript_loader import FunscriptActions, StimChannels
+from app.stim_safety import FlashRegion, apply_flash_guard
 
 
 WaveformMode = Literal["continuous", "pulse"]
@@ -150,6 +151,13 @@ class StimSynth:
         the algorithm is asked for; the user's ear is calibrated to the
         funscript-defined modulation, not to the carrier sample rate.
         """
+        # Last line of defense against "flash" glitches (near-max carrier +
+        # near-max volume at once → painful jolt). Already-shipped scripts can
+        # contain these even after the generator-side cap lands, so the player
+        # always sanitizes the channel set before synthesis. Detected regions
+        # are kept for the sidecar report / UI markers.
+        channels, self.flash_regions = apply_flash_guard(channels)
+
         self._channels = channels
         self._media_sync = media_sync
         self._sample_count = 0
