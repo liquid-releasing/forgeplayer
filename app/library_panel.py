@@ -60,10 +60,12 @@ _AMBIGUOUS       = QColor(234, 179, 8)           # yellow-amber for "pick"
 _BADGE_BG        = QColor(56, 64, 92)
 
 # Content-type pill colors — matched to the FunscriptForge library pills so the
-# two apps read consistently (video=blue, audio=green, funscript=amber).
+# two apps read consistently (video=blue, audio=green, funscript=amber,
+# forge=brand orange).
 _PILL_VIDEO      = QColor("#4dabf7")
 _PILL_AUDIO      = QColor("#3ed598")
 _PILL_FUNSCRIPT  = QColor("#ffb547")
+_PILL_FORGE      = QColor("#ff6b30")
 
 
 # Card geometry — generous for touch but still grid-dense. Height carries the
@@ -340,8 +342,8 @@ class LibraryCardDelegate(QStyledItemDelegate):
             badge_x += w + 8
 
         # Content-type pills (line 3) — what the scene actually carries:
-        # video / audio / funscript. Same palette + outlined-translucent look
-        # as the FunscriptForge library pills so the two apps read the same.
+        # video / audio / funscript / forge. Same palette + outlined-translucent
+        # look as the FunscriptForge library pills so the two apps read the same.
         line3_y = line2_y + small_fm.height() + 5
         content_pills: list[tuple[str, QColor]] = []
         if entry.videos:
@@ -350,6 +352,10 @@ class LibraryCardDelegate(QStyledItemDelegate):
             content_pills.append(("AUDIO", _PILL_AUDIO))
         if entry.funscript_sets or entry.bundle_path:
             content_pills.append(("FUNSCRIPT", _PILL_FUNSCRIPT))
+        # FORGE — this scene came from a .forge bundle (authored package), not a
+        # loose scanned folder. Distinguishes portable bundles at a glance.
+        if entry.bundle_path:
+            content_pills.append(("FORGE", _PILL_FORGE))
         pill_x = text_rect.x()
         pill_h = small_fm.height() + 2
         for label, color in content_pills:
