@@ -96,6 +96,33 @@ def _relink_video(bundle_dir: Path, manifest: dict, search_dirs) -> str | None:
     return None
 
 
+def _relink_chapters(bundle_dir: Path, video_path: str) -> None:
+    """Lay the bundle's flat ``chapters.json`` down as
+    ``<video_stem>.chapters.json`` next to the resolved video.
+
+    ``load_chapters`` / ``load_markers`` (control_window) probe for the
+    sidecar next to the VIDEO file — but a lean bundle relinks to an
+    external video, leaving ``chapters.json`` stranded in the bundle
+    folder. Copying it beside the video is the same normalize step
+    FunscriptForge's own importer does, and it's what makes both chapters
+    (section nav) AND markers (seek-bar ticks) survive a ``.forge`` import.
+
+    Non-destructive: never clobbers an existing sidecar (the user may have
+    a freshly-edited one). Best-effort — a read-only external video dir
+    just means no chapters, not an import failure.
+    """
+    src = bundle_dir / "chapters.json"
+    if not src.is_file():
+        return
+    dst = Path(video_path).with_suffix(".chapters.json")
+    if dst.exists():
+        return
+    try:
+        shutil.copy2(src, dst)
+    except OSError:
+        pass
+
+
 def _collect_funscript_sets(bundle_dir: Path, stem: str) -> list[FunscriptSet]:
     """Group the bundle's funscripts into channel SETS, exactly as the library
     scanner would. ``motion.funscript`` is the set's main (classified as
@@ -167,6 +194,8 @@ def load_bundle(path, *, cache_root=None) -> SceneCatalogEntry | None:
     video = _relink_video(bundle_dir, manifest, [src.parent, bundle_dir.parent])
     if video and Path(video).suffix.lower() in VIDEO_EXTS:
         videos.append(VideoVariant(path=video, tags=frozenset()))
+        # Make the bundle's chapters + markers reachable next to the video.
+        _relink_chapters(bundle_dir, video)
 
     # Nothing to play AND no haptics → not a usable bundle.
     if not videos and not funscript_sets:

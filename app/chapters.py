@@ -41,6 +41,48 @@ class Chapter:
     name: str
 
 
+@dataclass(frozen=True)
+class Marker:
+    """A user-authored navigation point. Lives in the SAME sidecar as
+    chapters, under a top-level `markers` array (`{id, at_ms, name}`),
+    authored in FunscriptForge and shipped in the `.forge` bundle. Unlike
+    chapters (structural, one per section) markers are hand-placed jump
+    points — we render them as tick marks on the seek bar."""
+    at_ms: int
+    name: str
+
+
+def load_markers(video_path: Path | str) -> list[Marker]:
+    """Load markers from the top-level `markers` array of
+    `<stem>.chapters.json` next to the video. Same tolerance contract as
+    load_chapters — malformed / missing yields an empty list, never raises.
+    """
+    sidecar = Path(video_path).with_suffix(".chapters.json")
+    if not sidecar.exists():
+        return []
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    raw = data.get("markers") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[Marker] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            at_ms = int(entry["at_ms"])
+            name = str(entry.get("name", ""))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if at_ms < 0:
+            continue
+        out.append(Marker(at_ms=at_ms, name=name))
+    out.sort(key=lambda m: m.at_ms)
+    return out
+
+
 def load_chapters(video_path: Path | str) -> list[Chapter]:
     """Load chapters from `<stem>.chapters.json` next to the video file.
 

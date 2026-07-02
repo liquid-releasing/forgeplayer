@@ -11,7 +11,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.chapters import Chapter, load_chapters, next_chapter, prev_chapter
+from app.chapters import (
+    Chapter,
+    Marker,
+    load_chapters,
+    load_markers,
+    next_chapter,
+    prev_chapter,
+)
 
 
 def _write_sidecar(video: Path, payload: object) -> Path:
@@ -183,3 +190,60 @@ def test_prev_chapter_before_first_chapter_returns_none() -> None:
 def test_prev_next_empty_chapters_returns_none() -> None:
     assert prev_chapter([], 5000) is None
     assert next_chapter([], 5000) is None
+
+
+# ── Markers ──────────────────────────────────────────────────────────
+
+def test_load_markers_missing_sidecar_returns_empty(tmp_path: Path) -> None:
+    video = tmp_path / "scene.mp4"
+    video.touch()
+    assert load_markers(video) == []
+
+
+def test_load_markers_basic_sorted_by_time(tmp_path: Path) -> None:
+    video = tmp_path / "scene.mp4"
+    video.touch()
+    _write_sidecar(video, {
+        "version": "3.0",
+        "chapters": [{"at_ms": 0, "name": "Intro"}],
+        "markers": [
+            {"id": "m-2", "at_ms": 90000, "name": "Climax"},
+            {"id": "m-1", "at_ms": 30000, "name": "Build"},
+        ],
+    })
+    assert load_markers(video) == [
+        Marker(at_ms=30000, name="Build"),
+        Marker(at_ms=90000, name="Climax"),
+    ]
+
+
+def test_load_markers_absent_key_returns_empty(tmp_path: Path) -> None:
+    """A chapters-only sidecar (no markers key) yields no markers, not a raise."""
+    video = tmp_path / "scene.mp4"
+    video.touch()
+    _write_sidecar(video, {"chapters": [{"at_ms": 0, "name": "Intro"}]})
+    assert load_markers(video) == []
+
+
+def test_load_markers_skips_invalid_and_negative(tmp_path: Path) -> None:
+    video = tmp_path / "scene.mp4"
+    video.touch()
+    _write_sidecar(video, {
+        "markers": [
+            {"at_ms": 0, "name": "Good"},
+            {"at_ms": "nope", "name": "Bad type"},
+            {"at_ms": -5, "name": "Negative"},
+            "not a dict",
+            {"at_ms": 10000},           # missing name → defaults to ""
+        ],
+    })
+    ms = load_markers(video)
+    assert [m.at_ms for m in ms] == [0, 10000]
+    assert ms[1].name == ""
+
+
+def test_load_markers_malformed_json_returns_empty(tmp_path: Path) -> None:
+    video = tmp_path / "scene.mp4"
+    video.touch()
+    video.with_suffix(".chapters.json").write_text("{{ bad", encoding="utf-8")
+    assert load_markers(video) == []

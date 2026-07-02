@@ -15,7 +15,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QScreen, QAction
 
-from app.chapters import Chapter, load_chapters, next_chapter, prev_chapter
+from app.chapters import (
+    Chapter,
+    Marker,
+    load_chapters,
+    load_markers,
+    next_chapter,
+    prev_chapter,
+)
 from app.player_window import PlayerWindow
 from app.sync_engine import SyncEngine
 from app.session import Session, SlotConfig
@@ -129,6 +136,13 @@ class ControlWindow(QMainWindow):
         # `_apply_scene_choices` and consumed by the prev/next chapter
         # transport buttons.
         self._chapters: list[Chapter] = []
+        # User-authored markers (FunscriptForge). Rendered as tick marks on
+        # the seek bar. `_marker_tick_dur` caches the duration the ticks
+        # were last laid out against so `_poll` only rebuilds them when the
+        # media duration actually resolves / changes (mpv reports it a beat
+        # after load, so ticks can't be positioned at scene-activation time).
+        self._markers: list[Marker] = []
+        self._marker_tick_dur: float = 0.0
         # Last chapter seek target (ms). mpv's default seek lands on the
         # nearest prior keyframe — a few seconds short of the target.
         # Without tracking the requested target, get_position would
@@ -2596,12 +2610,21 @@ class ControlWindow(QMainWindow):
         self._chapters = (
             load_chapters(choices.video.path) if choices.video else []
         )
+        # Markers ride the same sidecar. Clear the seek-bar ticks now; _poll
+        # re-lays them once the new media's duration resolves (fractions need
+        # duration, which mpv reports a beat after load).
+        self._markers = (
+            load_markers(choices.video.path) if choices.video else []
+        )
+        self._marker_tick_dur = 0.0
+        self._seek_bar.set_markers([])
         self._last_chapter_target_ms = None
         self._update_chapter_buttons_enabled()
         DebugLog.record(
             "library.activate.chapters",
             scene=entry.name,
             chapter_count=len(self._chapters),
+            marker_count=len(self._markers),
         )
         # Scene volume is ephemeral — reset to 100 % on every new scene
         # so a quiet pick from the prior session doesn't carry over.
@@ -4611,6 +4634,14 @@ class ControlWindow(QMainWindow):
         self._dur_label.setText(_fmt_time(dur))
         if dur > 0 and not self._seek_dragging:
             self._seek_bar.setValue(int((pos / dur) * 10000))
+        # Lay out marker ticks once the duration is known (and re-lay only
+        # if it changes). dur is in seconds; marker.at_ms is ms → fraction
+        # = at_ms / (dur * 1000).
+        if dur > 0 and self._markers and dur != self._marker_tick_dur:
+            self._marker_tick_dur = dur
+            self._seek_bar.set_markers(
+                [m.at_ms / (dur * 1000.0) for m in self._markers]
+            )
         paused = self._engine.is_paused()
         self._btn_play.setText("▶  Play" if paused else "⏸  Pause")
 
