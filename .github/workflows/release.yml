@@ -299,11 +299,9 @@ jobs:
             ForgePlayer is a synchronized multi-screen player with per-port device routing. Drop a FunscriptForge or ForgeAssembler scene pack into the Library and ForgePlayer plays it across your screens — with audio routed separately to scene speakers, your Haptic 1 stim port, and (optionally) a Haptic 2 prostate port — all from the same timeline.
 
             **What's new since the last cut:**
-            - **Browse for any source** — Video and Stim source pickers each get a **Browse…** button (native file dialog, opens at the scene folder) so you can grab a video, audio, or funscript the scanner didn't surface — handy for non-standard folder layouts
-            - **Library content pills** — every card shows **video / audio / funscript** pills (matching FunscriptForge), plus the scene's real **running time** instead of a placeholder
-            - **Funscripts are now the default** haptic source — live restim synthesis plays cleanly since the v0.0.6 DirectSound fix, and the funscript is the authored intent (312/2B owners flip to sound files in Preferences)
-            - **Control panel fits a 1920×720 screen** — accounting for the title bar and taskbar; tighter haptic channel list and dropdowns
-            - **Readable dropdowns** — cohesive gray combo boxes with a real triangle arrow and a clean drop-below list
+            - **Seek-bar marker ticks** — jump points you author in FunscriptForge (the new **Markers** feature) render as amber ticks on the seek bar, so you can see where the highlights are at a glance
+            - **Chapters & markers survive `.forge` import** — importing a bundle now lays its `chapters.json` down next to the video, so chapter prev/next **and** marker ticks work for imported bundles (previously only loose sidecars or embedded chapters did)
+            - **Stim flash guard** — clamps anomalous co-maximum frequency+volume values at load, so a malformed funscript can't produce a jarring stim flash on start
 
             **Device compatibility:** mechanical, 2b, stereostim, FOC-stim — supported via pre-rendered stim audio (mp3) or live funscript synthesis (vendored restim).
 
