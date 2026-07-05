@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import html
 import os
 
 from PySide6.QtWidgets import (
@@ -260,6 +261,17 @@ class ControlWindow(QMainWindow):
         # source picker lives in the Output panel (right, above Haptic 1) —
         # each next to the thing it controls. The old standalone "Sources"
         # box was folded in so the panel fits the 1920×720 touchpad.
+        # ── Now-playing header ──
+        # Names the active scene — and, when it came from a FunscriptForge
+        # export, the origin `<stem>.forge` in the brand orange — so the user
+        # always sees WHAT is loaded, not just the raw relinked video filename
+        # buried in the Video panel. Populated by _refresh_now_playing.
+        self._now_playing_label = QLabel("")
+        self._now_playing_label.setTextFormat(Qt.TextFormat.RichText)
+        self._now_playing_label.setWordWrap(True)
+        self._now_playing_label.setStyleSheet("font-size: 14px; padding: 0 2px;")
+        vbox.addWidget(self._now_playing_label)
+
         panels_row = QHBoxLayout()
         panels_row.setSpacing(10)
         panels_row.addWidget(self._build_video_panel(), 1)
@@ -739,6 +751,45 @@ class ControlWindow(QMainWindow):
         row.addWidget(source_label)
         return row
 
+    def _scene_audio_label(self, video_path: str) -> str:
+        """Name for the scene-audio source line. Prefer the active scene's
+        name (what the user picked) over the raw video filename — a relinked
+        or bundle-cache video is often named nothing like the scene. Falls
+        back to the video basename when no scene entry is tracked (e.g. a
+        loaded session with no catalog entry)."""
+        entry = self._current_entry
+        if entry is not None and getattr(entry, "name", ""):
+            return entry.name
+        return os.path.basename(video_path)
+
+    def _refresh_now_playing(self) -> None:
+        """Populate the Live 'Now playing' header from the active scene. Shows
+        the scene name, plus the origin `<stem>.forge` in the brand orange when
+        the scene came from a FunscriptForge export bundle (bundle_path set by
+        the scanner or bundle_importer). Empty state when nothing is loaded."""
+        entry = self._current_entry
+        if entry is None:
+            self._now_playing_label.setText(
+                '<span style="color:#6b7194;">Now playing: (nothing loaded)</span>'
+            )
+            self._now_playing_label.setToolTip("")
+            return
+        name = html.escape(entry.name or "(scene)")
+        parts = [
+            '<span style="color:#9ba3c4;">Now playing:</span> ',
+            f'<b style="color:#e6e9f2;">{name}</b>',
+        ]
+        bundle_path = getattr(entry, "bundle_path", None)
+        if bundle_path:
+            forge_name = html.escape(os.path.basename(bundle_path))
+            parts.append(
+                f' <span style="color:#ff6b30; font-weight:bold;">· {forge_name}</span>'
+            )
+            self._now_playing_label.setToolTip(bundle_path)
+        else:
+            self._now_playing_label.setToolTip("")
+        self._now_playing_label.setText("".join(parts))
+
     def _refresh_live_panels(self) -> None:
         """Re-render the Video and Output panel labels from current
         slot_data + prefs. Called after any state change (scene
@@ -757,6 +808,9 @@ class ControlWindow(QMainWindow):
         # stim slot — calibrate buttons stay disabled.
         from PySide6.QtGui import QGuiApplication  # noqa: PLC0415
         self._screens = list(QGuiApplication.screens())
+
+        # Now-playing header first — names the scene / origin .forge.
+        self._refresh_now_playing()
 
         # ── Video panel ─────────────────────────────────────────────
         slot0 = self._slots[0]
@@ -800,7 +854,13 @@ class ControlWindow(QMainWindow):
         if not scene_device:
             self._output_scene_source.setText("(no device — set in Setup)")
         elif video_path:
-            self._output_scene_source.setText(f"{os.path.basename(video_path)}  (embedded)")
+            # Prefer the scene name over the raw (often relinked / cache-named)
+            # video filename — a `.forge` scene's audio IS the video's embedded
+            # track, but the user thinks of it as the scene, not the mp4 file.
+            self._output_scene_source.setText(
+                f"{self._scene_audio_label(video_path)}  ·  embedded video audio"
+            )
+            self._output_scene_source.setToolTip(video_path)
         else:
             self._output_scene_source.setText("(no scene loaded)")
 
@@ -821,7 +881,7 @@ class ControlWindow(QMainWindow):
                 )
             elif video_path:
                 self._output_scene_secondary_source.setText(
-                    f"{os.path.basename(video_path)}  (mirrored)"
+                    f"{self._scene_audio_label(video_path)}  (mirrored)"
                 )
             else:
                 self._output_scene_secondary_source.setText("(no scene loaded)")

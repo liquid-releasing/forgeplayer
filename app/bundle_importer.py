@@ -206,4 +206,8 @@ def load_bundle(path, *, cache_root=None) -> SceneCatalogEntry | None:
         name=stem,
         videos=videos,
         funscript_sets=funscript_sets,
+        # Record the origin `.forge` so the Live page can name the bundle
+        # ("Now playing: <stem> · <stem>.forge") rather than only the raw
+        # relinked video filename. `src` is the zip/dir the user opened.
+        bundle_path=str(src),
     )

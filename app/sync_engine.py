@@ -94,6 +94,22 @@ class SyncEngine:
                 # boundaries (forgeassembler's job) is the alternative;
                 # this is the runtime fix for arbitrary source files.
                 "hr_seek": "yes",
+                # GPU-decode the video. Without this mpv defaults to
+                # software decoding, and a high-bitrate 4K source (e.g. a
+                # Topaz upscale) pegs the CPU — which starves BOTH the
+                # control-window poll loop and the haptic sync engine, so
+                # playback "freezes" at a non-deterministic spot that
+                # shifts with the start position (it's CPU/cache falling
+                # behind, not a bad frame). `auto-safe` only engages known-
+                # good hw decoders (NVDEC/D3D11VA/…) and cleanly falls back
+                # to software for codecs it can't offload, so it never makes
+                # a decodable file undecodable.
+                "hwdec": "auto-safe",
+                # Roomier demux buffer so a big 4K file reads ahead instead
+                # of stalling the decode thread on disk I/O during long
+                # scenes. Bytes, not seconds — caps the readahead RAM.
+                "demuxer_max_bytes": "256MiB",
+                "demuxer_max_back_bytes": "64MiB",
             }
             if audio_device:
                 kwargs["audio_device"] = audio_device

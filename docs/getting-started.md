@@ -17,6 +17,10 @@ separately and want everything on one timeline, this is the path.
 - Optional: a second USB audio dongle for a **prostate channel**
   (Haptic 2)
 - Optional: a second monitor for mirror playback
+- Optional: a **GPU is not required** — integrated graphics play 1080p and
+  typical 4K fine. Any GPU with hardware video decoding (NVIDIA, AMD, or
+  Intel) plays **large / high-bitrate 4K videos more smoothly** by offloading
+  decode from the CPU
 - A **scene folder** — see [The Pack](#the-pack) below
 
 ---

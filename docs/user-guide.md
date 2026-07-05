@@ -227,6 +227,20 @@ have to relaunch. New launches read the toggle's current state.
 
 `F11` inside any player window also toggles fullscreen for that slot.
 
+### Video playback & 4K
+
+ForgePlayer uses GPU hardware decoding when it's available (`hwdec=auto-safe`),
+falling back to the CPU for anything the GPU can't handle.
+
+- **A GPU is not required.** Integrated graphics play 1080p and typical 4K
+  fine.
+- For **large / high-bitrate 4K** (e.g. AI-upscaled sources), any GPU with
+  hardware video decoding — NVIDIA, AMD, or Intel — plays far more smoothly by
+  offloading decode from the CPU. On CPU-only decoding, a very demanding 4K
+  file can saturate the processor and stutter both the video and the haptic
+  sync, so if a big 4K scene isn't smooth, that's the cause — try a machine
+  with hardware decode, or play a 1080p variant of the scene.
+
 ---
 
 ## Setup tab
