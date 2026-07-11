@@ -38,7 +38,7 @@ JSONL. WASAPI exclusive mode used for stim streams on Windows to
 sidestep shared-mixer contention. See [SPEC.md](./SPEC.md) for the
 full v0.0.1-alpha design,
 [docs/getting-started.md](./docs/getting-started.md) for first-time
-setup, and [docs/user-guide.md](./docs/user-guide.md) for the full
+setup, and [docs/user-guide/](./docs/user-guide/index.md) for the full
 feature reference.
 
 ---

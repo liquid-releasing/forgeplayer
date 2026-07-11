@@ -199,7 +199,7 @@ Off by default; zero overhead when off.
 
 ## Next steps
 
-- [User guide](./user-guide.md) — feature-by-feature reference.
+- [User guide](./user-guide/index.md) — feature-by-feature reference.
 - [BACKLOG.md][backlog] (on GitHub) — what's coming next.
 - [docs/architecture/][archdir] (on GitHub) — internal design docs:
   audio-routing model, restim channel taxonomy, stim synthesis. Read

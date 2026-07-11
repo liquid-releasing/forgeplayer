@@ -20,12 +20,15 @@ exclude_docs: |
 theme:
   name: material
   language: en
+  logo: assets/forgeplayer_icon.png
+  favicon: assets/forgeplayer_icon.png
   features:
     - content.code.copy
     - navigation.instant
     - navigation.tabs
     - navigation.tabs.sticky
     - navigation.sections
+    - navigation.indexes
     - navigation.top
     - search.suggest
     - search.highlight
@@ -54,9 +57,15 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - User Guide: user-guide.md
-  - Quality: quality.md
-  - HDR Content: hdr-content.md
+  - User Guide:
+      - user-guide/index.md
+      - Library: user-guide/library.md
+      - Live: user-guide/live.md
+      - Setup: user-guide/setup.md
+      - Settings: user-guide/settings.md
+  - Quality:
+      - quality.md
+      - HDR Content: hdr-content.md
 
 markdown_extensions:
   - admonition
