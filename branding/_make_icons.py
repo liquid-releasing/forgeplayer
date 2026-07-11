@@ -37,24 +37,19 @@ ICO_SIZES = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 ICNS_SIZES = [(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)]
 
 
-def square_pad(im: Image.Image, target: int = 1024) -> Image.Image:
-    """Return a `target`x`target` RGBA image with `im` centered and
-    transparent padding.
+def center_square(im: Image.Image) -> Image.Image:
+    """Center-crop `im` to a square on its shorter side.
 
-    If `im` is already larger than `target`, it's downscaled (preserving
-    aspect ratio) before centering. If smaller, it's centered without
-    upscaling — preserves source quality.
+    The source art is a WIDE scene (coil tower flanked by devices). Padding it
+    to a square letterboxed it into a tiny squashed strip at taskbar sizes; a
+    centre crop keeps the coil filling the icon. Transparency is preserved.
     """
     src = im.convert("RGBA")
     w, h = src.size
-    scale = min(target / w, target / h, 1.0)
-    if scale < 1.0:
-        src = src.resize((int(round(w * scale)), int(round(h * scale))), Image.LANCZOS)
-        w, h = src.size
-
-    canvas = Image.new("RGBA", (target, target), (0, 0, 0, 0))
-    canvas.paste(src, ((target - w) // 2, (target - h) // 2), src)
-    return canvas
+    side = min(w, h)
+    left = (w - side) // 2
+    top = (h - side) // 2
+    return src.crop((left, top, left + side, top + side))
 
 
 def main() -> None:
@@ -64,7 +59,7 @@ def main() -> None:
     src = Image.open(SRC)
     print(f"Source: {SRC.name} {src.size} {src.mode}")
 
-    square = square_pad(src, target=1024)
+    square = center_square(src)
 
     # Pillow auto-generates the multi-res variants from a single
     # input when given `sizes=`.
