@@ -23,6 +23,11 @@ from app.recognizer.canonicalize import (
 )
 from app.recognizer.cluster import TitleCluster, cluster_files
 from app.recognizer.match import reconcile
+from app.recognizer.probe import (
+    funscript_span_ms,
+    mpv_duration_ms,
+    probe_resolve,
+)
 
 __all__ = [
     "Ordinal",
@@ -31,6 +36,9 @@ __all__ = [
     "TitleCluster",
     "canonicalize",
     "cluster_files",
+    "funscript_span_ms",
+    "mpv_duration_ms",
+    "probe_resolve",
     "reconcile",
     "resolution_rank",
 ]
