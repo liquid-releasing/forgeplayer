@@ -145,3 +145,19 @@ def test_library_root_per_folder_single_title_named_by_folder(tmp_path):
     _touch(tmp_path / "SceneB", "b.funscript")
     scenes = scan_library_root(tmp_path)
     assert _names(scenes) == {"SceneA", "SceneB"}
+
+
+# ── Per-title pins don't collide (two titles, one folder) ─────────────────────
+
+def test_multititle_pins_are_distinct(tmp_path):
+    from app.library.pins import pin_path_for
+
+    d = tmp_path / "Magik"
+    for f in ["Magik Vol 1.mp4", "Magik Vol 1.alpha.funscript",
+              "Magik Vol 2.mp4", "Magik Vol 2.alpha.funscript"]:
+        _touch(d, f)
+    entries = scan_scene_titles(d)
+    assert len(entries) == 2
+    paths = {str(pin_path_for(e)) for e in entries}
+    # Distinct pin files → pinning Vol 1's picks never clobbers Vol 2's.
+    assert len(paths) == 2
