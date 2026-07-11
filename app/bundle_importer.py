@@ -45,9 +45,59 @@ from app.library.scanner import VIDEO_EXTS
 # the same bundle refreshes one folder rather than piling up temps.
 _CACHE_DIRNAME = "bundle_cache"
 
+# Marker file recording the source zip's identity (mtime+size) so a re-open
+# skips re-extraction when the bundle hasn't changed.
+_CACHE_MARKER = ".forgeplayer_extracted"
+
 
 def _default_cache_root() -> Path:
     return Path.home() / ".forgeplayer" / _CACHE_DIRNAME
+
+
+def _is_wanted_member(name: str) -> bool:
+    """Which zip members forgeplayer actually needs extracted: the funscripts
+    (channels), the manifest (stem + video relink key), and chapters.json
+    (chapter nav + seek-bar markers). Everything else — bundled ``media/``
+    video bytes and the 100+ MB ``audio/*.mp3`` pre-rendered stim tracks — is
+    SKIPPED. That's the fix for the activation freeze: a `.forge` can be
+    multiple GB (media bundled) or carry ~400 MB of stim audio, and
+    ``extractall`` unzipped ALL of it on the UI thread every activation. The
+    funscripts are a few MB; the video relinks to the user's loose file. A
+    truly standalone bundle (media bundled, no loose video) just won't auto-
+    attach its video — acceptable versus freezing on every open."""
+    low = name.replace("\\", "/").lower()
+    base = low.rsplit("/", 1)[-1]
+    return (
+        low.endswith(".funscript")
+        or base == "manifest.ffmeta"
+        or base.endswith("chapters.json")
+    )
+
+
+def _cache_is_fresh(zip_path: Path, bundle_dir: Path) -> bool:
+    marker = bundle_dir / _CACHE_MARKER
+    if not marker.is_file():
+        return False
+    try:
+        st = zip_path.stat()
+        return marker.read_text(encoding="utf-8").strip() == f"{st.st_mtime_ns}:{st.st_size}"
+    except OSError:
+        return False
+
+
+def _selective_extract(zip_path: Path, bundle_dir: Path) -> None:
+    """Extract only the small files forgeplayer needs (see `_is_wanted_member`),
+    skipping the multi-GB media / audio blobs, then stamp a freshness marker."""
+    with zipfile.ZipFile(zip_path) as z:
+        for info in z.infolist():
+            if not info.is_dir() and _is_wanted_member(info.filename):
+                z.extract(info, bundle_dir)
+    try:
+        st = zip_path.stat()
+        (bundle_dir / _CACHE_MARKER).write_text(
+            f"{st.st_mtime_ns}:{st.st_size}", encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _read_manifest(bundle_dir: Path) -> dict:
@@ -124,21 +174,37 @@ def _relink_chapters(bundle_dir: Path, video_path: str) -> None:
 
 
 def _collect_funscript_sets(bundle_dir: Path, stem: str) -> list[FunscriptSet]:
-    """Group the bundle's funscripts into channel SETS, exactly as the library
-    scanner would. ``motion.funscript`` is the set's main (classified as
-    ``<stem>.funscript``); every ``stations/*/*.funscript`` is already
-    ``<stem>.<channel>.funscript`` and rides on its real filename. Files are
-    referenced in place (in the extracted bundle) — never copied."""
-    # (classify_name, real_path). Stations first, motion LAST so the canonical
-    # motion track wins the main slot over any station's plain L0 duplicate.
+    """Group the bundle's funscripts into channel SETS across EVERY layout
+    FunscriptForge emits — because the channel is read from the FILENAME
+    (``<stem>.<channel>.funscript``), not the folder:
+
+      - a ``.forge`` zip's ``stations/<device>/*.funscript``
+      - a ``.output/`` folder's human device folders
+        (``E-Stim/``, ``MultiFunPlayer/``, ``Handy/`` …)
+      - a top-level ``motion.funscript`` (classified as the scene's main)
+
+    Recursively scans, skipping any HIDDEN subfolder (``.pre_screech_backup``
+    and the like) so backups don't pollute the set. Files are referenced in
+    place — never copied.
+
+    Returns the channel-bearing set(s) — the canonical e-stim / multi-axis set
+    — when any exist. Device-specific single-file renderings (handy / lovense /
+    ossm, whose device word isn't a recognized channel so they classify as bare
+    mains of their own stem) are dropped: forgeplayer's haptic path plays the
+    e-stim channels, not those. Falls back to the bare main(s) for a
+    motion-only scene so it still plays something.
+    """
     items: list[tuple[str, Path]] = []
-    stations = bundle_dir / "stations"
-    if stations.is_dir():
-        for fp in sorted(stations.rglob("*.funscript")):
-            items.append((fp.name, fp))
-    motion = bundle_dir / "motion.funscript"
-    if motion.is_file():
-        items.append((f"{stem}.funscript", motion))
+    for fp in sorted(bundle_dir.rglob("*.funscript")):
+        rel_parents = fp.relative_to(bundle_dir).parts[:-1]
+        if any(part.startswith(".") for part in rel_parents):
+            continue  # skip funscripts under a hidden/backup folder
+        name = fp.name
+        # `motion.funscript` is the canonical stroke track — classify it as the
+        # scene's main so it joins the stem's set, not a stray "motion" set.
+        if name == "motion.funscript":
+            name = f"{stem}.funscript"
+        items.append((name, fp))
 
     sets_by_stem: dict[str, FunscriptSet] = {}
     for classify_name, fp in items:
@@ -148,10 +214,14 @@ def _collect_funscript_sets(bundle_dir: Path, stem: str) -> list[FunscriptSet]:
             fset = FunscriptSet(base_stem=info.base_stem)
             sets_by_stem[info.base_stem] = fset
         if info.channel == "":
-            fset.main_path = str(fp)
+            if not fset.main_path:  # first main wins; don't clobber
+                fset.main_path = str(fp)
         else:
             fset.channels[info.channel] = str(fp)
-    return list(sets_by_stem.values())
+
+    sets = list(sets_by_stem.values())
+    channeled = [s for s in sets if s.channels]
+    return channeled if channeled else sets
 
 
 def load_bundle(path, *, cache_root=None) -> SceneCatalogEntry | None:
@@ -173,11 +243,15 @@ def load_bundle(path, *, cache_root=None) -> SceneCatalogEntry | None:
 
     if src.is_file() and zipfile.is_zipfile(src):
         bundle_dir = cache_root / f"{src.stem}__extracted"
-        if bundle_dir.exists():
-            shutil.rmtree(bundle_dir, ignore_errors=True)
-        bundle_dir.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(src) as z:
-            z.extractall(bundle_dir)
+        # Re-extract only when the cache is missing or the source zip changed —
+        # and even then, pull just the funscripts/manifest/chapters, not the
+        # multi-GB media/audio blobs. This is what stops activation freezing
+        # the UI (an 8 GB `.forge` used to fully unzip on every open).
+        if not _cache_is_fresh(src, bundle_dir):
+            if bundle_dir.exists():
+                shutil.rmtree(bundle_dir, ignore_errors=True)
+            bundle_dir.mkdir(parents=True, exist_ok=True)
+            _selective_extract(src, bundle_dir)
         scene_name = src.stem
     elif src.is_dir():
         bundle_dir = src
