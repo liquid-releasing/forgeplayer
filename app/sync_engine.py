@@ -110,6 +110,17 @@ class SyncEngine:
                 # scenes. Bytes, not seconds — caps the readahead RAM.
                 "demuxer_max_bytes": "256MiB",
                 "demuxer_max_back_bytes": "64MiB",
+                # HDR handling. On a display with Windows HDR ON, the embedded
+                # mpv child window blew content out to solid WHITE (SDR content
+                # too) — the default `gpu` VO doesn't match the HDR desktop's
+                # composition. `gpu-next` (libplacebo) DOES, and it's the only VO
+                # that honours `target-colorspace-hint` (set post-construction),
+                # so the surface composits correctly instead of over-bright. A
+                # perceptual tone-map (not the default clip) keeps colours from
+                # washing out / looking muted when mpv converts HDR→SDR.
+                "vo": "gpu-next",
+                "tone_mapping": "bt.2390",
+                "hdr_compute_peak": "yes",
             }
             if audio_device:
                 kwargs["audio_device"] = audio_device
@@ -128,6 +139,14 @@ class SyncEngine:
                 if align_y:
                     kwargs["video_align_y"] = str(align_y)
             p = mpv.MPV(**kwargs)
+            # Hint the display colorspace so a Windows-HDR-ON desktop composits
+            # the mpv surface correctly (HDR passthrough) instead of blowing it
+            # out to white. Newer libmpv option — set best-effort so an older
+            # build that lacks it doesn't take down the player.
+            try:
+                p["target-colorspace-hint"] = "yes"
+            except Exception:
+                pass
             # Double-click the video surface = the Escape teardown. mpv owns the
             # video's native child window, so a Qt mouseDoubleClickEvent on the
             # PlayerWindow never sees clicks over the video — bind it at the mpv
