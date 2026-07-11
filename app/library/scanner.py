@@ -36,6 +36,16 @@ from app.library.catalog import (
     VideoVariant,
 )
 from app.library.channels import classify_funscript_channel
+from app.recognizer import (
+    Role,
+    canonicalize,
+    cluster_files,
+    funscript_span_ms,
+    mpv_duration_ms,
+    probe_resolve,
+    reconcile,
+)
+from app.recognizer.cluster import TitleCluster
 
 
 # ── File-type extensions ──────────────────────────────────────────────────────
@@ -339,6 +349,170 @@ def scan_scene_folder(folder: str | os.PathLike) -> SceneCatalogEntry | None:
     return entry
 
 
+# ── Multi-title scan (recognizer-backed) ──────────────────────────────────────
+#
+# The classic `scan_scene_folder` above lumps a whole folder into ONE scene —
+# correct when a folder holds one work in several renderings, wrong when it holds
+# two distinct works (Magik Vol 1 + Vol 2). `scan_scene_titles` runs the media
+# recognizer over the folder's files and emits ONE entry per detected TITLE, so
+# the Library shows a card per work. The two single-entry callers (drag-drop a
+# folder, find-a-playing-video's-scripts) keep using `scan_scene_folder`.
+
+# Immediate subfolders whose NAME starts with "." are hidden/working dirs
+# (`.<stem>.forge/`, `.pre_screech_backup`) — never descend into or gather from
+# them (user rule 2026-07-11, feedback_recognizer_skip_dot_folders).
+
+
+def _is_funscript_subfolder(d: Path) -> bool:
+    """A subfolder that holds funscripts but NO video is a scripts sidecar whose
+    contents belong to the parent scene (the 'funscripts live in their own
+    folder' layout). A subfolder WITH a video is its own scene — left alone."""
+    has_fs = has_vid = False
+    try:
+        for f in d.iterdir():
+            if not f.is_file():
+                continue
+            ext = f.suffix.lower()
+            if ext == FUNSCRIPT_EXT:
+                has_fs = True
+            elif ext in VIDEO_EXTS:
+                has_vid = True
+                break
+    except OSError:
+        return False
+    return has_fs and not has_vid
+
+
+def _gather_scene_files(folder_path: Path) -> list[Path]:
+    """Collect the paths the recognizer should classify for this scene folder.
+
+    - Top-level files (videos, funscripts, audio, subtitles, `.forge` bundles…).
+    - `<stem>.output` export FOLDERS, passed through as bundle items (the
+      recognizer classifies them by stem into their title).
+    - Funscripts from any non-hidden scripts-only subfolder (cross-folder
+      gather), skipping deeper hidden folders.
+    Hidden (dot-prefixed) subfolders are never entered.
+    """
+    files: list[Path] = []
+    try:
+        for item in sorted(folder_path.iterdir()):
+            name = item.name
+            if item.is_file():
+                files.append(item)
+            elif item.is_dir():
+                if name.startswith("."):
+                    continue  # hidden/working dir — never descend (user rule)
+                if name.lower().endswith(".output"):
+                    files.append(item)  # export bundle folder → BUNDLE role
+                    continue
+                if _is_funscript_subfolder(item):
+                    for sub in sorted(item.rglob("*.funscript")):
+                        rel = sub.relative_to(item).parts[:-1]
+                        if any(p.startswith(".") for p in rel):
+                            continue
+                        files.append(sub)
+    except OSError:
+        pass
+    if len(files) > _MAX_FILES_PER_SCENE:
+        files = files[:_MAX_FILES_PER_SCENE]
+    return files
+
+
+def _title_to_entry(title: TitleCluster, folder_path: Path) -> SceneCatalogEntry:
+    """Map one recognized TITLE onto the SceneCatalogEntry the UI/activation
+    consume. Reuses the classic scanner's audio/stem helpers so behavior matches
+    the single-title path."""
+    entry = SceneCatalogEntry(folder_path=str(folder_path), name=title.display_name)
+
+    # Videos — already ordered best-default-first by the recognizer.
+    video_base_stems: set[str] = set()
+    for v in title.videos:
+        entry.videos.append(VideoVariant(path=v.path, tags=frozenset(v.variant_tags)))
+        video_base_stems.add(_video_base_stem(Path(v.path).stem))
+
+    # Funscript sets — group the title's funscripts by base stem (edit-variants
+    # become separate sets, same as the classic path).
+    sets_by_stem: dict[str, FunscriptSet] = {}
+    for f in title.funscripts:
+        info = f.channel_info or classify_funscript_channel(Path(f.path).name)
+        fset = sets_by_stem.get(info.base_stem)
+        if fset is None:
+            fset = FunscriptSet(base_stem=info.base_stem)
+            sets_by_stem[info.base_stem] = fset
+        if info.channel == "":
+            if not fset.main_path:
+                fset.main_path = f.path
+        else:
+            fset.channels[info.channel] = f.path
+
+    def _set_sort_key(fset: FunscriptSet) -> tuple:
+        stem_lower = fset.base_stem.lower()
+        matches_video = any(stem_lower == v for v in (vs.lower() for vs in video_base_stems))
+        return (0 if matches_video else 1, len(fset.base_stem), stem_lower)
+
+    entry.funscript_sets = sorted(sets_by_stem.values(), key=_set_sort_key)
+
+    # Audio — stem-matched first (reuses the classic descriptor logic).
+    for a in title.audio:
+        descriptor, matches = _audio_descriptor(Path(a.path).stem, video_base_stems)
+        entry.audio_tracks.append(AudioVariant(
+            path=a.path, stem_matches_main_video=matches, descriptor=descriptor,
+        ))
+    entry.audio_tracks.sort(
+        key=lambda a: (0 if a.stem_matches_main_video else 1, a.filename.lower())
+    )
+
+    # Subtitles / archives / preset.
+    for s in title.subtitles:
+        entry.subtitles.append(SubtitleTrack(
+            path=s.path, language=_extract_subtitle_language(Path(s.path).stem),
+        ))
+    for arc in title.archives:
+        entry.archives.append(arc.path)
+    if title.presets:
+        entry.preset_path = title.presets[0].path
+
+    # Bundle — a `.forge`/`.forgeplay`/`.output` that clustered into this title.
+    # The best (most canonical) one wins if several are present.
+    if title.bundles:
+        best = max(title.bundles, key=lambda b: _bundle_priority(Path(b.path).name))
+        entry.bundle_path = best.path
+
+    return entry
+
+
+def scan_scene_titles(folder: str | os.PathLike) -> list[SceneCatalogEntry]:
+    """Scan one folder and return ONE entry per detected TITLE (empty if none
+    playable). Multi-title aware — the Library's per-work cards come from here."""
+    folder_path = Path(folder).resolve()
+    if not folder_path.is_dir():
+        return []
+
+    files = _gather_scene_files(folder_path)
+    recs = [canonicalize(p) for p in files]
+    titles = reconcile(cluster_files(recs))
+    # Content only adjudicates when a name match was too weak to trust.
+    titles = probe_resolve(
+        titles, duration_of=mpv_duration_ms, span_of=funscript_span_ms,
+    )
+
+    entries: list[SceneCatalogEntry] = []
+    for t in titles:
+        if not t.is_playable:
+            continue
+        entry = _title_to_entry(t, folder_path)
+        if entry.is_playable:
+            entries.append(entry)
+
+    # A folder that resolves to ONE work is named after the folder — the label
+    # users expect, and what the classic single-entry scanner produced. Only a
+    # genuine multi-title folder keeps the recognizer's per-work display names,
+    # since one folder name can't label several works.
+    if len(entries) == 1:
+        entries[0].name = folder_path.name
+    return entries
+
+
 def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
     """Walk a registered library root to find scene folders.
 
@@ -366,44 +540,45 @@ def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
         for child in sorted(root_path.iterdir()):
             if not child.is_dir():
                 continue
-            if child.name == _FORGE_FLATTEN_SUBFOLDER:
-                continue  # reserved for flat-dump semantics
+            if child.name.startswith("."):
+                continue  # hidden/working dir — never scan (user rule)
             if _is_export_bundle_dir(child.name):
-                continue  # FSF export output/bundle — opened via the importer
+                continue  # standalone FSF export — opened via the importer
 
-            scene = scan_scene_folder(child)
-            if scene is not None:
-                scenes.append(scene)
+            child_titles = scan_scene_titles(child)
+            if child_titles:
+                scenes.extend(child_titles)
                 has_subfolder_scenes = True
 
-            # Level 3: subfolders-of-scene become their own scene cards
-            # (but only if the subfolder itself contains playable content,
-            # not .forge, and not a duplicate of an already-scanned parent)
+            # Level 3: subfolders-of-scene become their OWN scene cards. A
+            # script-only subfolder was already folded into the parent's titles
+            # (cross-folder gather) and yields nothing playable here, so there's
+            # no double-count; a video-bearing subfolder is a nested scene.
             try:
                 for grandchild in sorted(child.iterdir()):
-                    if (
-                        grandchild.is_dir()
-                        and grandchild.name != _FORGE_FLATTEN_SUBFOLDER
-                        and not _is_export_bundle_dir(grandchild.name)
-                    ):
-                        sub_scene = scan_scene_folder(grandchild)
-                        if sub_scene is not None:
-                            # Disambiguate name with parent prefix for UI clarity
-                            sub_scene.name = f"{child.name} / {grandchild.name}"
-                            scenes.append(sub_scene)
+                    if not grandchild.is_dir():
+                        continue
+                    if grandchild.name.startswith("."):
+                        continue
+                    if _is_export_bundle_dir(grandchild.name):
+                        continue
+                    for sub in scan_scene_titles(grandchild):
+                        sub.name = f"{child.name} / {sub.name}"
+                        scenes.append(sub)
+                        has_subfolder_scenes = True
             except OSError:
                 pass
     except OSError:
         pass
 
-    # Root-as-scene (flat-dump use case) ONLY applies when the root has no
-    # scene subfolders. If the user's library is "root contains many scene
-    # folders", loose files at the root level are admin noise — don't lump
-    # them into one giant synthetic scene.
+    # Root-as-dump (flat-dump use case) ONLY applies when the root has no scene
+    # subfolders. If the user's library is "root contains many scene folders",
+    # loose files at the root level are admin noise. When it IS a flat dump, the
+    # recognizer splits it into one card per work (Magik Vol 1, Vol 2, …) rather
+    # than one giant synthetic scene.
     if not has_subfolder_scenes:
-        root_as_scene = scan_scene_folder(root_path)
-        if root_as_scene is not None:
-            scenes.insert(0, root_as_scene)
+        for i, entry in enumerate(scan_scene_titles(root_path)):
+            scenes.insert(i, entry)
 
     return scenes
 

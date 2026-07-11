@@ -37,10 +37,11 @@ AUDIO_EXTS = frozenset({".mp3", ".m4a", ".wav", ".flac", ".ogg", ".opus"})
 SUBTITLE_EXTS = frozenset({".srt", ".ass", ".ssa", ".vtt"})
 ARCHIVE_EXTS = frozenset({".zip", ".7z", ".rar"})
 FUNSCRIPT_EXT = ".funscript"
-# `.forge` / `.forgeplay` ZIP files are self-contained bundles. (A `.output`
-# FOLDER is a bundle too, but that's a directory the walker handles — not a
-# filename this function classifies.)
-BUNDLE_EXTS = frozenset({".forge", ".forgeplay"})
+# Export bundles. `.forge` / `.forgeplay` are self-contained ZIP files; a
+# `<stem>.output` is a device-organized FOLDER. All three carry a `<stem>` the
+# walker can feed here as a path string — classifying by suffix routes the
+# bundle into its title's cluster by stem, same as any other file.
+BUNDLE_EXTS = frozenset({".forge", ".forgeplay", ".output"})
 _PRESET_SUFFIX = ".forgeplayer.json"
 
 
