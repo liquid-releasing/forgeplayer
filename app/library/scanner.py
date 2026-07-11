@@ -574,6 +574,8 @@ def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
                         continue
                     if _is_export_bundle_dir(grandchild.name):
                         continue
+                    if _is_funscript_subfolder(grandchild):
+                        continue  # scripts already folded into the parent scene
                     for sub in scan_scene_titles(grandchild):
                         sub.name = f"{child.name} / {sub.name}"
                         scenes.append(sub)

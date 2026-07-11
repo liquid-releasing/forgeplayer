@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from app.recognizer.canonicalize import canonicalize
 from app.recognizer.cluster import cluster_files
-from app.recognizer.match import _name_similarity, reconcile
+from app.recognizer.match import _name_similarity, name_affinity, reconcile
 
 
 def titles(*names: str):
@@ -122,3 +122,43 @@ def test_name_similarity_basic():
     assert _name_similarity("magik", "magik") == 1.0
     assert _name_similarity("magik xxx", "magik") == 0.5
     assert _name_similarity("magik", "prisoner") == 0.0
+
+
+# ── Audio-companion folding (dogfood: Clutch/Optikon estim + beat tracks) ──────
+
+def test_estim_audio_folds_into_video_title():
+    ts = titles(
+        "Clutch rf20.mp4", "Clutch rf20.alpha.funscript",
+        "Clutch Estim Mild.mp3", "Clutch Estim Spicy.mp3",
+    )
+    # One card — the two estim mp3s fold in as audio companions, not own cards.
+    assert len(ts) == 1
+    t = ts[0]
+    assert t.has_video
+    assert len(t.audio) == 2
+
+
+def test_beat_track_folds_in():
+    ts = titles("CH Optikon Alpha.mp4", "Optikon Alpha Beats.mp3")
+    assert len(ts) == 1
+    assert len(ts[0].audio) == 1
+
+
+def test_audio_only_folder_keeps_its_card():
+    # No video anywhere → the audio stays as its own (pure-audio) card.
+    ts = titles("Ambience Loop.mp3", "Ambience Loop.beats.mp3")
+    assert len(ts) >= 1
+    assert all(not t.has_video for t in ts)
+
+
+def test_unrelated_audio_not_folded():
+    # Audio whose name shares nothing with the video is left alone.
+    ts = titles("Magik.mp4", "CompletelyDifferent.mp3")
+    keys = {t.cluster_key for t in ts}
+    assert "magik" in keys and "completelydifferent" in keys
+
+
+def test_name_affinity_helper():
+    assert name_affinity("victoriaoaks wet dreams", "wetdreams medium lrf") is True
+    assert name_affinity("clutch", "clutch estim mild") is True
+    assert name_affinity("magik", "prisoner") is False

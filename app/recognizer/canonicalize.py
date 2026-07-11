@@ -250,6 +250,79 @@ def _classify_token(tok: str) -> str | None:
     return None
 
 
+_ENCODER_TAG_RE = re.compile(r"^[a-z]{2,4}\d{1,2}$")
+
+
+def _is_id_or_hash_token(tok: str) -> bool:
+    """Download-tool artifacts that pollute a filename's identity, anywhere in
+    the name: a long pure-digit run (timestamp / numeric id, ≥6 digits — short
+    ordinals like a 1-3 digit part number are kept) or a long mixed alphanumeric
+    hash (≥8 chars with ≥2 digits, e.g. 'f57kog2x7o8')."""
+    if tok.isdigit():
+        return len(tok) >= 6
+    if len(tok) >= 8 and tok.isalnum() and not tok.isalpha():
+        return sum(c.isdigit() for c in tok) >= 2
+    return False
+
+
+def _is_encoder_tag(tok: str) -> bool:
+    """A short release/encoder tag like 'ghq5' / 'apo8' / 'rf20' — letters then
+    1-2 digits, and NOT an ordinal marker ('vol2', 'pt3' are ordinals, kept)."""
+    if not _ENCODER_TAG_RE.match(tok):
+        return False
+    base = re.match(r"^([a-z]+)", tok).group(1)
+    return base not in _MARKER_CLASS
+
+
+def _extract_name_tokens(raw_tokens: list[str]) -> tuple[list[str], set[str], str | None]:
+    """Split raw filename tokens into the NAME tokens vs the rendering noise.
+
+    Returns (name_tokens_original_case, variant_tags, best_resolution_bucket).
+    Dropped as noise: resolution/upscaler/aspect/codec/misc tokens, download-tool
+    ids & hashes, short encoder tags (rf20 / apo8 / ghq5), and pipeline PASS
+    numbers — a bare 1-3 digit token immediately followed by a render token
+    (e.g. the '_1_' in 'rf20_1_iris3', the '_3_' in 'HD_3_apo8'). A number NOT
+    followed by render noise is kept (it may be a real ordinal like 'sc 1' or
+    part of the name). Classification is case-insensitive; original casing is
+    preserved in the returned tokens for display."""
+    classified: list[tuple[str, str, str | None]] = []
+    for tok in raw_tokens:
+        low = tok.lower()
+        tag = _classify_token(low)
+        if tag is not None:
+            classified.append(("variant", tok, tag))
+        elif _is_id_or_hash_token(low) or _is_encoder_tag(low):
+            classified.append(("render", tok, None))
+        elif low.isdigit() and len(low) <= 3:
+            classified.append(("num", tok, None))
+        else:
+            classified.append(("name", tok, None))
+
+    res_map = _token_sets()[0]
+    res_buckets = set(res_map.values())
+    tags: set[str] = set()
+    best_res: str | None = None
+    name_tokens: list[str] = []
+    for i, (kind, tok, tag) in enumerate(classified):
+        if kind == "variant":
+            tags.add(tag)
+            if tag in res_buckets and (
+                best_res is None or resolution_rank(tag) < resolution_rank(best_res)
+            ):
+                best_res = tag
+        elif kind == "name":
+            name_tokens.append(tok)
+        elif kind == "num":
+            nxt = classified[i + 1][0] if i + 1 < len(classified) else None
+            prev = classified[i - 1][1].lower() if i > 0 else ""
+            # A pass/version number is followed by render noise AND is not the
+            # number of an explicit ordinal marker ('vol 2' before a '4k' tag).
+            if nxt in ("variant", "render") and prev not in _MARKER_CLASS:
+                continue
+            name_tokens.append(tok)
+    return name_tokens, tags, best_res
+
+
 def canonicalize(path: str | Path) -> RecognizedFile:
     """Classify one filename into its role and title identity.
 
@@ -259,30 +332,17 @@ def canonicalize(path: str | Path) -> RecognizedFile:
     role, channel, channel_info, stem = _role_and_stem(p)
 
     # 1. Drop bracketed edit tags: [E-Stim Edit], (final), {v2}.
-    work = _BRACKET_RE.sub(" ", stem).lower()
+    work = _BRACKET_RE.sub(" ", stem)
 
-    # 2. Pull the ordinal out (before token stripping so "Pt 1" is seen whole).
-    work, ordinal = _extract_ordinal(work)
+    # 2. Classify tokens; keep the name, drop rendering/noise/pass-numbers.
+    raw = [t for t in _SPLIT_RE.split(work) if t]
+    name_tokens, tags, best_res = _extract_name_tokens(raw)
 
-    # 3. Split into words; drop rendering tokens, keep the name.
-    name_tokens: list[str] = []
-    tags: set[str] = set()
-    best_res: str | None = None
-    res_map = _token_sets()[0]
-    for tok in _SPLIT_RE.split(work):
-        if not tok:
-            continue
-        tag = _classify_token(tok)
-        if tag is None:
-            name_tokens.append(tok)
-            continue
-        tags.add(tag)
-        if tok in res_map or tag in res_map.values():
-            # Track the best (lowest-rank) resolution bucket seen.
-            if best_res is None or resolution_rank(tag) < resolution_rank(best_res):
-                best_res = tag
-
-    canonical_key = " ".join(name_tokens).strip()
+    # 3. Pull the ordinal out of the cleaned name (marker like 'Pt 1', or a bare
+    #    trailing number that survived pass-number filtering), then normalize.
+    cleaned = " ".join(name_tokens).lower()
+    cleaned, ordinal = _extract_ordinal(cleaned)
+    canonical_key = re.sub(r"\s+", " ", cleaned).strip()
     if not canonical_key:
         # Stripping emptied it (e.g. "4k.mp4") — fall back to the raw stem so a
         # title identity always exists.

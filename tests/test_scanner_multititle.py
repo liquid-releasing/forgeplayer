@@ -149,6 +149,23 @@ def test_library_root_per_folder_single_title_named_by_folder(tmp_path):
 
 # ── Per-title pins don't collide (two titles, one folder) ─────────────────────
 
+def test_scripts_subfolder_does_not_leak_a_card(tmp_path):
+    # A Scripts-only subfolder folds into the parent and must NOT also appear as
+    # its own empty card at library level.
+    scene = tmp_path / "Celestial Succubus"
+    _touch(scene, "Celestial Succubus.mp4")
+    _touch(scene / "Scripts", "Celestial Succubus.alpha.funscript")
+    _touch(scene / "Scripts", "Celestial Succubus.beta.funscript")
+
+    scenes = scan_library_root(tmp_path)
+    names = _names(scenes)
+    assert "Celestial Succubus" in names
+    assert not any("Scripts" in n for n in names)
+    # And the scripts did fold into the parent.
+    cs = next(e for e in scenes if e.name == "Celestial Succubus")
+    assert len(cs.funscript_sets) == 1
+
+
 def test_multititle_pins_are_distinct(tmp_path):
     from app.library.pins import pin_path_for
 

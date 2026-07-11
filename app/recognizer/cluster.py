@@ -31,6 +31,14 @@ class TitleCluster:
     canonical_key: str
     ordinal: Ordinal | None = None
     files: list[RecognizedFile] = field(default_factory=list)
+    confidence: float = 1.0
+    """How sure we are this cluster is one coherent title. 1.0 = exact-name
+    grouping; lowered by match.py when files were attached by fuzzy name (0.7)
+    or the singleton fallback (0.5). Low confidence is what triggers the
+    duration probe and, failing that, a user prompt."""
+    provenance: str = "name"
+    """How this title's files were gathered: 'name' | 'fuzzy' | 'singleton' |
+    'duration'."""
 
     @property
     def cluster_key(self) -> str:
@@ -139,16 +147,20 @@ def _display_stem(rf: RecognizedFile) -> str:
     clean label by :pyattr:`TitleCluster.display_name`. Display-only, best-effort;
     reuses the canonicalizer's single-source token classifier so it never drifts.
     """
+    import re
     from pathlib import Path
 
     from app.recognizer.canonicalize import (
         _BRACKET_RE, _ORDINAL_MARKER_RE, _SPLIT_RE, _TRAILING_NUM_RE,
-        _classify_token,
+        _extract_name_tokens,
     )
 
     stem = _BRACKET_RE.sub(" ", Path(rf.path).stem)
+    raw = [t for t in _SPLIT_RE.split(stem) if t]
+    name_tokens, _, _ = _extract_name_tokens(raw)  # same cleaning as the key
+    name = " ".join(name_tokens)
     if rf.ordinal is not None:
-        stripped = _ORDINAL_MARKER_RE.sub(" ", stem)
-        stem = stripped if stripped != stem else _TRAILING_NUM_RE.sub("", stem)
-    kept = [t for t in _SPLIT_RE.split(stem) if t and _classify_token(t.lower()) is None]
-    return " ".join(kept).strip()
+        # Strip the ordinal for the base — display_name re-appends a clean label.
+        stripped = _ORDINAL_MARKER_RE.sub(" ", name)
+        name = stripped if stripped != name else _TRAILING_NUM_RE.sub("", name)
+    return re.sub(r"\s+", " ", name).strip()

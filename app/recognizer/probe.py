@@ -299,22 +299,9 @@ def _same_content_duration(a_ms: float, b_ms: float) -> bool:
     return abs(a_ms - b_ms) <= max(2_000.0, 0.01 * max(a_ms, b_ms))
 
 
-def _name_affinity(a_key: str, b_key: str) -> bool:
-    """Do two title keys share enough name to be plausibly the same work?
-
-    Guards duration-based merging against a coincidental runtime match between
-    two genuinely different works dumped in one folder. True when they share a
-    token, or one squashed key contains the other, or a ≥5-char token of one
-    appears inside the other's squashed form (catches 'wet dreams' ↔
-    'wetdreams …' where spacing differs)."""
-    ta, tb = set(a_key.split()), set(b_key.split())
-    if ta & tb:
-        return True
-    sa, sb = a_key.replace(" ", ""), b_key.replace(" ", "")
-    if len(sa) >= 4 and len(sb) >= 4 and (sa in sb or sb in sa):
-        return True
-    short, long_sq = (ta, sb) if len(sa) <= len(sb) else (tb, sa)
-    return any(len(tok) >= 5 and tok in long_sq for tok in short)
+# Name affinity lives in match.py (shared with audio-companion folding); alias
+# kept for the probe's own readability and existing tests.
+from app.recognizer.match import name_affinity as _name_affinity  # noqa: E402
 
 
 def consolidate_videos_by_duration(

@@ -163,3 +163,44 @@ def test_path_accepted():
 def test_separators_normalized():
     assert key("Victoria_Oaks.4k.mp4") == key("Victoria.Oaks.1080p.mp4")
     assert key("Victoria Oaks.mp4") == key("victoria_oaks.mp4")
+
+
+# ── Download-artifact / encoder noise (dogfood D:\_migrate) ────────────────────
+
+def test_id_and_hash_tokens_stripped():
+    rf = canonicalize("1765492923409 f57kog2x7o8 Mila Azul PMV2.mp4")
+    assert "1765492923409" not in rf.canonical_key   # timestamp id
+    assert "f57kog2x7o8" not in rf.canonical_key      # hash
+    assert "mila azul" in rf.canonical_key
+
+
+def test_short_numbers_kept_as_ordinal_not_stripped():
+    # A 1-3 digit trailing number is an ordinal, not an id.
+    rf = canonicalize("Show 12.mp4")
+    assert rf.ordinal is not None and rf.ordinal.number == 12
+
+
+def test_pmv_identity_number_survives():
+    # PMV2 and PMV3 are different works — the glued identity number is NOT a tag.
+    assert key("1765492923409 aaa Mila Azul PMV2.mp4") != \
+           key("1765585851749 bbb Mila Azul PMV3.mp4")
+
+
+def test_pipeline_pass_number_dropped():
+    # The '_1_'/'_3_' pass number sitting before an upscaler token is NOT an
+    # ordinal — the render variant collapses into the base work.
+    assert canonicalize("Clutch-x265-rf20_1_iris3.mp4").ordinal is None
+    assert key("Clutch-x265-rf20_1_iris3.mp4") == key("Clutch-x265-rf20.mp4")
+    assert key("A Sinful XXX-perience_1_iris3.mp4") == key("A Sinful XXX-perience.mp4")
+    assert key("ddt483.HD_3_apo8_nyx3.mp4") == key("ddt483.HD.wmv")
+
+
+def test_encoder_tag_dropped_render_variants_merge():
+    # Short encoder tags (apo8, rf20, ghq5) are render noise — variants merge.
+    assert key("34357 BonnieRotten 543265967.mp4") == key("34357 BonnieRotten apo8.mp4")
+
+
+def test_real_trailing_number_still_splits():
+    # A genuine trailing number with no render token after it stays an ordinal.
+    assert key("the torch sc 1.mp4") != key("the torch sc 2.mp4")
+    assert canonicalize("the torch sc 3.mp4").ordinal is not None

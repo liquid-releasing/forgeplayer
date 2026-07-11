@@ -20,6 +20,7 @@ that, for the picker to ask. Nothing here does I/O.
 
 from __future__ import annotations
 
+from app.recognizer.canonicalize import Role
 from app.recognizer.cluster import TitleCluster
 
 
@@ -29,6 +30,24 @@ def _name_similarity(a: str, b: str) -> float:
     if not ta or not tb:
         return 0.0
     return len(ta & tb) / len(ta | tb)
+
+
+def name_affinity(a_key: str, b_key: str) -> bool:
+    """Do two title keys share enough name to be plausibly the same work?
+
+    True when they share a token, one squashed key contains the other, or a
+    ≥5-char token of one appears inside the other's squashed form (catches
+    'wet dreams' ↔ 'wetdreams …' where spacing differs). Used to guard both
+    audio-companion folding and duration-based video merging against
+    coincidental matches between genuinely different works."""
+    ta, tb = set(a_key.split()), set(b_key.split())
+    if ta & tb:
+        return True
+    sa, sb = a_key.replace(" ", ""), b_key.replace(" ", "")
+    if len(sa) >= 4 and len(sb) >= 4 and (sa in sb or sb in sa):
+        return True
+    short, long_sq = (ta, sb) if len(sa) <= len(sb) else (tb, sa)
+    return any(len(tok) >= 5 and tok in long_sq for tok in short)
 
 
 def _ordinal_compatible(a: TitleCluster, b: TitleCluster) -> bool:
@@ -115,7 +134,44 @@ def reconcile(
         orph.confidence = min(orph.confidence, 0.3)
 
     result = video_titles + homeless + audio_only
+    result = fold_audio_companions(result)
     return sorted(
         result,
         key=lambda t: (t.canonical_key, t.ordinal.number if t.ordinal else -1),
     )
+
+
+def fold_audio_companions(titles: list[TitleCluster]) -> list[TitleCluster]:
+    """Fold audio-only titles (estim / beat tracks) into a name-affine video
+    title as audio companions, instead of leaving them as empty standalone
+    cards. An audio-only title is one with audio but NO video, funscript, or
+    bundle. Folds into the best affine, ordinal-compatible video title; a folder
+    with no video keeps its audio as its own card (a pure-audio release)."""
+    video_titles = [t for t in titles if t.has_video]
+    audio_only = [
+        t for t in titles
+        if not t.has_video and not t.has_haptics
+        and any(f.role is Role.AUDIO for f in t.files)
+    ]
+    if not video_titles or not audio_only:
+        return titles
+
+    folded: set[int] = set()
+    for at in audio_only:
+        best: TitleCluster | None = None
+        best_sim = -1.0
+        for vt in video_titles:
+            if not _ordinal_compatible(at, vt):
+                continue
+            if not name_affinity(at.canonical_key, vt.canonical_key):
+                continue
+            sim = _name_similarity(at.canonical_key, vt.canonical_key)
+            if sim > best_sim:
+                best, best_sim = vt, sim
+        if best is not None:
+            best.files.extend(at.files)
+            folded.add(id(at))
+
+    if not folded:
+        return titles
+    return [t for t in titles if id(t) not in folded]
