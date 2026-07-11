@@ -1,7 +1,11 @@
 # ForgePlayer — Feature Backlog
 
-Ideas and future features not yet scheduled for implementation.
-Items are roughly grouped by phase but not strictly ordered.
+Ideas and future features, roughly grouped by phase (not strictly ordered).
+
+> **Reconciled to v0.0.12 (2026-07-11).** Checkboxes reflect what's actually
+> shipped. For the **near-term road to beta** — the curated, prioritized subset
+> with quality gates — see **[BETA_TODO.md](./BETA_TODO.md)**; this file is the
+> long-horizon idea pool.
 
 ---
 
@@ -12,14 +16,16 @@ alpha
 - [x] rename eHaptic Studio Player to ForgePlayer
 - [x] rename syncplayer in this project to ForgePlayer (syncplayer project is the video wall industrial version)
 - [ ] Loop mode (loop a single file or all slots)
-- [ ] jump to next chapter or previous chapter, assign keyboard. arrow keys?
+- [~] jump to next chapter or previous chapter — **Prev/Next chapter transport
+      buttons shipped (v0.0.10, gate on `<stem>.chapters.json`)**; keyboard
+      (arrow-key) chapter nav still open
 - [ ] Keyboard shortcuts in ControlWindow (Space = play/pause, Left/Right = skip ±5s)
 - [ ] Drift correction — periodic re-sync for long content across MULTIPLE VIDEO PLAYERS (detect clock drift between mpv instances, nudge lagging players). Audio-vs-video drift on the stim stream is solved by `_TimeSmoother` in v002; this item is the separate multi-player problem.
 - [x] Show "no mpv.dll found" friendly error dialog on Windows startup — obsolete for shipped users since PyInstaller now bundles libmpv-2.dll. Dev-from-source still gets a raw OSError.
 - [ ] Per-player window title bar showing filename
 - [ ] Remember control window size/position between sessions
-- [ ] play representative sample for user to calibrate hardware settings without starting video or audio
-- [ ] mkdocs User docs
+- [x] play representative sample for user to calibrate hardware settings without starting video or audio — **Calibrate H1/H2 (steady carrier, pre-play, 5 s ramp option)**
+- [x] mkdocs User docs — **shipped; per-tab User Guide + landing, deployed to forgeplayer.app**
 - [ ] **Reorder + split tabs** — left-to-right: **Library** → **Live** → **Settings** (audio + video devices) → **Preferences** (pulse vs continuous, plus other behavior toggles to come). Splits the current Setup tab into a hardware-routing tab (Settings) and a behavior tab (Preferences). Natural place to also resolve the v0.0.3 "Apply Setup algorithm change without restart" item — Preferences-tab toggles should take effect mid-session.
 - [ ] **Add third monitor** — light up the third output already in the v0.0.1 spec ("same video, full-screen, across up to three output monitors"). Today's build supports up to two; extend slot/window plumbing + Settings device-routing to expose monitor 3, with the same frame-perfect single-decoder / N-render-surfaces sync as monitors 1–2.
 
@@ -139,8 +145,8 @@ Items deferred during the 2026-05-03 alpha push. None block alpha.
       (funscript set, video variant, stim audio) as a thin bar above
       the tile grid. Currently only visible inside the picker dialog.
 - [ ] **Arrow-key navigation in Library** — keyboard nav across tiles.
-- [ ] **Prev / Next chapter transport buttons** — for scenes with
-      chapter markers.
+- [x] **Prev / Next chapter transport buttons** — for scenes with
+      chapter markers. **Shipped v0.0.10.**
 - [ ] **Hardware-side pop investigation** — 2026-05-03 dogfood
       narrowed remaining pops to outside our audio data (WAV recording
       provably clean). WASAPI exclusive mode for stim addresses one
@@ -153,7 +159,7 @@ Items deferred during the 2026-05-03 alpha push. None block alpha.
 
 - [ ] **White-screen-after-double-click intermittent** — reproduced ~3x in v0.0.2 dogfood; **not seen since (as of 2026-04-29)**. Library double-click → both video panes white, won't respond to Play. App restart only recovery. May have been incidentally fixed by v0.0.2-onward stim-audio / startup-timing work. Demoted from blocker to monitor — capture stderr if it recurs (`python main.py 2> mpv-err.txt`). Original suspects: mpv vs Qt window race, GL context loss from prior session, single+double-click double-fire in handler. Close after a clean v0.0.3 dogfood pass.
 - [ ] **Apply Setup algorithm change without restart** — Continuous ↔ Pulse picker change is captured at player launch only. Mid-session change requires close + relaunch to take effect. Either restart the stim stream on prefs change or document the behavior in the picker subtitle.
-- [ ] **Wire Haptic 2 routing** — Setup combo for Haptic 2 exists but the second stim channel isn't dispatched yet. Useful for prostate / second-stim-device users.
+- [x] **Wire Haptic 2 routing** — **shipped**: prostate / second-stim channel dispatches (funscript synth, `.prostate.wav`, or mirror-H1), with `(silent — …)` states surfaced on the Live tab.
 - [ ] **Research: is `alpha-prostate` ever the same signal as the main funscript / `alpha`?** — In observed scenes (Euphoria, Zer0 Game) `alpha-prostate` ships alone (no `beta-prostate`). Need to confirm whether the alpha-prostate curve is a unique re-script of the same scene, or whether some scenes' main `.funscript` (or `alpha` channel) IS the prostate signal — in which case the prostate path could fall back to the main funscript when `alpha-prostate` is missing, the way main-stim already falls back to radial 1D→2D from main. Sample 3–5 scenes side-by-side; if curves match, add a Tier 1.5 in the Haptic 2 cascade ("use main funscript as prostate when no `alpha-prostate` present"). If they diverge, document and skip.
 - [ ] **Verify no clicks when advancing across scene / chapter boundaries** — v002 audio quality work covers within-scene playback only. Auto-advance + chapter-end behavior is untested. Gate before any playlist or chapter-jump UI ships.
 - [ ] **Residual ~7% audible click rate on stim playback** — likely device-level analog transient response in USB dongle when funscript modulation has steep edges during a fade window. Candidate fixes: freeze modulation across whole fade window (synth-side), or longer fade durations (loses haptic responsiveness). Only worth investigating if users report.
