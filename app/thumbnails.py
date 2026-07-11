@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QObject, QRunnable, QThreadPool, Qt, Signal, Slot,
+    QObject, QRunnable, QThreadPool, Qt, QTimer, Signal, Slot,
 )
 from PySide6.QtGui import QImage, QPixmap
 
@@ -218,28 +218,47 @@ def _grab_frame_to(video_path: str, out_path: Path) -> bool:
             except Exception:
                 pass  # un-seekable / very short clip: shoot wherever we are
 
-            try:
-                if tmp.exists():
-                    tmp.unlink()
-            except OSError:
-                pass
-            try:
-                player.command("screenshot-to-file", str(tmp), "video")
-            except Exception:
-                continue
-            # screenshot-to-file is async-ish in libmpv — wait for the file.
-            shot_deadline = time.monotonic() + 5.0
-            while time.monotonic() < shot_deadline:
-                if tmp.exists() and tmp.stat().st_size > 0:
-                    break
-                time.sleep(0.03)
-            if not (tmp.exists() and tmp.stat().st_size > 0):
-                continue
+            # Let the seeked frame actually decode before we shoot — under
+            # contention the presented frame lags the seek.
+            time.sleep(0.15)
 
-            img = QImage(str(tmp))
-            if img.isNull():
+            # Screenshot the frame. The first shot can still land before decode
+            # completes → a solid-black image; retry a couple of times, settling
+            # briefly, until we capture a non-black frame (a genuinely dark point
+            # just loses to a brighter sample below).
+            img = None
+            score = -1.0
+            for _shot_try in range(3):
+                try:
+                    if tmp.exists():
+                        tmp.unlink()
+                except OSError:
+                    pass
+                try:
+                    player.command("screenshot-to-file", str(tmp), "video")
+                except Exception:
+                    break
+                shot_deadline = time.monotonic() + 5.0
+                while time.monotonic() < shot_deadline:
+                    if tmp.exists() and tmp.stat().st_size > 0:
+                        break
+                    time.sleep(0.03)
+                if not (tmp.exists() and tmp.stat().st_size > 0):
+                    time.sleep(0.15)
+                    continue
+                cand = QImage(str(tmp))
+                if cand.isNull():
+                    time.sleep(0.15)
+                    continue
+                cand_score = _frame_score(cand)
+                if cand_score > score:
+                    score, img = cand_score, cand
+                if cand_score >= 3.0:
+                    break  # a real, non-black frame for this point
+                time.sleep(0.15)  # black/undecoded — settle and re-shoot
+
+            if img is None:
                 continue
-            score = _frame_score(img)
             if score > best_score:
                 best_score = score
                 # Keep the scaled copy now; the next iteration overwrites tmp.
@@ -300,12 +319,20 @@ class ThumbnailService(QObject):
 
     ready = Signal(str)
 
+    # A failed grab is usually transient — libmpv contention while the main
+    # players and both thumbnail workers spin up decoders during a scroll. So we
+    # RETRY with backoff instead of blacklisting the card for the whole session;
+    # only after this many attempts do we give up. Backoff (seconds) spaces the
+    # retries so we don't hammer a genuinely-bad file.
+    _RETRY_BACKOFF = (1.0, 4.0, 10.0)
+
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._pixmaps: dict[str, QPixmap] = {}
         self._durations: dict[str, float] = {}
         self._inflight: set[str] = set()
-        self._failed: set[str] = set()
+        self._fail_count: dict[str, int] = {}
+        self._retry_after: dict[str, float] = {}
         self._pool = QThreadPool(self)
         # A small cap: decoding is the expensive bit, and the user only ever
         # sees a screenful of cards at once. 2 keeps scroll responsive without
@@ -321,8 +348,13 @@ class ThumbnailService(QObject):
         hit = self._pixmaps.get(video_path)
         if hit is not None:
             return hit
-        if video_path in self._failed or video_path in self._inflight:
+        if video_path in self._inflight:
             return None
+        if self._fail_count.get(video_path, 0) > len(self._RETRY_BACKOFF):
+            return None  # exhausted retries — give up on this file
+        retry_at = self._retry_after.get(video_path)
+        if retry_at is not None and time.monotonic() < retry_at:
+            return None  # still in backoff after a recent failure
         self._inflight.add(video_path)
         self._pool.start(_GrabJob(video_path, self._signals))
         return None
@@ -349,9 +381,22 @@ class ThumbnailService(QObject):
         if ok:
             # QPixmap must be built on the GUI thread — we're there now.
             self._pixmaps[video_path] = QPixmap.fromImage(image)
+            self._fail_count.pop(video_path, None)
+            self._retry_after.pop(video_path, None)
             self.ready.emit(video_path)
         else:
-            self._failed.add(video_path)
+            n = self._fail_count.get(video_path, 0) + 1
+            self._fail_count[video_path] = n
+            if n <= len(self._RETRY_BACKOFF):
+                backoff = self._RETRY_BACKOFF[n - 1]
+                self._retry_after[video_path] = time.monotonic() + backoff
+                # Nudge a repaint once the backoff elapses so a card still in
+                # view re-attempts the grab, instead of waiting for an unrelated
+                # scroll. Emitting `ready` just repaints; pixmap_for re-enqueues.
+                QTimer.singleShot(
+                    int(backoff * 1000) + 50,
+                    lambda vp=video_path: self.ready.emit(vp),
+                )
         # Diagnostic breadcrumb (enable Debug to capture): tells us whether
         # generation succeeded per scene, so a "no thumbnails" report is
         # actionable instead of a guess.

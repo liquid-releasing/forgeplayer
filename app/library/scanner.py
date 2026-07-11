@@ -807,6 +807,49 @@ def scan_scene_titles(
     return entries
 
 
+def _merge_work_key(entry: SceneCatalogEntry) -> str | None:
+    """A DISTINCTIVE work key for cross-folder de-duplication, or None when the
+    name is too generic to safely merge. Same key in two folders ⇒ the same work
+    in two places (a loose render at root + a render subfolder) → one card."""
+    stem = None
+    if entry.videos:
+        stem = Path(entry.videos[0].path).stem
+    elif entry.funscript_sets:
+        stem = entry.funscript_sets[0].base_stem
+    elif entry.bundle_path:
+        stem = _bundle_stem(Path(entry.bundle_path).name)
+    if not stem:
+        return None
+    wk = _work_key(stem)
+    # Only merge on a distinctive key — ≥2 words or a long single token — so a
+    # short generic name never merges unrelated folders.
+    return wk if (len(wk.split()) >= 2 or len(wk) >= 12) else None
+
+
+def _merge_scene_into(dst: SceneCatalogEntry, src: SceneCatalogEntry) -> None:
+    """Fold src's renders / tracks / scripts into dst (same work, other folder)."""
+    have_v = {v.path for v in dst.videos}
+    for v in src.videos:
+        if v.path not in have_v:
+            dst.videos.append(v)
+            have_v.add(v.path)
+    dst.videos.sort(key=_video_sort_key)
+    have_a = {a.path for a in dst.audio_tracks}
+    for a in src.audio_tracks:
+        if a.path not in have_a:
+            dst.audio_tracks.append(a)
+            have_a.add(a.path)
+    have_f = {f.base_stem for f in dst.funscript_sets}
+    for f in src.funscript_sets:
+        if f.base_stem not in have_f:
+            dst.funscript_sets.append(f)
+            have_f.add(f.base_stem)
+    if not dst.bundle_path and src.bundle_path:
+        dst.bundle_path = src.bundle_path
+    if not src.is_video_only:
+        dst.is_video_only = False
+
+
 def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
     """Walk a registered library root to find scene folders.
 
@@ -903,6 +946,22 @@ def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
         root_path, name_single_by_folder=False, include_standalone=True)
     for i, entry in enumerate(root_scenes):
         scenes.insert(i, entry)
+
+    # Merge same-work cards that live in DIFFERENT folders (a loose render at
+    # root + a render subfolder) into one — a work appearing twice reads as a
+    # duplicate. The first-seen card is primary (root scenes come first, so the
+    # loose card keeps its clean name and the subfolder renders fold in).
+    merged: dict[str, SceneCatalogEntry] = {}
+    deduped: list[SceneCatalogEntry] = []
+    for s in scenes:
+        mk = _merge_work_key(s)
+        if mk is not None and mk in merged:
+            _merge_scene_into(merged[mk], s)
+        else:
+            if mk is not None:
+                merged[mk] = s
+            deduped.append(s)
+    scenes = deduped
 
     # Disambiguate exact duplicate display names — the same work loose at root
     # AND inside a subfolder reads as two identical tiles. Qualify the
