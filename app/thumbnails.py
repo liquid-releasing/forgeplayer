@@ -167,8 +167,10 @@ def _grab_frame_to(video_path: str, out_path: Path) -> bool:
             msg_level="all=no", really_quiet=True,
         )
         player.command("loadfile", video_path)
-        # Wait for the demuxer to expose dimensions + a clock, or bail.
-        deadline = time.monotonic() + 8.0
+        # Wait for the demuxer to expose dimensions + a clock, or bail. Generous
+        # so a large 4K/mkv on a slow/external drive still demuxes in time (a
+        # too-short deadline was blacklisting big files → permanently blank card).
+        deadline = time.monotonic() + 20.0
         while time.monotonic() < deadline:
             if player.width and player.time_pos is not None:
                 break
@@ -208,7 +210,7 @@ def _grab_frame_to(video_path: str, out_path: Path) -> bool:
         for idx, target in enumerate(targets):
             try:
                 player.command("seek", target, "absolute", "exact")
-                seek_deadline = time.monotonic() + 2.5
+                seek_deadline = time.monotonic() + 5.0
                 while time.monotonic() < seek_deadline:
                     if player.time_pos is not None and player.time_pos >= target - 1.0:
                         break
@@ -226,7 +228,7 @@ def _grab_frame_to(video_path: str, out_path: Path) -> bool:
             except Exception:
                 continue
             # screenshot-to-file is async-ish in libmpv — wait for the file.
-            shot_deadline = time.monotonic() + 2.5
+            shot_deadline = time.monotonic() + 5.0
             while time.monotonic() < shot_deadline:
                 if tmp.exists() and tmp.stat().st_size > 0:
                     break

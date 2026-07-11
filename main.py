@@ -5,6 +5,20 @@
 import sys
 from pathlib import Path
 
+# Claim a single-threaded COM apartment for the GUI thread BEFORE anything
+# (libmpv, imported transitively below) can initialize COM as multi-threaded.
+# The modern Windows folder/file picker (IFileDialog) requires STA; when mpv
+# gets there first with MTA, Qt silently falls back to its dated non-native
+# dialog (no Quick Access / drive navigation). Claiming STA here keeps the
+# native picker — a later MTA request on this thread just fails harmlessly and
+# the thread stays STA.
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.ole32.CoInitializeEx(None, 0x2)  # COINIT_APARTMENTTHREADED
+    except Exception:
+        pass
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon, QPalette, QColor
 from PySide6.QtCore import QTimer

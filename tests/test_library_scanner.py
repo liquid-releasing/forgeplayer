@@ -355,14 +355,14 @@ class TestScanLibraryRoot:
         assert "Jet Black / Part 2" in names
 
     def test_flat_dump_at_root_level(self, tmp_path):
-        """User drops video+funscript directly at root, no scene folder."""
+        """User drops video+funscript directly at root, no scene folder. The
+        loose scene surfaces under its own (work) name."""
         _touch(tmp_path, "scene.mp4")
         _touch(tmp_path, "scene.funscript")
 
         scenes = scan_library_root(tmp_path)
         assert len(scenes) == 1
-        # Scene name = root folder's name
-        assert scenes[0].name == tmp_path.name
+        assert scenes[0].name == "scene"
 
     def test_skips_funscriptforge_export_outputs(self, tmp_path):
         """A <stem>.output/ folder and .forge/.forgeplay bundle dirs are OUR
@@ -380,22 +380,24 @@ class TestScanLibraryRoot:
         names = {s.name for s in scenes}
         assert names == {"Scene"}, names
 
-    def test_loose_root_files_ignored_when_subfolders_exist(self, tmp_path):
-        """Root has both scene subfolders AND loose files: loose files are
-        admin noise, not a synthetic 'root scene'. Only subfolder scenes
-        appear in the library."""
-        # Scene subfolder
+    def test_loose_root_scenes_surface_alongside_subfolders(self, tmp_path):
+        """Root has both scene subfolders AND loose files. A loose file with
+        haptics is a real HAPTIC scene next to the subfolder scenes; a loose
+        UNSCRIPTED video surfaces as a standalone-VIDEO card (is_video_only), so
+        the default 'Videos with Funscripts' filter hides it while 'Videos'
+        shows it."""
         _make_scene(tmp_path, "RealScene", ["real.mp4", "real.funscript"])
-        # Loose files at root (different scenes mixed together)
         _touch(tmp_path, "orphan1.mp4")
         _touch(tmp_path, "orphan1.funscript")
         _touch(tmp_path, "orphan2.mp4")
         _touch(tmp_path, "orphan2.funscript")
+        _touch(tmp_path, "unscripted.mp4")
 
         scenes = scan_library_root(tmp_path)
-        # Only the scene subfolder counts; loose root files are ignored
-        assert len(scenes) == 1
-        assert scenes[0].name == "RealScene"
+        by_name = {s.name: s for s in scenes}
+        haptic = {n for n, s in by_name.items() if not s.is_video_only}
+        assert haptic == {"RealScene", "orphan1", "orphan2"}
+        assert "unscripted" in by_name and by_name["unscripted"].is_video_only
 
     def test_volume_stereostim_folds_into_correct_set(self, tmp_path):
         """Verify `-stereostim` subchannel doesn't spawn spurious sets, AND

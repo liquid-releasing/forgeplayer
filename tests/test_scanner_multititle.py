@@ -1,13 +1,19 @@
 # Copyright (c) 2026 Liquid Releasing. Licensed under the MIT License.
-"""End-to-end tests for the recognizer-backed multi-title library scan.
+"""End-to-end tests for the funscript-first library scan.
 
-These prove the real-world folder shapes the recognizer was built for, wired
-all the way through scan_scene_titles / scan_library_root to SceneCatalogEntry:
-  - two distinct works in one folder split into two cards, scripts following
+The card model (user 2026-07-11): the Library is a launcher for HAPTIC SCENES,
+not a video catalog. A card is a funscript SET (or a `.forge`/`.output` bundle,
+or a pre-rendered e-stim SOUND) plus the video whose name it matches. These
+tests prove the real-world folder shapes wired through scan_scene_titles /
+scan_library_root to SceneCatalogEntry:
+
+  - a video with NO haptic asset is not a card (source pieces, unscripted clips)
+  - each funscript SET finds its own video → distinct scripts = distinct cards
+  - same-name video renders (4k + 1080p) collapse into ONE card as a choice
   - funscripts in a separate subfolder attach to their video
   - hidden (dot-prefixed) folders are never scanned
-  - a .output export folder becomes the title's bundle
-  - single-title folders stay named after the folder (unchanged behavior)
+  - a .output / .forge export becomes the card's bundle
+  - an e-stim sound with no funscript forms a card; a stray sound does not
 """
 
 from __future__ import annotations
@@ -28,10 +34,20 @@ def _names(entries):
     return {e.name for e in entries}
 
 
-# ── Two works dumped in one folder ────────────────────────────────────────────
+# ── The core rule: haptics drive the card, videos alone do not ────────────────
 
-def test_ordinal_series_becomes_one_card_with_parts(tmp_path):
-    # A same-name ordinal series (Vol 1/2) is ONE card with a part picker.
+def test_video_without_funscript_is_not_a_card(tmp_path):
+    # darling 3/4/5 — three videos, no funscript anywhere → NO tiles. Videos are
+    # not playable haptic scenes on their own.
+    d = tmp_path / "the_unit"
+    for n in (3, 4, 5):
+        _touch(d, f"darling{n} high.mp4")
+    assert scan_scene_titles(d) == []
+
+
+def test_each_funscript_set_is_its_own_card(tmp_path):
+    # Magik Vol 1 and Vol 2 each have their own script → TWO cards, not one
+    # collapsed series. Distinct scripts = distinct works.
     d = tmp_path / "Magik"
     for f in [
         "Magik Vol 1.mp4", "Magik Vol 1.alpha.funscript", "Magik Vol 1.beta.funscript",
@@ -40,38 +56,68 @@ def test_ordinal_series_becomes_one_card_with_parts(tmp_path):
         _touch(d, f)
 
     entries = scan_scene_titles(d)
-    assert len(entries) == 1
-    e = entries[0]
-    assert e.name == "Magik"                 # single entry → folder name
-    assert e.needs_part_choice and e.is_ambiguous
-    assert {p.label for p in e.parts} == {"Volume 1", "Volume 2"}
-    for p in e.parts:                        # each part keeps its own media
-        assert len(p.videos) == 1
-        assert set(p.funscript_sets[0].channels) == {"alpha", "beta"}
+    assert len(entries) == 2
+    assert _names(entries) == {"Magik Vol 1", "Magik Vol 2"}
+    for e in entries:
+        assert len(e.videos) == 1
+        assert set(e.funscript_sets[0].channels) == {"alpha", "beta"}
 
 
-def test_glued_number_series_grouped(tmp_path):
-    # 'darling3 high' / 'darling4 high' / 'darling5 high' — number glued to the
-    # name — still recognised as a 3-part series via sibling detection.
-    d = tmp_path / "the_unit"
-    for n in (3, 4, 5):
-        _touch(d, f"darling{n} high.mp4")
+def test_scripted_video_beside_unscripted_pieces(tmp_path):
+    # A scripted main video sitting next to shorter unscripted source pieces:
+    # only the scripted one is a card.
+    d = tmp_path / "megamix"
+    _touch(d, "megamix.mp4")
+    _touch(d, "megamix.funscript")
+    _touch(d, "piece_a.mp4")            # source piece, no script
+    _touch(d, "piece_b.mp4")            # source piece, no script
     entries = scan_scene_titles(d)
     assert len(entries) == 1
-    e = entries[0]
-    assert e.name == "the_unit"
-    assert e.needs_part_choice
-    assert [p.ordinal_number for p in e.parts] == [3, 4, 5]
+    assert entries[0].name == "megamix"
 
 
-def test_different_works_not_grouped_as_series(tmp_path):
-    # animopron-style: distinct names in one folder stay separate cards.
+def test_distinct_scripted_works_get_distinct_cards(tmp_path):
+    # animopron-style: several scripted works in one folder → a card each.
     d = tmp_path / "animopron"
-    for f in ["Breaking The Quiet.mp4", "Lara In Trouble.mp4", "Prison Battleship.mp4"]:
+    for f in [
+        "Breaking The Quiet.mp4", "Breaking The Quiet.funscript",
+        "Lara In Trouble.mp4", "Lara In Trouble.funscript",
+        "Prison Battleship.mp4", "Prison Battleship.funscript",
+    ]:
         _touch(d, f)
     entries = scan_scene_titles(d)
     assert len(entries) == 3
-    assert all(not e.needs_part_choice for e in entries)
+    assert _names(entries) == {
+        "Breaking The Quiet", "Lara In Trouble", "Prison Battleship"
+    }
+
+
+def test_same_video_renders_collapse_to_one_card(tmp_path):
+    # 4k + 1080p of the same work, one script → ONE card offering both renders.
+    d = tmp_path / "Mommy"
+    _touch(d, "Mommy.4k.mp4")
+    _touch(d, "Mommy.1080p.mp4")
+    _touch(d, "Mommy.funscript")
+    entries = scan_scene_titles(d)
+    assert len(entries) == 1
+    e = entries[0]
+    assert len(e.videos) == 2
+    assert e.needs_video_choice
+    assert len(e.funscript_sets) == 1
+
+
+def test_edit_variant_scripts_are_one_card_two_sets(tmp_path):
+    # Original + a bracketed edit-variant of the SAME video → one card with two
+    # funscript sets (a pick), not two cards.
+    d = tmp_path / "Magik"
+    _touch(d, "Magik.mp4")
+    _touch(d, "Magik.funscript")
+    _touch(d, "Magik [E-Stim & Popper Edit].funscript")
+    entries = scan_scene_titles(d)
+    assert len(entries) == 1
+    e = entries[0]
+    assert len(e.funscript_sets) == 2
+    assert e.needs_funscript_set_choice
 
 
 def test_different_titles_in_one_folder_split(tmp_path):
@@ -95,7 +141,7 @@ def test_funscripts_in_subfolder_attach(tmp_path):
     entries = scan_scene_titles(d)
     assert len(entries) == 1
     e = entries[0]
-    assert e.name == "Scene"           # single title → folder name
+    assert e.name == "Scene"           # single scene → folder name
     assert len(e.videos) == 1
     assert len(e.funscript_sets) == 1
     assert set(e.funscript_sets[0].channels) == {"alpha", "beta"}
@@ -117,11 +163,12 @@ def test_dot_folders_skipped(tmp_path):
     e = entries[0]
     # Only the loose top-level script — nothing pulled from dot-folders.
     assert len(e.funscript_sets) == 1
-    all_paths = [e.funscript_sets[0].main_path or ""] + list(e.funscript_sets[0].channels.values())
+    ch = e.funscript_sets[0].channels
+    all_paths = [e.funscript_sets[0].main_path or ""] + list(ch.values())
     assert not any(".Scene.forge" in p or "pre_screech" in p for p in all_paths)
 
 
-# ── .output export folder → title bundle ──────────────────────────────────────
+# ── Export bundle → card bundle ───────────────────────────────────────────────
 
 def test_output_folder_becomes_bundle(tmp_path):
     d = tmp_path / "Victoria"
@@ -135,8 +182,7 @@ def test_output_folder_becomes_bundle(tmp_path):
     e = entries[0]
     assert e.name == "Victoria"
     assert len(e.videos) == 1
-    # The .output is recorded as the bundle (lazy import at activation) — NOT
-    # gathered as loose funscripts.
+    # The .output is the bundle (lazy import at activation) — NOT loose scripts.
     assert e.bundle_path is not None
     assert e.bundle_path.endswith("Victoria.output")
     assert len(e.funscript_sets) == 0
@@ -151,10 +197,96 @@ def test_forge_zip_becomes_bundle(tmp_path):
     assert entries[0].bundle_path.endswith("Oaks.forge")
 
 
-# ── Library-root walk: multi-title + flat-dump ────────────────────────────────
+def test_bundle_without_loose_video_still_a_card(tmp_path):
+    # A self-contained .output with no loose video is still playable (importer
+    # relinks its video) → one card named for the work.
+    d = tmp_path / "_stage"
+    _touch(d / "Prisoner.output" / "E-Stim", "Prisoner.alpha.funscript")
+    entries = scan_scene_titles(d)
+    assert len(entries) == 1
+    assert entries[0].name == "Prisoner"
+    assert entries[0].bundle_path is not None
+
+
+# ── e-stim sound as the haptic asset ──────────────────────────────────────────
+
+def test_estim_sound_forms_a_card(tmp_path):
+    # No funscript — the e-stim mp3 IS the haptic track → a card.
+    d = tmp_path / "Clutch"
+    _touch(d, "Clutch.mp4")
+    _touch(d, "Clutch ESTIM mild.mp3")
+    entries = scan_scene_titles(d)
+    assert len(entries) == 1
+    assert entries[0].name == "Clutch"
+    assert len(entries[0].audio_tracks) == 1
+
+
+def test_estim_audio_subfolder_folds_into_parent(tmp_path):
+    # 'Clutch spicy' style: an audio-only subfolder of a scene folds its estim
+    # audio into the parent's audio list, not a separate card.
+    scene = tmp_path / "Clutch"
+    _touch(scene, "Clutch.mp4")
+    _touch(scene, "Clutch ESTIM mild.mp3")
+    _touch(scene / "Clutch spicy", "Clutch ESTIM Spicy Ramp.mp3")
+    _touch(scene / "Clutch spicy", "Clutch ESTIM Spicy Ramp Ending.mp3")
+
+    scenes = scan_library_root(tmp_path)
+    assert _names(scenes) == {"Clutch"}          # one card, spicy folded in
+    clutch = scenes[0]
+    assert len(clutch.audio_tracks) == 3         # mild + 2 spicy ramps
+
+
+def test_stray_sound_without_video_is_dropped(tmp_path):
+    # A beat track with no matching video is not a scene → no tile.
+    d = tmp_path / "loose"
+    _touch(d, "some_beat_track.mp3")
+    assert scan_scene_titles(d) == []
+
+
+def test_name_matched_sound_makes_a_scene(tmp_path):
+    # A sound that matches a video by name is that video's haptic track (many
+    # scenes ship as video + e-stim MP3, no funscript) → one card, not video-only.
+    d = tmp_path / "clip"
+    _touch(d, "clip.mp4")
+    _touch(d, "clip estim.mp3")
+    entries = scan_scene_titles(d)
+    assert len(entries) == 1
+    assert not entries[0].is_video_only
+    assert entries[0].has_haptics
+    assert len(entries[0].audio_tracks) == 1
+
+
+def test_noise_tagged_video_pairs_with_plain_estim_mp3(tmp_path):
+    # The real-world E:/videos shape: an encoder-noise video name pairs with an
+    # estim MP3 named for the plain work.
+    d = tmp_path / "_Klinik hb"
+    _touch(d, "Klinik Industries Vi22 Hq Chf3 Iris3 5120x1440.mkv")
+    _touch(d, "Klinik Industries Vi22 Hq Chf3 Iris3.mp4")
+    _touch(d, "Klinik Industries Vi22 - Triphase.mp3")
+    entries = scan_scene_titles(d)
+    assert len(entries) == 1
+    e = entries[0]
+    assert not e.is_video_only
+    assert len(e.videos) == 2           # both renders collapse into one card
+    assert len(e.audio_tracks) == 1     # the estim MP3 is the haptic track
+
+
+def test_ordinal_parts_stay_separate_despite_resolution_suffix(tmp_path):
+    # 'Part 1 4K' / 'Part 2 4K60' — the ordinal must survive next to a
+    # resolution token (it's not a render pass-number).
+    d = tmp_path / "Jet Black"
+    _touch(d, "Jet Black - Part 1 4K.mp4")
+    _touch(d, "Jet Black - Part 1 By Fb.mp3")
+    _touch(d, "Jet Black - Part 2 4K60.mp4")
+    _touch(d, "Jet Black - Part 2 By Fb.mp3")
+    entries = scan_scene_titles(d)
+    assert {e.name for e in entries} == {"Jet Black Part 1", "Jet Black Part 2"}
+
+
+# ── Library-root walk ─────────────────────────────────────────────────────────
 
 def test_library_root_flat_dump_splits_into_cards(tmp_path):
-    # A single-folder dump of two works, no subfolders.
+    # A single-folder dump of two scripted works, no subfolders.
     for f in ["Magik.mp4", "Magik.alpha.funscript",
               "Prisoner.mp4", "Prisoner.alpha.funscript"]:
         _touch(tmp_path, f)
@@ -169,23 +301,6 @@ def test_library_root_per_folder_single_title_named_by_folder(tmp_path):
     _touch(tmp_path / "SceneB", "b.funscript")
     scenes = scan_library_root(tmp_path)
     assert _names(scenes) == {"SceneA", "SceneB"}
-
-
-# ── Per-title pins don't collide (two titles, one folder) ─────────────────────
-
-def test_estim_audio_subfolder_folds_into_parent(tmp_path):
-    # 'Clutch spicy' style: an audio-only subfolder of a video scene folds its
-    # estim audio into the parent's audio picker, not a separate card.
-    scene = tmp_path / "Clutch"
-    _touch(scene, "Clutch.mp4")
-    _touch(scene, "Clutch ESTIM mild.mp3")
-    _touch(scene / "Clutch spicy", "Clutch ESTIM Spicy Ramp.mp3")
-    _touch(scene / "Clutch spicy", "Clutch ESTIM Spicy Ramp Ending.mp3")
-
-    scenes = scan_library_root(tmp_path)
-    assert _names(scenes) == {"Clutch"}          # one card, spicy folded in
-    clutch = scenes[0]
-    assert len(clutch.audio_tracks) == 3         # mild + 2 spicy ramps
 
 
 def test_underscore_staging_folder_named_by_content(tmp_path):
@@ -213,51 +328,15 @@ def test_scripts_subfolder_does_not_leak_a_card(tmp_path):
     names = _names(scenes)
     assert "Celestial Succubus" in names
     assert not any("Scripts" in n for n in names)
-    # And the scripts did fold into the parent.
     cs = next(e for e in scenes if e.name == "Celestial Succubus")
     assert len(cs.funscript_sets) == 1
 
 
-def test_series_part_choice_is_never_cached(tmp_path):
-    # The user's requirement: for a series (the_torch sc 1/2/3), the part is
-    # chosen every time and NOT cached. is_pinnable gates both pin replay and
-    # pin save in activation — it must be False for a series, True otherwise.
-    from app.library.pins import is_pinnable
-
-    series_dir = tmp_path / "the-torch"
-    for n in (1, 2, 3):
-        _touch(series_dir, f"the torch sc {n}.mp4")
-    series = scan_scene_titles(series_dir)[0]
-    assert series.needs_part_choice
-    assert is_pinnable(series) is False        # never replayed, never saved
-
-    solo_dir = tmp_path / "Solo"
-    _touch(solo_dir, "Solo.mp4")
-    _touch(solo_dir, "Solo.alpha.funscript")
-    solo = scan_scene_titles(solo_dir)[0]
-    assert is_pinnable(solo) is True           # normal scenes still pin
-
-
-def test_series_part_carries_its_own_media(tmp_path):
-    # Each part resolves to its own video (what the picker hands to activation).
-    d = tmp_path / "Show"
-    for n in (1, 2, 3):
-        _touch(d, f"Show sc {n}.mp4")
-        _touch(d, f"Show sc {n}.alpha.funscript")
-    e = scan_scene_titles(d)[0]
-    assert len(e.parts) == 3
-    for part in e.parts:
-        assert part.default_video is not None
-        assert part.default_funscript_set is not None
-        # the part's video/script share its ordinal number in the filename
-        n = part.ordinal_number
-        assert f"sc {n}" in part.default_video.filename.lower()
-
+# ── Per-card pins ─────────────────────────────────────────────────────────────
 
 def test_distinct_works_get_distinct_pins(tmp_path):
     from app.library.pins import pin_path_for
 
-    # Two genuinely different works in one folder → two cards, distinct pins.
     d = tmp_path / "Mixed"
     for f in ["Magik.mp4", "Magik.alpha.funscript",
               "Prisoner.mp4", "Prisoner.alpha.funscript"]:
@@ -266,3 +345,61 @@ def test_distinct_works_get_distinct_pins(tmp_path):
     assert len(entries) == 2
     paths = {str(pin_path_for(e)) for e in entries}
     assert len(paths) == 2
+
+
+# ── Standalone videos (Videos / All filters) ──────────────────────────────────
+
+def test_standalone_video_only_with_include_flag(tmp_path):
+    # A video with no haptics is omitted by default but surfaces (tagged) when
+    # standalone videos are requested — the 'Videos' filter's source.
+    d = tmp_path / "clips"
+    _touch(d, "lonely.mp4")
+    assert scan_scene_titles(d) == []
+    with_v = scan_scene_titles(d, include_standalone=True)
+    assert len(with_v) == 1
+    assert with_v[0].is_video_only
+    assert not with_v[0].has_haptics
+
+
+def test_standalone_collapses_same_name_renders(tmp_path):
+    # 4k + 1080p of an unscripted work → ONE standalone-video card, two renders.
+    d = tmp_path / "clips"
+    _touch(d, "beach.4k.mp4")
+    _touch(d, "beach.1080p.mp4")
+    entries = scan_scene_titles(d, include_standalone=True)
+    assert len(entries) == 1
+    assert entries[0].is_video_only
+    assert len(entries[0].videos) == 2
+
+
+def test_scripted_video_not_duplicated_as_standalone(tmp_path):
+    # A scripted video must NOT also appear as a standalone-video card.
+    d = tmp_path / "Scene"
+    _touch(d, "Scene.mp4")
+    _touch(d, "Scene.funscript")
+    entries = scan_scene_titles(d, include_standalone=True)
+    assert len(entries) == 1
+    assert not entries[0].is_video_only
+    assert entries[0].has_haptics
+
+
+def test_library_root_tags_standalone_videos(tmp_path):
+    # End-to-end: a scripted scene and an unscripted clip folder → the clip is
+    # tagged is_video_only so the default filter can hide it.
+    _make = lambda folder, files: [_touch(tmp_path / folder, f) for f in files]
+    _make("Scripted", ["s.mp4", "s.funscript"])
+    _make("Raw", ["raw.mp4"])
+    scenes = scan_library_root(tmp_path)
+    by_name = {s.name: s for s in scenes}
+    assert not by_name["Scripted"].is_video_only
+    assert by_name["Raw"].is_video_only
+
+
+def test_scenes_still_pinnable(tmp_path):
+    from app.library.pins import is_pinnable
+
+    d = tmp_path / "Solo"
+    _touch(d, "Solo.mp4")
+    _touch(d, "Solo.alpha.funscript")
+    solo = scan_scene_titles(d)[0]
+    assert is_pinnable(solo) is True

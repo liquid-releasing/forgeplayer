@@ -234,6 +234,24 @@ class SceneCatalogEntry:
     entry's top-level `videos` / `funscript_sets` / `audio_tracks` mirror the
     default (first) part so part-unaware code paths still work."""
 
+    is_video_only: bool = False
+    """True for a STANDALONE-VIDEO card: a video (or same-name render group)
+    with no funscript / bundle / e-stim sound. These are hidden from the curated
+    'Videos with Funscripts' view and surface only under the 'Videos' / 'All'
+    library filters — the player can still play them, they just aren't haptic
+    scenes. See `has_haptics`."""
+
+    @property
+    def has_haptics(self) -> bool:
+        """True when this scene carries something to play on a device — a
+        funscript set, an export bundle, or a pre-rendered e-stim sound. The
+        inverse of a pure standalone-video card."""
+        if self.funscript_sets or self.bundle_path:
+            return True
+        # An e-stim sound that formed the card counts; plain music on a
+        # video-only card does not (that card is flagged is_video_only).
+        return bool(self.audio_tracks) and not self.is_video_only
+
     @property
     def default_video(self) -> VideoVariant | None:
         """First entry in self.videos — the scanner's default-pick."""

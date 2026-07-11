@@ -25,23 +25,18 @@ from __future__ import annotations
 
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 from app.library.catalog import (
-    VIDEO_RESOLUTION_RANK,
     AudioVariant,
     FunscriptSet,
     SceneCatalogEntry,
-    ScenePart,
     SubtitleTrack,
     VideoVariant,
 )
-from typing import TYPE_CHECKING
 
 from app.library.channels import classify_funscript_channel
-
-if TYPE_CHECKING:  # annotations only — avoids a package-init import cycle
-    from app.recognizer.cluster import TitleCluster
 
 
 # ── File-type extensions ──────────────────────────────────────────────────────
@@ -366,9 +361,11 @@ def _is_companion_subfolder(d: Path) -> bool:
     'Clutch spicy'. A subfolder WITH a video is its own scene — left alone."""
     has_media = has_vid = False
     try:
-        for f in d.iterdir():
+        for f in d.rglob("*"):
             if not f.is_file():
                 continue
+            if any(p.startswith(".") for p in f.relative_to(d).parts):
+                continue  # ignore hidden/working subdirs
             ext = f.suffix.lower()
             if ext in VIDEO_EXTS:
                 has_vid = True
@@ -378,6 +375,30 @@ def _is_companion_subfolder(d: Path) -> bool:
     except OSError:
         return False
     return has_media and not has_vid
+
+
+# Subfolder names that mark a re-encode of the PARENT scene (handbrake condense,
+# same timing) — its videos are extra renders of the parent work, not a new
+# scene. Folded into the parent by name so they don't spawn a duplicate card.
+_REENCODE_SUBFOLDER_NAMES = frozenset({"hb", "handbrake", "handbraked", "compressed"})
+
+
+def _is_reencode_subfolder(d: Path) -> bool:
+    """A subfolder holding VIDEO re-encodes of the parent scene — a folder named
+    EXACTLY 'hb' / 'handbrake' / 'compressed'. Its videos fold into the parent
+    as variant renders. Match must be exact: a whole scene folder like
+    '_Klinik Industries Vi22 hb' merely ENDS in 'hb' and is NOT a re-encode
+    subfolder (folding it would slurp a real scene into its parent)."""
+    n = d.name.lower().strip()
+    if n not in _REENCODE_SUBFOLDER_NAMES:
+        return False
+    try:
+        for f in d.iterdir():
+            if f.is_file() and f.suffix.lower() in VIDEO_EXTS:
+                return True
+    except OSError:
+        pass
+    return False
 
 
 def _gather_scene_files(folder_path: Path) -> list[Path]:
@@ -402,10 +423,13 @@ def _gather_scene_files(folder_path: Path) -> list[Path]:
                 if name.lower().endswith(".output"):
                     files.append(item)  # export bundle folder → BUNDLE role
                     continue
-                if _is_companion_subfolder(item):
-                    # Pull the sidecar's funscripts AND audio (estim variants like
-                    # 'Clutch spicy') into the parent scene; they fold onto the
-                    # parent's title by name.
+                companion = _is_companion_subfolder(item)
+                reencode = False if companion else _is_reencode_subfolder(item)
+                if companion or reencode:
+                    # Pull the sidecar's media into the parent scene so it folds
+                    # onto the parent by name: funscripts + audio for a companion
+                    # ('Clutch spicy' estim variants, scripts-in-own-folder), and
+                    # ALSO video for a re-encode folder ('hb' handbrake renders).
                     for sub in sorted(item.rglob("*")):
                         if not sub.is_file():
                             continue
@@ -415,6 +439,8 @@ def _gather_scene_files(folder_path: Path) -> list[Path]:
                         ext = sub.suffix.lower()
                         if ext == FUNSCRIPT_EXT or ext in AUDIO_EXTS:
                             files.append(sub)
+                        elif reencode and ext in VIDEO_EXTS:
+                            files.append(sub)
     except OSError:
         pass
     if len(files) > _MAX_FILES_PER_SCENE:
@@ -422,194 +448,362 @@ def _gather_scene_files(folder_path: Path) -> list[Path]:
     return files
 
 
-def _title_to_entry(title: TitleCluster, folder_path: Path) -> SceneCatalogEntry:
-    """Map one recognized TITLE onto the SceneCatalogEntry the UI/activation
-    consume. Reuses the classic scanner's audio/stem helpers so behavior matches
-    the single-title path."""
-    entry = SceneCatalogEntry(folder_path=str(folder_path), name=title.display_name)
+# ── Funscript-first card assembly ─────────────────────────────────────────────
+#
+# The card model (user 2026-07-11): "we are not trying to find standalone videos
+# or audio files. we are trying to find the main video and its associated
+# funscript and/or forge file to play." The HAPTIC ASSET drives the card — the
+# video is found by name. Funscripts are cleanly named and almost always match
+# their video's name, so we match on the (noise-stripped) base stem.
 
-    # Videos — already ordered best-default-first by the recognizer.
-    video_base_stems: set[str] = set()
-    for v in title.videos:
-        entry.videos.append(VideoVariant(path=v.path, tags=frozenset(v.variant_tags)))
-        video_base_stems.add(_video_base_stem(Path(v.path).stem))
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip().lower()
 
-    # Funscript sets — group the title's funscripts by base stem (edit-variants
-    # become separate sets, same as the classic path).
+
+def _bundle_stem(name: str) -> str:
+    """Strip the export-bundle suffix off a bundle name → its work stem
+    ('Victoria.output' → 'Victoria', 'Oaks.forge' → 'Oaks')."""
+    low = name.lower()
+    for sfx, _prio in _BUNDLE_SUFFIX_PRIORITY:
+        if low.endswith(sfx):
+            return name[: -len(sfx)]
+    return name
+
+
+_ESTIM_AUDIO_RE = re.compile(r"(?i)(?<![a-z])(e[-_\s]?stim|stim)(?![a-z])")
+
+
+def _is_estim_audio(name: str) -> bool:
+    """A sound file that is ITSELF the haptic track (pre-rendered e-stim audio),
+    not music. Only such audio may FORM a card for a video with no funscript /
+    bundle. Everything else (music, beat tracks) merely folds into an existing
+    card as an alternate-audio option, or is dropped."""
+    return bool(_ESTIM_AUDIO_RE.search(name))
+
+
+# ── Work-key extraction — reduce an encoder-tagged filename to its WORK name ────
+#
+# Real scene folders name their renders with heavy noise: 'Klinik Industries
+# Vi22 Hq Chf3 Iris3 5120x1440.mkv', 'Clutch-X265-Rf20 1 Iris3.mkv'. The estim
+# MP3 that goes with them ('Klinik Industries Vi22 - Triphase.mp3') shares only
+# the WORK name. To pair them we strip everything that isn't the work: codec,
+# resolution, upscaler, quality/source tags, all-noise bracket groups, and
+# pipeline pass-numbers. Whatever name-ish tail remains on the asset (e.g.
+# 'Triphase', 'ESTIM mild') is fine — matching tolerates it.
+
+_NOISE_WORDS = frozenset({
+    "hq", "hd", "hb", "hbs", "uhd", "hdr", "sdr", "handbrake", "handbraked",
+    "x264", "x265", "h264", "h265", "hevc", "avc", "topaz", "proteus",
+    "4k", "4k60", "4k30", "2k", "1440p", "1080p", "720p", "480p", "360p", "fhd",
+    "ultrawide", "cropped", "crop", "sbs", "lrf", "lr", "tb", "vr",
+    "rf", "apo", "chf", "iris", "rhea", "nyx", "ghq",
+})
+_NOISE_TOKEN_RE = re.compile(
+    r"(?i)^(?:iris\d*|chf\d*|rhea\d*|nyx\d*|apo\d*|apf\d*|ghq\d*|rf\d+|crf\d+"
+    r"|\d{3,4}p|\d{3,5}x\d{1,4}|\d{6,}|4k\d+)$"  # \d{3,4}p = any 720p/1080p/2160p
+)
+_TOKEN_RE = re.compile(r"\[[^\]]*\]|\([^)]*\)|[^\s._\-]+")
+
+# Words that introduce a real ORDINAL — a number right after one is part of the
+# work identity ('Part 1', 'Vol 2'), never a render pass-number, even when a
+# resolution/codec token follows it ('Part 1 4K').
+_ORDINAL_MARKERS = frozenset({
+    "part", "pt", "vol", "volume", "ep", "episode", "sc", "scene", "chapter",
+    "ch", "number", "no", "act", "day", "round", "session", "disc",
+})
+
+
+def _is_noise_token(tok: str) -> bool:
+    t = tok.lower()
+    return t in _NOISE_WORDS or bool(_NOISE_TOKEN_RE.match(t))
+
+
+def _work_tokens(stem: str) -> list[str]:
+    """WORK-name tokens of a filename stem — noise, bracket/paren annotations,
+    and render pass-numbers removed.
+
+    Bracket/paren groups (`[Supermassive 2022]`, `[ESTIM - DigitalParkingLot]`,
+    `[E-Stim & Popper Edit]`) are ANNOTATIONS (studio/year, source, edit type),
+    not the work identity — the same video and its estim MP3 usually carry
+    DIFFERENT brackets, so keeping them would break the pairing. We drop them.
+    A bare number adjacent to a render token is a pass-number ('Rf20 1 Iris3' →
+    drop the 1); a number after an ordinal marker ('Number 3', 'Pt 1') is kept."""
+    toks = _TOKEN_RE.findall(stem)
+    kinds: list[str] = []
+    for t in toks:
+        if t[:1] in "[(":
+            kinds.append("noise")           # bracket/paren annotation → drop
+        elif _is_noise_token(t):
+            kinds.append("noise")
+        elif t.isdigit():
+            kinds.append("num")
+        else:
+            kinds.append("name")
+    for i, k in enumerate(kinds):
+        if k == "num":
+            prev_word = toks[i - 1].lower() if i > 0 else ""
+            if prev_word in _ORDINAL_MARKERS:
+                continue  # 'Part 1' / 'Vol 2' — a real ordinal, keep it
+            left = kinds[i - 1] if i > 0 else None
+            right = kinds[i + 1] if i + 1 < len(kinds) else None
+            if left == "noise" or right == "noise":
+                kinds[i] = "noise"
+    return [toks[i] for i in range(len(toks)) if kinds[i] != "noise"]
+
+
+def _work_key(stem: str) -> str:
+    """Normalized WORK name for matching — noise stripped, lower-cased."""
+    return _norm(" ".join(_work_tokens(stem)))
+
+
+def _name_word_set(stem: str) -> frozenset[str]:
+    """Set of ≥2-char alphanumeric words in the work name — for token-overlap
+    matching when word ORDER differs ('Rlgl Joi Ch La Luna 3' vs 'RLGL La Luna
+    3')."""
+    out: set[str] = set()
+    for t in _work_tokens(stem):
+        for w in re.findall(r"[a-z0-9]+", t.lower()):
+            if len(w) >= 2:
+                out.add(w)
+    return frozenset(out)
+
+
+def scan_scene_titles(
+    folder: str | os.PathLike,
+    *,
+    name_single_by_folder: bool = True,
+    include_standalone: bool = False,
+) -> list[SceneCatalogEntry]:
+    """Scan one folder → one SceneCatalogEntry per playable HAPTIC SCENE.
+
+    With ``include_standalone=True`` the result ALSO contains standalone-video
+    cards (``is_video_only=True``) for any video with no haptic asset — used by
+    the library's 'Videos' / 'All' filters. Folder naming only ever keys off the
+    HAPTIC scenes, so the curated view's labels are unaffected by them.
+
+    Funscript-first. A card is a funscript SET (or a `.forge`/`.output` bundle,
+    or a pre-rendered e-stim SOUND file) plus the video whose name it matches:
+
+      - A funscript / bundle / e-stim sound finds its video by clean name match.
+        Same-name renders of that video (4k + 1080p) collapse into the ONE card
+        as a video-variant choice.
+      - A video with NO matching haptic asset is NOT a card — source pieces,
+        upscales, and unscripted clips never become tiles.
+      - Two funscript SETS with different names → two cards (Magik Vol 1 and Vol
+        2 are separate works, each with its own script).
+      - Audio that isn't itself a haptic track folds into its video's card as an
+        alternate-audio option; a sound matching no card is dropped (a stray
+        beat track never becomes a tile).
+
+    The Library is a launcher for haptic scenes — NOT a video catalog.
+    """
+    folder_path = Path(folder).resolve()
+    if not folder_path.is_dir():
+        return []
+
+    files = _gather_scene_files(folder_path)
+
+    # 1) Classify files.
+    videos: list[VideoVariant] = []
+    funscript_files: list[Path] = []
+    audio_paths: list[Path] = []
+    subtitles: list[SubtitleTrack] = []
+    archives: list[str] = []
+    preset_path: str | None = None
+    bundles: list[tuple[str, int, str]] = []  # (path, priority, work stem)
+
+    for path in files:
+        name = path.name
+        prio = _bundle_priority(name)
+        if prio:
+            bundles.append((str(path), prio, _bundle_stem(name)))
+            continue
+        ext = path.suffix.lower()
+        if ext in VIDEO_EXTS:
+            videos.append(VideoVariant(path=str(path), tags=_extract_video_tags(name)))
+        elif ext == FUNSCRIPT_EXT:
+            funscript_files.append(path)
+        elif ext in AUDIO_EXTS:
+            audio_paths.append(path)
+        elif ext in SUBTITLE_EXTS:
+            subtitles.append(SubtitleTrack(
+                path=str(path), language=_extract_subtitle_language(path.stem)))
+        elif ext in ARCHIVE_EXTS:
+            archives.append(str(path))
+        elif name.endswith(PRESET_EXT):
+            preset_path = str(path)
+
+    # 2) Video index by WORK key (encoder / resolution / upscaler noise stripped
+    #    so an estim MP3 named for the plain work finds its noise-tagged video).
+    videos_by_base: dict[str, list[VideoVariant]] = {}
+    display_of: dict[str, str] = {}
+    base_words: dict[str, frozenset[str]] = {}
+    for v in videos:
+        stem = Path(v.path).stem
+        key = _work_key(stem) or _norm(stem)
+        videos_by_base.setdefault(key, []).append(v)
+        if key not in display_of:
+            display_of[key] = " ".join(_work_tokens(stem)) or stem
+            base_words[key] = _name_word_set(stem)
+    video_base_stems = set(display_of.values())
+
+    def _match_video(asset_stem: str) -> str | None:
+        """The video this haptic asset (funscript / bundle / sound) belongs to,
+        by WORK name (None if none). Exact work-key first; then a prefix where
+        the asset is the work name plus a descriptive tail ('Klinik…Vi22 -
+        Triphase', 'Magik [E-Stim Edit]') without crossing an ordinal boundary
+        ('Magik 2' vs 'Magik'); then a conservative word-overlap fallback for
+        word-order differences."""
+        akey = _work_key(asset_stem)
+        if akey in videos_by_base:
+            return akey
+        best: str | None = None
+        for vb in videos_by_base:
+            if akey.startswith(vb):
+                tail = akey[len(vb):].lstrip(" ._-")
+                if tail == "" or not tail[0].isdigit():
+                    if best is None or len(vb) > len(best):
+                        best = vb
+        if best is not None:
+            return best
+        # Word-order fallback: the smaller work-word set is a subset of exactly
+        # one video's words (both ≥2 words). Subset (not mere overlap) keeps
+        # different ordinals apart ('…Pt 1' ⊄ '…Pt 2').
+        aset = _name_word_set(asset_stem)
+        if len(aset) < 2:
+            return None
+        hits = [vb for vb, vset in base_words.items()
+                if len(vset) >= 2 and (aset <= vset or vset <= aset)]
+        return hits[0] if len(hits) == 1 else None
+
+    # 3) Funscripts → sets by base stem.
     sets_by_stem: dict[str, FunscriptSet] = {}
-    for f in title.funscripts:
-        info = f.channel_info or classify_funscript_channel(Path(f.path).name)
+    for path in funscript_files:
+        info = classify_funscript_channel(path.name)
         fset = sets_by_stem.get(info.base_stem)
         if fset is None:
             fset = FunscriptSet(base_stem=info.base_stem)
             sets_by_stem[info.base_stem] = fset
         if info.channel == "":
             if not fset.main_path:
-                fset.main_path = f.path
+                fset.main_path = str(path)
         else:
-            fset.channels[info.channel] = f.path
+            fset.channels[info.channel] = str(path)
 
-    def _set_sort_key(fset: FunscriptSet) -> tuple:
-        stem_lower = fset.base_stem.lower()
-        matches_video = any(stem_lower == v for v in (vs.lower() for vs in video_base_stems))
-        return (0 if matches_video else 1, len(fset.base_stem), stem_lower)
-
-    entry.funscript_sets = sorted(sets_by_stem.values(), key=_set_sort_key)
-
-    # Audio — stem-matched first (reuses the classic descriptor logic).
-    for a in title.audio:
-        descriptor, matches = _audio_descriptor(Path(a.path).stem, video_base_stems)
-        entry.audio_tracks.append(AudioVariant(
-            path=a.path, stem_matches_main_video=matches, descriptor=descriptor,
-        ))
-    entry.audio_tracks.sort(
-        key=lambda a: (0 if a.stem_matches_main_video else 1, a.filename.lower())
-    )
-
-    # Subtitles / archives / preset.
-    for s in title.subtitles:
-        entry.subtitles.append(SubtitleTrack(
-            path=s.path, language=_extract_subtitle_language(Path(s.path).stem),
-        ))
-    for arc in title.archives:
-        entry.archives.append(arc.path)
-    if title.presets:
-        entry.preset_path = title.presets[0].path
-
-    # Bundle — a `.forge`/`.forgeplay`/`.output` that clustered into this title.
-    # The best (most canonical) one wins if several are present.
-    if title.bundles:
-        best = max(title.bundles, key=lambda b: _bundle_priority(Path(b.path).name))
-        entry.bundle_path = best.path
-
-    return entry
-
-
-# ── Same-name ordinal SERIES → one card with parts ────────────────────────────
-
-_SERIES_NUM_RE = re.compile(r"\d+")
-
-
-def _series_signature(title: "TitleCluster") -> tuple[str, int | None]:
-    """(series_key, part_number) for grouping a same-name ordinal series.
-
-    Two shapes both count as a series so a folder of pieces becomes ONE card:
-      - explicit/separated ordinals ('the torch sc 1/2/3', 'Magik Vol 1/2') —
-        the number is already the title's ordinal, series_key = its name.
-      - glued numbers ('darling3 high', 'darling4 high') — the LAST digit run in
-        the name is the part number; series_key blanks it so the siblings match.
-    A title with no number → (name, None): only ever its own standalone card.
-    """
-    if title.ordinal is not None:
-        return (title.canonical_key, title.ordinal.number)
-    matches = list(_SERIES_NUM_RE.finditer(title.canonical_key))
-    if not matches:
-        return (title.canonical_key, None)
-    m = matches[-1]
-    key = title.canonical_key[: m.start()] + "#" + title.canonical_key[m.end():]
-    return (key, int(m.group()))
-
-
-def _title_to_part(title: "TitleCluster", folder_path: Path) -> ScenePart:
-    e = _title_to_entry(title, folder_path)
-    if title.ordinal is not None:
-        label, num = title.ordinal.label, title.ordinal.number
-    else:
-        num = _series_signature(title)[1] or 0
-        label = str(num)
-    return ScenePart(
-        label=label, ordinal_number=num,
-        videos=e.videos, funscript_sets=e.funscript_sets,
-        audio_tracks=e.audio_tracks, bundle_path=e.bundle_path,
-    )
-
-
-def _series_entry(titles_sorted: list, folder_path: Path) -> SceneCatalogEntry:
-    """Build one multi-part card from a sorted list of series-member titles."""
-    parts = [_title_to_part(t, folder_path) for t in titles_sorted]
-    default = parts[0]
-    base = titles_sorted[0].display_name
-    if " · " in base:                       # 'Darling · 3' → 'Darling'
-        base = base.rsplit(" · ", 1)[0]
-    else:                                    # glued 'darling3 high' → 'darling high'
-        base = re.sub(r"\d+", "", base)
-        base = re.sub(r"\s+", " ", base).strip() or titles_sorted[0].display_name
-    entry = SceneCatalogEntry(
-        folder_path=str(folder_path), name=base,
-        videos=list(default.videos), funscript_sets=list(default.funscript_sets),
-        audio_tracks=list(default.audio_tracks), bundle_path=default.bundle_path,
-        parts=parts,
-    )
-    return entry
-
-
-def scan_scene_titles(folder: str | os.PathLike) -> list[SceneCatalogEntry]:
-    """Scan one folder and return ONE entry per detected TITLE (empty if none
-    playable). Multi-title aware — the Library's per-work cards come from here."""
-    # Lazy import: the recognizer package pulls in app.library.channels, so
-    # importing it at module top would close a package-init cycle
-    # (app.library.__init__ → scanner → app.recognizer → app.library.channels).
-    from app.recognizer import (
-        canonicalize,
-        cluster_files,
-        consolidate_videos_by_duration,
-        funscript_span_ms,
-        probe_resolve,
-        reconcile,
-        scan_duration_ms,
-    )
-
-    folder_path = Path(folder).resolve()
-    if not folder_path.is_dir():
-        return []
-
-    files = _gather_scene_files(folder_path)
-    recs = [canonicalize(p) for p in files]
-    titles = reconcile(cluster_files(recs))
-    # Content only adjudicates when a name match was too weak to trust:
-    #  - attach an orphan funscript to the video whose span it fits, then
-    #  - fold sibling video-titles names couldn't relate but duration can
-    #    (param-named renders). Both only probe on genuine ambiguity.
-    titles = probe_resolve(
-        titles, duration_of=scan_duration_ms, span_of=funscript_span_ms,
-    )
-    titles = consolidate_videos_by_duration(titles, duration_of=scan_duration_ms)
-
-    # Group titles that form a same-name ordinal SERIES (darling 3/4/5, Magik
-    # Vol 1/2) into ONE multi-part card; everything else is a title per card.
-    playable = [t for t in titles if t.is_playable]
-    groups: dict[str, list] = {}
+    # 4) Assemble cards, keyed by the video the haptic asset matches (or a
+    #    synthetic key for a self-contained bundle with no loose video).
+    cards: dict[str, dict] = {}
     order: list[str] = []
-    for t in playable:
-        sk = _series_signature(t)[0]
-        if sk not in groups:
-            groups[sk] = []
-            order.append(sk)
-        groups[sk].append(t)
+
+    def _card(key: str, name: str, video_key: str | None) -> dict:
+        c = cards.get(key)
+        if c is None:
+            c = {"name": name, "video_key": video_key,
+                 "sets": [], "audio": [], "bundle": None, "bundle_prio": 0}
+            cards[key] = c
+            order.append(key)
+        return c
+
+    # 4a) Funscript sets → their video. An orphan (no video) isn't a playable
+    #     scene — funscripts find their movies; a homeless one is dropped.
+    for fset in sets_by_stem.values():
+        vk = _match_video(fset.base_stem)
+        if vk is None:
+            continue
+        _card(vk, display_of[vk], vk)["sets"].append(fset)
+
+    # 4b) Bundles → their video, else a standalone bundle card (opens via the
+    #     importer — a `.forge`/`.output` is self-contained even with no loose
+    #     video).
+    for path, prio, stem in bundles:
+        vk = _match_video(stem)
+        if vk is not None:
+            c = _card(vk, display_of[vk], vk)
+        else:
+            c = _card("bundle::" + _norm(stem), stem, None)
+        if prio > c["bundle_prio"]:
+            c["bundle"], c["bundle_prio"] = path, prio
+
+    # 4c) Audio. A sound that matches a video by name is that video's haptic
+    #     track: it folds into the video's card as an alternate track, or — when
+    #     the video has no funscript/bundle — it IS the haptic asset and forms
+    #     the card (many scenes ship as video + e-stim MP3, no funscript). A
+    #     sound matching NO video is dropped (a stray beat track never tiles).
+    def _distinctive_audio_match(stem: str) -> str | None:
+        """Last-resort within-folder pairing for a sound whose video keeps an
+        unstrippable encoder tag ('Mistressandcontrolbox-…Apf2' vs
+        'MistressAndControlBox-ESTIM-v3'): attach to the UNIQUE video sharing a
+        distinctive work-word (≥6 chars, or ≥2 shared words). The uniqueness
+        guard keeps Vi22/Vi89-style siblings apart."""
+        aset = _name_word_set(stem)
+        cands = [vb for vb, vset in base_words.items()
+                 if any(len(w) >= 6 for w in (aset & vset)) or len(aset & vset) >= 2]
+        return cands[0] if len(cands) == 1 else None
+
+    for path in audio_paths:
+        descriptor, matches = _audio_descriptor(path.stem, video_base_stems)
+        av = AudioVariant(path=str(path), stem_matches_main_video=matches,
+                          descriptor=descriptor)
+        vk = _match_video(path.stem) or _distinctive_audio_match(path.stem)
+        if vk is None:
+            continue
+        if vk in cards:
+            cards[vk]["audio"].append(av)
+        else:
+            _card(vk, display_of[vk], vk)["audio"].append(av)
+
+    # 5) Materialize entries.
+    def _set_sort_key(fset: FunscriptSet, vk: str | None) -> tuple:
+        stem = _work_key(fset.base_stem)
+        return (0 if stem == vk else 1, len(fset.base_stem), fset.base_stem.lower())
 
     entries: list[SceneCatalogEntry] = []
-    for sk in order:
-        group = groups[sk]
-        nums = {n for n in (_series_signature(t)[1] for t in group) if n is not None}
-        if len(group) >= 2 and len(nums) >= 2:
-            ordered = sorted(group, key=lambda t: _series_signature(t)[1] or 0)
-            entry = _series_entry(ordered, folder_path)
-            if entry.is_playable:
-                entries.append(entry)
-        else:
-            for t in group:
-                entry = _title_to_entry(t, folder_path)
-                if entry.is_playable:
-                    entries.append(entry)
+    for key in order:
+        c = cards[key]
+        vk = c["video_key"]
+        vids = sorted(videos_by_base.get(vk, []), key=_video_sort_key) if vk else []
+        sets = sorted(c["sets"], key=lambda f: _set_sort_key(f, vk))
+        audio = sorted(c["audio"], key=lambda a: (
+            0 if a.stem_matches_main_video else 1, a.filename.lower()))
+        entry = SceneCatalogEntry(
+            folder_path=str(folder_path), name=c["name"],
+            videos=vids, funscript_sets=sets, audio_tracks=audio,
+            subtitles=list(subtitles), archives=list(archives),
+            preset_path=preset_path, bundle_path=c["bundle"],
+        )
+        if entry.is_playable:
+            entries.append(entry)
 
-    # A folder that resolves to ONE work is named after the folder — the label
-    # users expect, and what the classic single-entry scanner produced. Two
-    # exceptions keep the recognizer's content-derived name: a genuine
-    # multi-title folder (one folder name can't label several works), and a
+    # A folder that resolves to ONE scene is named after the folder — the label
+    # users expect. Exceptions keep the content-derived name: a genuine
+    # multi-scene folder (one folder name can't label several works), and a
     # '_'-prefixed staging/container folder (e.g. '_forgeplayme' holding a loose
     # 'Prisoner.mp4' + its '.output') where the folder name isn't the work.
-    if len(entries) == 1 and not folder_path.name.startswith("_"):
+    # Folder naming keys off the HAPTIC scenes first — a lone haptic scene takes
+    # the folder's name; standalone videos never displace it.
+    haptic_count = len(entries)
+    name_by_folder = name_single_by_folder and not folder_path.name.startswith("_")
+    if name_by_folder and haptic_count == 1:
         entries[0].name = folder_path.name
+
+    # Standalone-video cards: any video base not claimed by a haptic asset. Its
+    # same-name renders collapse into the one card (video-variant choice).
+    if include_standalone:
+        for key, vlist in videos_by_base.items():
+            if key in cards:
+                continue  # already part of a haptic card
+            vids = sorted(vlist, key=_video_sort_key)
+            entries.append(SceneCatalogEntry(
+                folder_path=str(folder_path), name=display_of[key],
+                videos=vids, subtitles=list(subtitles), archives=list(archives),
+                is_video_only=True,
+            ))
+
+    # A folder that is ONLY a single standalone video takes the folder name too
+    # (no haptic scene competed for it).
+    if name_by_folder and haptic_count == 0 and len(entries) == 1:
+        entries[0].name = folder_path.name
+
     return entries
 
 
@@ -634,7 +828,10 @@ def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
         return []
 
     scenes: list[SceneCatalogEntry] = []
-    has_subfolder_scenes = False
+
+    def _split(entries):
+        return ([e for e in entries if not e.is_video_only],
+                [e for e in entries if e.is_video_only])
 
     try:
         for child in sorted(root_path.iterdir()):
@@ -645,42 +842,85 @@ def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
             if _is_export_bundle_dir(child.name):
                 continue  # standalone FSF export — opened via the importer
 
-            child_titles = scan_scene_titles(child)
-            if child_titles:
-                scenes.extend(child_titles)
-                has_subfolder_scenes = True
+            # Top-level scenes of this folder (loose media directly inside it).
+            child_h, child_v = _split(scan_scene_titles(child, include_standalone=True))
 
-            # Level 3: subfolders-of-scene become their OWN scene cards. A
-            # script-only subfolder was already folded into the parent's titles
-            # (cross-folder gather) and yields nothing playable here, so there's
-            # no double-count; a video-bearing subfolder is a nested scene.
+            # Level 3: a nested subfolder can hold the scene (Clutch's videos in
+            # a subfolder, the_unit's 'Edited'). A script/audio-only companion
+            # was already folded into the parent, so skip those.
+            grand: list[SceneCatalogEntry] = []
             try:
-                for grandchild in sorted(child.iterdir()):
-                    if not grandchild.is_dir():
+                for gc in sorted(child.iterdir()):
+                    if not gc.is_dir() or gc.name.startswith("."):
                         continue
-                    if grandchild.name.startswith("."):
+                    if _is_export_bundle_dir(gc.name) or _is_companion_subfolder(gc):
                         continue
-                    if _is_export_bundle_dir(grandchild.name):
-                        continue
-                    if _is_companion_subfolder(grandchild):
-                        continue  # scripts/audio already folded into the parent
-                    for sub in scan_scene_titles(grandchild):
-                        sub.name = f"{child.name} / {sub.name}"
-                        scenes.append(sub)
-                        has_subfolder_scenes = True
+                    if _is_reencode_subfolder(gc):
+                        continue  # handbrake re-encodes already folded into parent
+                    grand.extend(scan_scene_titles(gc, include_standalone=True))
             except OSError:
                 pass
+            grand_h, grand_v = _split(grand)
+
+            # HAPTIC scenes drive the curated view's names. If the folder itself
+            # is a haptic scene, nested haptic scenes read as belonging to it;
+            # if the scene lives entirely in ONE subfolder, name it by the parent
+            # folder (rough root naming: 'Clutch', not 'Clutch / hd').
+            if child_h:
+                scenes.extend(child_h)
+                for s in grand_h:
+                    s.name = f"{child.name} / {s.name}"
+                scenes.extend(grand_h)
+            elif len(grand_h) == 1:
+                grand_h[0].name = child.name
+                scenes.extend(grand_h)
+            elif grand_h:
+                for s in grand_h:
+                    s.name = f"{child.name} / {s.name}"
+                scenes.extend(grand_h)
+
+            # Standalone-video cards ride along tagged (hidden by default view).
+            # Prefix them with the subfolder name so they read as belonging to it
+            # and don't look like bare duplicates of a root-level card of the same
+            # work (user rule: include the subfolder name). Skip the prefix when
+            # the card is already the folder's own name (a lone video folder).
+            for s in child_v:
+                if s.name != child.name:
+                    s.name = f"{child.name} / {s.name}"
+            scenes.extend(child_v)
+            for s in grand_v:
+                s.name = f"{child.name} / {s.name}"
+            scenes.extend(grand_v)
     except OSError:
         pass
 
-    # Root-as-dump (flat-dump use case) ONLY applies when the root has no scene
-    # subfolders. If the user's library is "root contains many scene folders",
-    # loose files at the root level are admin noise. When it IS a flat dump, the
-    # recognizer splits it into one card per work (Magik Vol 1, Vol 2, …) rather
-    # than one giant synthetic scene.
-    if not has_subfolder_scenes:
-        for i, entry in enumerate(scan_scene_titles(root_path)):
-            scenes.insert(i, entry)
+    # Loose files living directly in the root are their own scenes too. Under the
+    # funscript-first model haptic loose works are no longer buried as "admin
+    # noise" (Magik Number 3, ZerO game, …); loose unscripted videos ride along
+    # as standalone-video cards. name_single_by_folder=False so a lone root work
+    # keeps its own name rather than the root folder's.
+    root_scenes = scan_scene_titles(
+        root_path, name_single_by_folder=False, include_standalone=True)
+    for i, entry in enumerate(root_scenes):
+        scenes.insert(i, entry)
+
+    # Disambiguate exact duplicate display names — the same work loose at root
+    # AND inside a subfolder reads as two identical tiles. Qualify the
+    # subfolder-originating card with its subfolder name; the root-level copy
+    # keeps the bare name (user rule: include the subfolder name).
+    name_counts = Counter(s.name for s in scenes)
+    for s in scenes:
+        if name_counts[s.name] <= 1:
+            continue
+        try:
+            rel = Path(s.folder_path).relative_to(root_path)
+        except ValueError:
+            continue
+        if not rel.parts or rel.parts == (".",):
+            continue  # a root-level card keeps the bare name
+        sub = rel.parts[0]
+        if s.name != sub and not s.name.startswith(f"{sub} / "):
+            s.name = f"{sub} / {s.name}"
 
     return scenes
 

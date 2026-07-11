@@ -23,10 +23,11 @@ with mpv, cached to disk, loaded off the GUI thread). Duration is still a
 from __future__ import annotations
 
 import os
+import subprocess
 from enum import Enum
 
 from PySide6.QtCore import (
-    QAbstractListModel, QModelIndex, QRect, QSize, Qt, Signal,
+    QAbstractListModel, QEvent, QModelIndex, QPoint, QRect, QSize, Qt, Signal,
 )
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPalette, QPen,
@@ -75,6 +76,27 @@ _CARD_H  = 232
 _THUMB_H = 130
 _PAD     = 12
 
+# "Open file location" affordance — a little box-with-arrow button in each
+# card's top-right corner. Clicking it reveals the scene's primary file in the
+# OS file manager (Explorer) so the user can inspect what the recognizer
+# grouped. Hit-tested by the panel's viewport event filter, painted here.
+_OPEN_BTN = 22
+
+
+def _open_btn_rect(option_rect: QRect) -> QRect:
+    """Rect of the reveal-in-Explorer button for a card, in viewport
+    coordinates. Same geometry in paint() and the panel's hit test — driven off
+    the delegate's outer card rect (option_rect adjusted by the 4px gap)."""
+    rect = option_rect.adjusted(4, 4, -4, -4)
+    return QRect(rect.right() - _OPEN_BTN - 6, rect.y() + 6, _OPEN_BTN, _OPEN_BTN)
+
+
+def _pin_btn_rect(option_rect: QRect) -> QRect:
+    """Rect of the 📌 re-pick button — sits just left of the reveal button.
+    Only interactive when the scene actually has a saved pin."""
+    o = _open_btn_rect(option_rect)
+    return QRect(o.left() - 4 - _OPEN_BTN, o.top(), _OPEN_BTN, _OPEN_BTN)
+
 
 def _fmt_card_duration(seconds: float) -> str:
     """Running time for a Library card: H:MM:SS for hour-plus clips, M:SS
@@ -88,12 +110,17 @@ def _fmt_card_duration(seconds: float) -> str:
 
 
 class LibraryFilter(str, Enum):
-    """Which filter chip is currently active in the Library toolbar."""
-    ALL       = "all"
-    RECENT    = "recent"
-    FAVORITES = "favorites"
-    WITH_PRESET = "with_preset"
-    PLAYLISTS = "playlists"
+    """Which content filter is active in the Library toolbar.
+
+    The library is a launcher for HAPTIC scenes by default; standalone videos
+    are one click away for plain playback.
+      - WITH_FUNSCRIPTS: curated haptic scenes (funscript / bundle / e-stim).
+      - VIDEOS: standalone videos with no haptics.
+      - ALL: both.
+    """
+    ALL             = "all"
+    WITH_FUNSCRIPTS = "with_funscripts"
+    VIDEOS          = "videos"
 
 
 # ── Model ────────────────────────────────────────────────────────────────────
@@ -116,7 +143,9 @@ class LibraryModel(QAbstractListModel):
         self._all: list[SceneCatalogEntry] = []
         self._visible: list[SceneCatalogEntry] = []
         self._search: str = ""
-        self._filter: LibraryFilter = LibraryFilter.ALL
+        # Default to the curated haptic view — the library is a launcher for
+        # haptic scenes; standalone videos are one click away.
+        self._filter: LibraryFilter = LibraryFilter.WITH_FUNSCRIPTS
 
     # ── Qt interface ──
 
@@ -184,13 +213,23 @@ class LibraryModel(QAbstractListModel):
         for entry in self._all:
             if search and search not in entry.name.lower():
                 continue
-            if self._filter == LibraryFilter.WITH_PRESET and entry.preset_path is None:
+            if self._filter == LibraryFilter.WITH_FUNSCRIPTS and entry.is_video_only:
                 continue
-            # RECENT / FAVORITES / PLAYLISTS are Phase 2 — alpha shows "ALL"
-            # when those filters are picked, until the data model exists.
+            if self._filter == LibraryFilter.VIDEOS and not entry.is_video_only:
+                continue
             out.append(entry)
         out.sort(key=lambda e: e.name.lower())
         self._visible = out
+
+    # ── Filter-count helpers (for the toolbar chips) ──
+
+    def count_for(self, f: LibraryFilter) -> int:
+        """How many entries a given filter would show (ignores search)."""
+        if f == LibraryFilter.WITH_FUNSCRIPTS:
+            return sum(1 for e in self._all if not e.is_video_only)
+        if f == LibraryFilter.VIDEOS:
+            return sum(1 for e in self._all if e.is_video_only)
+        return len(self._all)
 
 
 # ── Delegate ──────────────────────────────────────────────────────────────────
@@ -371,23 +410,48 @@ class LibraryCardDelegate(QStyledItemDelegate):
             painter.drawText(pill_x + 5, line3_y + small_fm.ascent() + 1, label)
             pill_x += pill_w + 5
 
-        # Top-right corner tags: "pick" (ambiguous, no pin yet) or "📌"
-        # (pinned — user's choices are saved and replayed on next click).
-        scene_has_pin = has_pin(entry)
+        # Reveal-in-Explorer button (box with an NE arrow) — top-right corner.
+        # Semi-opaque so it stays legible over a bright thumbnail. Click routed
+        # through the panel's viewport event filter (see LibraryPanel.eventFilter).
+        btn = _open_btn_rect(option.rect)
+        btn_bg = QColor(_SURFACE)
+        btn_bg.setAlpha(230)
+        painter.setPen(QPen(_BORDER, 1))
+        painter.setBrush(QBrush(btn_bg))
+        painter.drawRoundedRect(btn, 4, 4)
+        glyph = QColor(_ACCENT) if is_hover else QColor(_TEXT_MUTED)
+        painter.setPen(QPen(glyph, 1.5))
+        painter.setBrush(Qt.NoBrush)
+        # a small "window" square, open toward the arrow…
+        sq = QRect(btn.x() + 5, btn.y() + 9, 8, 8)
+        painter.drawRoundedRect(sq, 1, 1)
+        # …with a diagonal arrow escaping its top-right corner.
+        tip = QPoint(btn.right() - 4, btn.y() + 5)
+        painter.drawLine(QPoint(sq.center().x() + 1, sq.center().y() - 1), tip)
+        painter.drawLine(tip, QPoint(tip.x() - 5, tip.y()))
+        painter.drawLine(tip, QPoint(tip.x(), tip.y() + 5))
+
+        # Corner affordances, left of the reveal button:
+        #  • 📌 pin BUTTON when the scene has saved picks — clicking it re-opens
+        #    the picker (change picks); clicking the tile body plays the pin.
+        #  • "pick" indicator when the scene needs a choice and has no pin yet —
+        #    a hint that tapping opens the picker (not itself a button).
         painter.setFont(small_font)
-        if scene_has_pin:
+        if has_pin(entry):
+            pin = _pin_btn_rect(option.rect)
+            pin_bg = QColor(_SURFACE)
+            pin_bg.setAlpha(230)
+            painter.setPen(QPen(_BORDER, 1))
+            painter.setBrush(QBrush(pin_bg))
+            painter.drawRoundedRect(pin, 4, 4)
             painter.setPen(QPen(_ACCENT))
-            tag = "📌"
+            painter.setBrush(Qt.NoBrush)
+            painter.drawText(pin, Qt.AlignCenter, "📌")
         elif entry.is_ambiguous:
             painter.setPen(QPen(_AMBIGUOUS))
-            tag = "pick"
-        else:
-            tag = ""
-        if tag:
-            tw = small_fm.horizontalAdvance(tag)
-            tag_x = rect.right() - _PAD - tw
-            tag_y = rect.y() + _PAD + small_fm.ascent()
-            painter.drawText(tag_x, tag_y, tag)
+            tw = small_fm.horizontalAdvance("pick")
+            painter.drawText(btn.left() - 6 - tw,
+                             rect.y() + _PAD + small_fm.ascent(), "pick")
 
         painter.restore()
 
@@ -473,26 +537,30 @@ class LibraryPanel(QWidget):
 
         layout.addLayout(top)
 
-        # Filter chip row
+        # Filter chip row — content filters (the library is a haptic-scene
+        # launcher by default; standalone videos are one click away).
         chip_row = QHBoxLayout()
         chip_row.setSpacing(6)
         self._chips: dict[LibraryFilter, QToolButton] = {}
-        for label, filter_val in [
-            ("All",         LibraryFilter.ALL),
-            ("Recent",      LibraryFilter.RECENT),
-            ("Favorites",   LibraryFilter.FAVORITES),
-            ("With preset", LibraryFilter.WITH_PRESET),
-            ("Playlists",   LibraryFilter.PLAYLISTS),
-        ]:
+        self._chip_labels: dict[LibraryFilter, str] = {
+            LibraryFilter.ALL:             "All",
+            LibraryFilter.WITH_FUNSCRIPTS: "Videos with Funscripts",
+            LibraryFilter.VIDEOS:          "Videos",
+        }
+        for filter_val in (
+            LibraryFilter.ALL,
+            LibraryFilter.WITH_FUNSCRIPTS,
+            LibraryFilter.VIDEOS,
+        ):
             btn = QToolButton()
-            btn.setText(label)
+            btn.setText(self._chip_labels[filter_val])
             btn.setCheckable(True)
             btn.setMinimumHeight(32)
             btn.setAutoExclusive(True)
             btn.clicked.connect(lambda _=False, f=filter_val: self._model.set_filter(f))
             chip_row.addWidget(btn)
             self._chips[filter_val] = btn
-        self._chips[LibraryFilter.ALL].setChecked(True)
+        self._chips[LibraryFilter.WITH_FUNSCRIPTS].setChecked(True)
         chip_row.addStretch()
 
         # Count label
@@ -530,6 +598,9 @@ class LibraryPanel(QWidget):
         self._view.clicked.connect(self._on_activated)
         self._view.setContextMenuPolicy(Qt.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._on_context_menu)
+        # Intercept clicks on the per-card reveal-in-Explorer button before they
+        # register as scene activations.
+        self._view.viewport().installEventFilter(self)
 
         # Kinetic touch scroll. Without this, Qt treats touch events on the
         # viewport as item clicks rather than scroll gestures — drags select
@@ -633,12 +704,65 @@ class LibraryPanel(QWidget):
             self._count_label.setText(f"{total} scenes")
         else:
             self._count_label.setText(f"{shown} of {total} scenes")
+        # Each filter chip carries its own count so the split is visible at a
+        # glance (e.g. "Videos with Funscripts (86)" vs "Videos (52)").
+        for f, btn in self._chips.items():
+            btn.setText(f"{self._chip_labels[f]}  ({self._model.count_for(f)})")
 
     def _on_thumbnail_ready(self, _video_path: str) -> None:
         """A lazily-grabbed frame finished — repaint the grid so the card
         that requested it swaps its placeholder for the frame. viewport
         update is cheap and Qt coalesces a burst of readys into one paint."""
         self._view.viewport().update()
+
+    def eventFilter(self, obj, event) -> bool:
+        """Hit-test a card's corner buttons on left-release. The reveal button
+        opens the file location; the 📌 button re-opens the picker. Either
+        CONSUMES the event so it doesn't also fire `clicked` → scene activation
+        (a plain tile click still plays the saved pick)."""
+        if obj is self._view.viewport() and event.type() == QEvent.Type.MouseButtonRelease:
+            if event.button() == Qt.LeftButton:
+                pos = event.position().toPoint()
+                index = self._view.indexAt(pos)
+                if index.isValid():
+                    entry = self._model.entry_at(index)
+                    if entry is not None:
+                        vrect = self._view.visualRect(index)
+                        if _open_btn_rect(vrect).contains(pos):
+                            self._reveal_in_explorer(entry)
+                            return True
+                        if has_pin(entry) and _pin_btn_rect(vrect).contains(pos):
+                            self.scene_change_picks_requested.emit(entry)
+                            return True
+        return super().eventFilter(obj, event)
+
+    def _reveal_in_explorer(self, entry: SceneCatalogEntry) -> None:
+        """Open the OS file manager with the scene's primary file selected, so
+        the user can see exactly what the recognizer grouped. Falls back to the
+        scene folder when there's no concrete file (or on any failure)."""
+        target = None
+        dv = entry.default_video
+        if dv is not None:
+            target = dv.path
+        elif entry.funscript_sets:
+            fs = entry.funscript_sets[0]
+            target = fs.main_path or next(iter(fs.channels.values()), None)
+        elif entry.audio_tracks:
+            target = entry.audio_tracks[0].path
+        try:
+            if target and os.path.isfile(target):
+                # `explorer /select,<path>` reveals + highlights the file. It
+                # returns a non-zero exit code even on success, so don't check.
+                subprocess.run(["explorer", "/select,", os.path.normpath(target)])
+                return
+        except Exception:
+            pass
+        folder = entry.folder_path
+        if folder and os.path.isdir(folder):
+            try:
+                os.startfile(folder)  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     def _on_activated(self, index: QModelIndex) -> None:
         entry = self._model.entry_at(index)
@@ -651,6 +775,7 @@ class LibraryPanel(QWidget):
         if entry is None:
             return
         menu = QMenu(self)
+        reveal_action = menu.addAction("⧉ Open file location")
         change_action = menu.addAction("↻ Change picks…")
         if not has_pin(entry):
             change_action.setEnabled(False)
@@ -658,5 +783,7 @@ class LibraryPanel(QWidget):
                 "No saved picks yet — the picker opens on first play."
             )
         chosen = menu.exec(self._view.viewport().mapToGlobal(pos))
-        if chosen is change_action:
+        if chosen is reveal_action:
+            self._reveal_in_explorer(entry)
+        elif chosen is change_action:
             self.scene_change_picks_requested.emit(entry)
