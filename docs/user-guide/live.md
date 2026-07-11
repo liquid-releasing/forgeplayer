@@ -2,18 +2,16 @@
 
 ## Output panel
 
-Shows the live source → destination map for the loaded scene:
+Shows the live source → destination map for the loaded scene — which
+**source** is routed to which **device**:
 
-```
-Scene Audio: <device>           <-- mp3 / mp4 audio of the video
-  <video filename>
-Haptic 1: <device>              <-- main stim port
-  <funscript or .mp3 filename>
-Haptic 2: <device>              <-- prostate port
-  <prostate source or "(mirror H1)" or "(silent — ...)"
-```
+| Row | Device | What plays there |
+| --- | --- | --- |
+| **Scene Audio** | scene-audio output | the video's own audio (the `.mp4` / `.mp3`) |
+| **Haptic 1** | main stim port | the funscript synth or the pre-rendered stim `.mp3` |
+| **Haptic 2** | prostate / second stim port | the prostate source, `(mirror H1)`, or `(silent — …)` |
 
-The H2 line tells you exactly what's playing there:
+The **Haptic 2** row tells you exactly what's playing there:
 
 - `<scene-stem>-prostate.funscript` — the prostate funscript synth.
 - `<scene-stem>.prostate.wav` — the pre-rendered prostate audio file.
