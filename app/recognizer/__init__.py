@@ -21,11 +21,14 @@ from app.recognizer.canonicalize import (
     canonicalize,
     resolution_rank,
 )
+from app.recognizer.cluster import TitleCluster, cluster_files
 
 __all__ = [
     "Ordinal",
     "RecognizedFile",
     "Role",
+    "TitleCluster",
     "canonicalize",
+    "cluster_files",
     "resolution_rank",
 ]
