@@ -250,33 +250,18 @@ class SceneCatalogEntry:
 
     @property
     def needs_video_choice(self) -> bool:
-        """True when the scene has videos with substantively different
-        renderings — specifically when upscaler states differ (original vs
-        Topaz-upscaled) or multiple different upscalers are applied.
+        """True whenever the scene has 2+ video variants — the user picks the
+        one to play on the Library page (user decision 2026-07-07: "let me
+        select the best available"). The picker pre-selects the scanner's
+        best-pick (videos[0]), so it's a one-click confirm in the common case,
+        and the choice pins so it won't re-prompt for that scene.
 
-        Resolution-only differences (4K vs 1080p of the same original) do
-        NOT trigger this — the wall config picks by resolution.
-
-        Aspect variants (ultrawide-cropped) are wall-type choices, not user
-        choices — don't trigger either.
+        Previously this only fired when upscaler states differed, treating
+        resolution-only differences (4K vs 1080p) as wall-automatic — but the
+        user wants to choose the source quality explicitly, so any multi-variant
+        scene now prompts.
         """
-        if len(self.videos) < 2:
-            return False
-        # Distinguish by the (is_upscaled) dimension of preference_tier
-        # — index [1] of the tuple. Aspect variants (index [0]) and
-        # resolution rank (index [2]) don't trigger picker.
-        upscale_states = {v.preference_tier[1] for v in self.videos}
-        if len(upscale_states) > 1:
-            return True
-        # All same upscale state — check if there are multiple distinct
-        # upscalers applied (iris vs chf vs rhea). Treat each upscaler tag
-        # as distinct content.
-        upscaler_tags_per_video = [
-            v.tags & {"iris", "chf", "topaz", "rhea", "proteus", "nyx"}
-            for v in self.videos
-        ]
-        distinct_upscaler_sets = {frozenset(t) for t in upscaler_tags_per_video if t}
-        return len(distinct_upscaler_sets) > 1
+        return len(self.videos) >= 2
 
     @property
     def needs_subtitle_choice(self) -> bool:

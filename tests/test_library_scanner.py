@@ -211,8 +211,9 @@ class TestScanSceneFolder:
         # auto-match by stem is not enough signal on its own)
         assert entry.is_ambiguous is True
         assert entry.needs_audio_choice is True
-        # Video has 2 variants but only resolution differs → no video picker
-        assert entry.needs_video_choice is False
+        # Video has 2 variants → user picks which to play on the Library page
+        # (any multi-variant scene prompts; picker pre-selects the best-pick)
+        assert entry.needs_video_choice is True
         # One funscript set, no generation variants → no funscript picker
         assert entry.needs_funscript_set_choice is False
         assert entry.needs_generation_variant_choice is False
@@ -464,9 +465,10 @@ class TestPerGroupAmbiguityFlags:
     needs_*_choice flag. Tests verify these flags fire only when the choice
     is genuinely user-dependent (not resolvable from device / wall config)."""
 
-    def test_resolution_only_video_variants_do_not_need_choice(self, tmp_path):
-        """Multiple videos of the same original at different resolutions
-        → no picker; player picks by wall resolution."""
+    def test_resolution_only_video_variants_need_choice(self, tmp_path):
+        """Multiple videos of the same original at different resolutions →
+        picker prompts (user decision 2026-07-07: choose the source quality on
+        the Library page). Picker pre-selects the scanner's best-pick."""
         scene_dir = _make_scene(tmp_path, "ResOnly", [
             "scene.mp4",          # plain
             "scene.1080p30.mp4",  # explicit 1080p
@@ -475,7 +477,7 @@ class TestPerGroupAmbiguityFlags:
         ])
         entry = scan_scene_folder(scene_dir)
         assert entry is not None
-        assert entry.needs_video_choice is False
+        assert entry.needs_video_choice is True
 
     def test_upscaler_variants_need_choice(self, tmp_path):
         """Original + Topaz-upscaled → substantively different renderings,
@@ -501,8 +503,9 @@ class TestPerGroupAmbiguityFlags:
         assert entry is not None
         assert entry.needs_video_choice is True
 
-    def test_aspect_variants_alone_do_not_need_choice(self, tmp_path):
-        """Plain + cropped → wall aspect picks automatically."""
+    def test_aspect_variants_need_choice(self, tmp_path):
+        """Plain + cropped → still 3 variants, so the user picks on the Library
+        page (any multi-variant scene prompts now)."""
         scene_dir = _make_scene(tmp_path, "Aspects", [
             "scene.mp4",
             "scene-cropped-4k.mp4",
@@ -511,7 +514,7 @@ class TestPerGroupAmbiguityFlags:
         ])
         entry = scan_scene_folder(scene_dir)
         assert entry is not None
-        assert entry.needs_video_choice is False
+        assert entry.needs_video_choice is True
 
     def test_single_audio_no_picker(self, tmp_path):
         scene_dir = _make_scene(tmp_path, "OneAudio", [
