@@ -35,17 +35,12 @@ from app.library.catalog import (
     SubtitleTrack,
     VideoVariant,
 )
+from typing import TYPE_CHECKING
+
 from app.library.channels import classify_funscript_channel
-from app.recognizer import (
-    Role,
-    canonicalize,
-    cluster_files,
-    funscript_span_ms,
-    mpv_duration_ms,
-    probe_resolve,
-    reconcile,
-)
-from app.recognizer.cluster import TitleCluster
+
+if TYPE_CHECKING:  # annotations only — avoids a package-init import cycle
+    from app.recognizer.cluster import TitleCluster
 
 
 # ── File-type extensions ──────────────────────────────────────────────────────
@@ -484,6 +479,19 @@ def _title_to_entry(title: TitleCluster, folder_path: Path) -> SceneCatalogEntry
 def scan_scene_titles(folder: str | os.PathLike) -> list[SceneCatalogEntry]:
     """Scan one folder and return ONE entry per detected TITLE (empty if none
     playable). Multi-title aware — the Library's per-work cards come from here."""
+    # Lazy import: the recognizer package pulls in app.library.channels, so
+    # importing it at module top would close a package-init cycle
+    # (app.library.__init__ → scanner → app.recognizer → app.library.channels).
+    from app.recognizer import (
+        canonicalize,
+        cluster_files,
+        consolidate_videos_by_duration,
+        funscript_span_ms,
+        mpv_duration_ms,
+        probe_resolve,
+        reconcile,
+    )
+
     folder_path = Path(folder).resolve()
     if not folder_path.is_dir():
         return []
@@ -491,10 +499,14 @@ def scan_scene_titles(folder: str | os.PathLike) -> list[SceneCatalogEntry]:
     files = _gather_scene_files(folder_path)
     recs = [canonicalize(p) for p in files]
     titles = reconcile(cluster_files(recs))
-    # Content only adjudicates when a name match was too weak to trust.
+    # Content only adjudicates when a name match was too weak to trust:
+    #  - attach an orphan funscript to the video whose span it fits, then
+    #  - fold sibling video-titles names couldn't relate but duration can
+    #    (param-named renders). Both only probe on genuine ambiguity.
     titles = probe_resolve(
         titles, duration_of=mpv_duration_ms, span_of=funscript_span_ms,
     )
+    titles = consolidate_videos_by_duration(titles, duration_of=mpv_duration_ms)
 
     entries: list[SceneCatalogEntry] = []
     for t in titles:

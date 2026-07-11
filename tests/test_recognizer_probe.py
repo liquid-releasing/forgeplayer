@@ -14,6 +14,8 @@ import json
 from app.recognizer import recognize_titles
 from app.recognizer.probe import (
     _duration_matches,
+    _name_affinity,
+    consolidate_videos_by_duration,
     funscript_span_ms,
     probe_resolve,
 )
@@ -118,3 +120,72 @@ def test_probe_noop_when_no_videos():
     titles = recognize_titles(["A.alpha.funscript", "A.beta.funscript"])
     out = probe_resolve(titles, duration_of=lambda p: 1, span_of=lambda p: 1)
     assert out is titles
+
+
+# ── consolidate_videos_by_duration: param-named render folds into its work ─────
+
+def test_name_affinity():
+    # 'wet dreams' ↔ 'wetdreams …' share a token via squashed containment.
+    assert _name_affinity("victoriaoaks wet dreams",
+                          "wetdreams medium 55 right only lrf full") is True
+    assert _name_affinity("magik", "prisoner") is False
+
+
+def test_param_render_merges_by_duration():
+    # The real dogfood shape: clean title + a param-named SBS render, same runtime.
+    titles = recognize_titles([
+        "VictoriaOaks - Wet Dreams 4k.mp4",
+        "wetdreams 4k60-medium_55_5_RIGHT_ONLY_auto_subject_v1.8.5_LRF_Full_SBS.mp4",
+    ])
+    assert len(titles) == 2   # names alone split them
+    dur = {
+        "VictoriaOaks - Wet Dreams 4k.mp4": 1_800_000,
+        "wetdreams 4k60-medium_55_5_RIGHT_ONLY_auto_subject_v1.8.5_LRF_Full_SBS.mp4": 1_800_500,
+    }
+    out = consolidate_videos_by_duration(titles, duration_of=lambda p: dur.get(p))
+    assert len(out) == 1
+    t = out[0]
+    assert len(t.videos) == 2
+    assert t.provenance == "duration"
+    # Clean title survives; render's noisy name doesn't become the label.
+    assert "wet dreams" in t.canonical_key
+
+
+def test_different_works_same_duration_not_merged():
+    # Coincidental runtime match must NOT merge unrelated works (no affinity).
+    titles = recognize_titles(["Magik.mp4", "Prisoner.mp4"])
+    out = consolidate_videos_by_duration(
+        titles, duration_of=lambda p: 1_200_000,   # identical
+    )
+    assert len(out) == 2
+
+
+def test_ordinal_conflict_blocks_duration_merge():
+    # Same duration + affinity, but Vol 1 vs Vol 2 stay separate.
+    titles = recognize_titles(["Magik Vol 1.mp4", "Magik Vol 2.mp4"])
+    out = consolidate_videos_by_duration(
+        titles, duration_of=lambda p: 1_500_000,
+    )
+    assert len(out) == 2
+
+
+def test_different_duration_affinity_not_merged():
+    titles = recognize_titles([
+        "Show.mp4", "Show extended cut bonus render.mp4",
+    ])
+    dur = {"Show.mp4": 600_000, "Show extended cut bonus render.mp4": 1_800_000}
+    out = consolidate_videos_by_duration(titles, duration_of=lambda p: dur.get(p))
+    assert len(out) == 2
+
+
+def test_single_video_folder_no_probe():
+    titles = recognize_titles(["Solo.mp4", "Solo.alpha.funscript"])
+    called = {"n": 0}
+
+    def dur(p):
+        called["n"] += 1
+        return 1
+
+    out = consolidate_videos_by_duration(titles, duration_of=dur)
+    assert out is titles
+    assert called["n"] == 0

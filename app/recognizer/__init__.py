@@ -24,6 +24,7 @@ from app.recognizer.canonicalize import (
 from app.recognizer.cluster import TitleCluster, cluster_files
 from app.recognizer.match import reconcile
 from app.recognizer.probe import (
+    consolidate_videos_by_duration,
     funscript_span_ms,
     mpv_duration_ms,
     probe_resolve,
@@ -36,6 +37,7 @@ __all__ = [
     "TitleCluster",
     "canonicalize",
     "cluster_files",
+    "consolidate_videos_by_duration",
     "funscript_span_ms",
     "mpv_duration_ms",
     "probe_resolve",

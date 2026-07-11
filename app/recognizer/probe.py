@@ -209,6 +209,95 @@ def probe_resolve(
     )
 
 
+def _ordinal_sig(t: TitleCluster) -> str | None:
+    return t.ordinal.signature if t.ordinal is not None else None
+
+
+def _same_content_duration(a_ms: float, b_ms: float) -> bool:
+    """Two videos are the SAME content when their running times are within a
+    tight window — re-encodes / aspect renders of one master share a duration;
+    different works don't. Tighter than the funscript window (which allows a
+    script to end early)."""
+    if a_ms <= 0 or b_ms <= 0:
+        return False
+    return abs(a_ms - b_ms) <= max(2_000.0, 0.01 * max(a_ms, b_ms))
+
+
+def _name_affinity(a_key: str, b_key: str) -> bool:
+    """Do two title keys share enough name to be plausibly the same work?
+
+    Guards duration-based merging against a coincidental runtime match between
+    two genuinely different works dumped in one folder. True when they share a
+    token, or one squashed key contains the other, or a ≥5-char token of one
+    appears inside the other's squashed form (catches 'wet dreams' ↔
+    'wetdreams …' where spacing differs)."""
+    ta, tb = set(a_key.split()), set(b_key.split())
+    if ta & tb:
+        return True
+    sa, sb = a_key.replace(" ", ""), b_key.replace(" ", "")
+    if len(sa) >= 4 and len(sb) >= 4 and (sa in sb or sb in sa):
+        return True
+    short, long_sq = (ta, sb) if len(sa) <= len(sb) else (tb, sa)
+    return any(len(tok) >= 5 and tok in long_sq for tok in short)
+
+
+def consolidate_videos_by_duration(
+    titles: list[TitleCluster], *, duration_of: DurationFn,
+) -> list[TitleCluster]:
+    """Merge sibling video-titles that names couldn't relate but content can.
+
+    Within one folder, two video-titles fold into one work when they (a) have
+    compatible ordinals, (b) share name affinity, and (c) have matching running
+    times. Fixes param-named renders (an SBS/VR export split off by its noisy
+    filename) while keeping genuinely-different videos and Vol 1/Vol 2 apart.
+    The cleaner-named title (fewer tokens) survives as the merge target. Pure —
+    duration is injected. Only probes when a folder has 2+ video-titles.
+    """
+    video_titles = [t for t in titles if t.has_video]
+    if len(video_titles) < 2:
+        return titles
+
+    # Cleaner (fewer name tokens) first, so param-junk folds INTO the tidy title.
+    video_titles.sort(key=lambda t: (len(t.canonical_key.split()), t.canonical_key))
+
+    dur_cache: dict[int, float | None] = {}
+
+    def dur(t: TitleCluster) -> float | None:
+        if id(t) not in dur_cache:
+            v = t.videos
+            dur_cache[id(t)] = duration_of(v[0].path) if v else None
+        return dur_cache[id(t)]
+
+    survivors: list[TitleCluster] = []
+    merged: set[int] = set()
+    for t in video_titles:
+        placed = False
+        for s in survivors:
+            if _ordinal_sig(s) != _ordinal_sig(t):
+                continue
+            if not _name_affinity(s.canonical_key, t.canonical_key):
+                continue
+            ds, dt = dur(s), dur(t)
+            if ds is None or dt is None or not _same_content_duration(ds, dt):
+                continue
+            s.files.extend(t.files)
+            s.confidence = min(s.confidence, 0.85)
+            s.provenance = "duration"
+            merged.add(id(t))
+            placed = True
+            break
+        if not placed:
+            survivors.append(t)
+
+    if not merged:
+        return titles
+    result = [t for t in titles if id(t) not in merged]
+    return sorted(
+        result,
+        key=lambda t: (t.canonical_key, t.ordinal.number if t.ordinal else -1),
+    )
+
+
 def _orphan_span(orph: TitleCluster, span_of: SpanFn) -> float | None:
     """Longest funscript span in an orphan title — its content length."""
     best: float | None = None
