@@ -66,6 +66,82 @@ def funscript_span_ms(path: str) -> float | None:
     return span
 
 
+def _mp4_duration_ms(path: str) -> float | None:
+    """Duration (ms) from an MP4/MOV ``moov→mvhd`` header — no decode, just a few
+    header reads (seeks past ``mdat``). Milliseconds of work vs spinning mpv.
+    None if the file isn't a parseable MP4-family container."""
+    import struct
+
+    def _read_header(f):
+        hdr = f.read(8)
+        if len(hdr) < 8:
+            return None, None, None
+        size, typ = struct.unpack(">I4s", hdr)
+        hlen = 8
+        if size == 1:
+            ext = f.read(8)
+            if len(ext) < 8:
+                return None, None, None
+            size = struct.unpack(">Q", ext)[0]
+            hlen = 16
+        return size, typ, hlen
+
+    try:
+        with open(path, "rb") as f:
+            # Top level: find moov (skipping ftyp/mdat/…).
+            for _ in range(64):
+                size, typ, hlen = _read_header(f)
+                if size is None:
+                    return None
+                if typ == b"moov":
+                    # moov children: find mvhd (usually first).
+                    for _ in range(64):
+                        s2, t2, h2 = _read_header(f)
+                        if s2 is None:
+                            return None
+                        if t2 == b"mvhd":
+                            data = f.read(min(s2 - h2, 40))
+                            if not data:
+                                return None
+                            if data[0] == 1:
+                                timescale = struct.unpack(">I", data[20:24])[0]
+                                duration = struct.unpack(">Q", data[24:32])[0]
+                            else:
+                                timescale = struct.unpack(">I", data[12:16])[0]
+                                duration = struct.unpack(">I", data[16:20])[0]
+                            return duration / timescale * 1000.0 if timescale else None
+                        f.seek(s2 - h2, 1)
+                    return None
+                if size < hlen:
+                    return None
+                f.seek(size - hlen, 1)
+    except (OSError, struct.error, ZeroDivisionError):
+        return None
+    return None
+
+
+def cached_duration_ms(path: str) -> float | None:
+    """Duration (ms) from the shared thumbnail duration sidecar, if already
+    probed. No decode, no mpv."""
+    try:
+        from app.thumbnails import cached_duration
+    except Exception:
+        return None
+    secs = cached_duration(path)
+    return secs * 1000.0 if secs is not None else None
+
+
+def scan_duration_ms(path: str) -> float | None:
+    """FAST duration for use DURING a library scan — a container-header read
+    (mp4/mov) then the cached sidecar, and NEVER mpv. Keeps the scan instant on
+    a large library; formats we can't header-read (wmv/avi/some mkv) simply skip
+    duration refinement until a thumbnail pass caches their duration."""
+    d = _mp4_duration_ms(path)
+    if d and d > 0:
+        return d
+    return cached_duration_ms(path)
+
+
 def mpv_duration_ms(path: str) -> float | None:
     """Video running time (ms) via the shared thumbnail duration sidecar, probing
     headlessly with mpv on a miss. Reuses ``app.thumbnails`` opportunistically

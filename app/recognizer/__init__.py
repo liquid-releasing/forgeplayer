@@ -28,6 +28,7 @@ from app.recognizer.probe import (
     funscript_span_ms,
     mpv_duration_ms,
     probe_resolve,
+    scan_duration_ms,
 )
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "probe_resolve",
     "reconcile",
     "resolution_rank",
+    "scan_duration_ms",
 ]
 
 

@@ -487,9 +487,9 @@ def scan_scene_titles(folder: str | os.PathLike) -> list[SceneCatalogEntry]:
         cluster_files,
         consolidate_videos_by_duration,
         funscript_span_ms,
-        mpv_duration_ms,
         probe_resolve,
         reconcile,
+        scan_duration_ms,
     )
 
     folder_path = Path(folder).resolve()
@@ -504,9 +504,9 @@ def scan_scene_titles(folder: str | os.PathLike) -> list[SceneCatalogEntry]:
     #  - fold sibling video-titles names couldn't relate but duration can
     #    (param-named renders). Both only probe on genuine ambiguity.
     titles = probe_resolve(
-        titles, duration_of=mpv_duration_ms, span_of=funscript_span_ms,
+        titles, duration_of=scan_duration_ms, span_of=funscript_span_ms,
     )
-    titles = consolidate_videos_by_duration(titles, duration_of=mpv_duration_ms)
+    titles = consolidate_videos_by_duration(titles, duration_of=scan_duration_ms)
 
     entries: list[SceneCatalogEntry] = []
     for t in titles:
