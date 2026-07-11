@@ -24,4 +24,20 @@
          <loc>https://forgeplayer.app/user-guide/</loc>
          <lastmod>2026-07-11</lastmod>
     </url>
+    <url>
+         <loc>https://forgeplayer.app/user-guide/library/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://forgeplayer.app/user-guide/live/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://forgeplayer.app/user-guide/settings/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://forgeplayer.app/user-guide/setup/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
 </urlset>
