@@ -42,7 +42,7 @@ from app.library.channels import (
 # and are excluded from the Haptic-output channel list.
 _ESTIM_CORES = STEREOSTIM_CHANNELS | FOC_STIM_CHANNELS | FOUR_PHASE_ELECTRODE_CHANNELS
 from app.select_picker import SelectPicker, SelectionChoices
-from app.library.pins import has_pin, load_pin, resolve_pin, save_pin
+from app.library.pins import has_pin, is_pinnable, load_pin, resolve_pin, save_pin
 from app.debug_log import DebugLog
 from app.version import __version__
 from app.widgets import ClickableSlider
@@ -2484,7 +2484,9 @@ class ControlWindow(QMainWindow):
         entry = self._resolve_bundle_backed(entry)
         choices: SelectionChoices | None = None
 
-        pin = load_pin(entry) if not force_picker else None
+        # A same-name ordinal series (parts) is chosen every time — never replay
+        # a pin for it, so the part picker always appears.
+        pin = load_pin(entry) if (not force_picker and is_pinnable(entry)) else None
         preselect: SelectionChoices | None = None
 
         if pin is not None:
@@ -2552,20 +2554,23 @@ class ControlWindow(QMainWindow):
                 set=entry.default_funscript_set.base_stem,
             )
 
-        # Persist the picks — auto-save on every successful activation.
-        try:
-            save_pin(
-                entry,
-                video=choices.video,
-                audio=choices.audio,
-                funscript_set=choices.funscript_set,
-                subtitle=choices.subtitle,
-            )
-            DebugLog.record("library.pin_saved", scene=entry.name)
-        except Exception as exc:
-            DebugLog.record(
-                "library.pin_save_failed", scene=entry.name, error=repr(exc)
-            )
+        # Persist the picks — auto-save on every successful activation. EXCEPT a
+        # same-name ordinal series: the part choice is deliberately not cached
+        # (the user picks a part each time), so we don't pin it at all.
+        if is_pinnable(entry):
+            try:
+                save_pin(
+                    entry,
+                    video=choices.video,
+                    audio=choices.audio,
+                    funscript_set=choices.funscript_set,
+                    subtitle=choices.subtitle,
+                )
+                DebugLog.record("library.pin_saved", scene=entry.name)
+            except Exception as exc:
+                DebugLog.record(
+                    "library.pin_save_failed", scene=entry.name, error=repr(exc)
+                )
 
         self._apply_scene_choices(entry, choices)
 

@@ -30,7 +30,8 @@ def _names(entries):
 
 # ── Two works dumped in one folder ────────────────────────────────────────────
 
-def test_two_volumes_in_one_folder_split(tmp_path):
+def test_ordinal_series_becomes_one_card_with_parts(tmp_path):
+    # A same-name ordinal series (Vol 1/2) is ONE card with a part picker.
     d = tmp_path / "Magik"
     for f in [
         "Magik Vol 1.mp4", "Magik Vol 1.alpha.funscript", "Magik Vol 1.beta.funscript",
@@ -39,15 +40,38 @@ def test_two_volumes_in_one_folder_split(tmp_path):
         _touch(d, f)
 
     entries = scan_scene_titles(d)
-    assert len(entries) == 2
-    names = _names(entries)
-    assert names == {"Magik · Volume 1", "Magik · Volume 2"}
-    for e in entries:
-        assert len(e.videos) == 1
-        assert len(e.funscript_sets) == 1
-        # each volume keeps its own scripts
-        set_ = e.funscript_sets[0]
-        assert "alpha" in set_.channels and "beta" in set_.channels
+    assert len(entries) == 1
+    e = entries[0]
+    assert e.name == "Magik"                 # single entry → folder name
+    assert e.needs_part_choice and e.is_ambiguous
+    assert {p.label for p in e.parts} == {"Volume 1", "Volume 2"}
+    for p in e.parts:                        # each part keeps its own media
+        assert len(p.videos) == 1
+        assert set(p.funscript_sets[0].channels) == {"alpha", "beta"}
+
+
+def test_glued_number_series_grouped(tmp_path):
+    # 'darling3 high' / 'darling4 high' / 'darling5 high' — number glued to the
+    # name — still recognised as a 3-part series via sibling detection.
+    d = tmp_path / "the_unit"
+    for n in (3, 4, 5):
+        _touch(d, f"darling{n} high.mp4")
+    entries = scan_scene_titles(d)
+    assert len(entries) == 1
+    e = entries[0]
+    assert e.name == "the_unit"
+    assert e.needs_part_choice
+    assert [p.ordinal_number for p in e.parts] == [3, 4, 5]
+
+
+def test_different_works_not_grouped_as_series(tmp_path):
+    # animopron-style: distinct names in one folder stay separate cards.
+    d = tmp_path / "animopron"
+    for f in ["Breaking The Quiet.mp4", "Lara In Trouble.mp4", "Prison Battleship.mp4"]:
+        _touch(d, f)
+    entries = scan_scene_titles(d)
+    assert len(entries) == 3
+    assert all(not e.needs_part_choice for e in entries)
 
 
 def test_different_titles_in_one_folder_split(tmp_path):
@@ -194,15 +218,51 @@ def test_scripts_subfolder_does_not_leak_a_card(tmp_path):
     assert len(cs.funscript_sets) == 1
 
 
-def test_multititle_pins_are_distinct(tmp_path):
+def test_series_part_choice_is_never_cached(tmp_path):
+    # The user's requirement: for a series (the_torch sc 1/2/3), the part is
+    # chosen every time and NOT cached. is_pinnable gates both pin replay and
+    # pin save in activation — it must be False for a series, True otherwise.
+    from app.library.pins import is_pinnable
+
+    series_dir = tmp_path / "the-torch"
+    for n in (1, 2, 3):
+        _touch(series_dir, f"the torch sc {n}.mp4")
+    series = scan_scene_titles(series_dir)[0]
+    assert series.needs_part_choice
+    assert is_pinnable(series) is False        # never replayed, never saved
+
+    solo_dir = tmp_path / "Solo"
+    _touch(solo_dir, "Solo.mp4")
+    _touch(solo_dir, "Solo.alpha.funscript")
+    solo = scan_scene_titles(solo_dir)[0]
+    assert is_pinnable(solo) is True           # normal scenes still pin
+
+
+def test_series_part_carries_its_own_media(tmp_path):
+    # Each part resolves to its own video (what the picker hands to activation).
+    d = tmp_path / "Show"
+    for n in (1, 2, 3):
+        _touch(d, f"Show sc {n}.mp4")
+        _touch(d, f"Show sc {n}.alpha.funscript")
+    e = scan_scene_titles(d)[0]
+    assert len(e.parts) == 3
+    for part in e.parts:
+        assert part.default_video is not None
+        assert part.default_funscript_set is not None
+        # the part's video/script share its ordinal number in the filename
+        n = part.ordinal_number
+        assert f"sc {n}" in part.default_video.filename.lower()
+
+
+def test_distinct_works_get_distinct_pins(tmp_path):
     from app.library.pins import pin_path_for
 
-    d = tmp_path / "Magik"
-    for f in ["Magik Vol 1.mp4", "Magik Vol 1.alpha.funscript",
-              "Magik Vol 2.mp4", "Magik Vol 2.alpha.funscript"]:
+    # Two genuinely different works in one folder → two cards, distinct pins.
+    d = tmp_path / "Mixed"
+    for f in ["Magik.mp4", "Magik.alpha.funscript",
+              "Prisoner.mp4", "Prisoner.alpha.funscript"]:
         _touch(d, f)
     entries = scan_scene_titles(d)
     assert len(entries) == 2
     paths = {str(pin_path_for(e)) for e in entries}
-    # Distinct pin files → pinning Vol 1's picks never clobbers Vol 2's.
     assert len(paths) == 2

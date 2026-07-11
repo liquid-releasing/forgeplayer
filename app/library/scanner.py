@@ -32,6 +32,7 @@ from app.library.catalog import (
     AudioVariant,
     FunscriptSet,
     SceneCatalogEntry,
+    ScenePart,
     SubtitleTrack,
     VideoVariant,
 )
@@ -484,6 +485,64 @@ def _title_to_entry(title: TitleCluster, folder_path: Path) -> SceneCatalogEntry
     return entry
 
 
+# ── Same-name ordinal SERIES → one card with parts ────────────────────────────
+
+_SERIES_NUM_RE = re.compile(r"\d+")
+
+
+def _series_signature(title: "TitleCluster") -> tuple[str, int | None]:
+    """(series_key, part_number) for grouping a same-name ordinal series.
+
+    Two shapes both count as a series so a folder of pieces becomes ONE card:
+      - explicit/separated ordinals ('the torch sc 1/2/3', 'Magik Vol 1/2') —
+        the number is already the title's ordinal, series_key = its name.
+      - glued numbers ('darling3 high', 'darling4 high') — the LAST digit run in
+        the name is the part number; series_key blanks it so the siblings match.
+    A title with no number → (name, None): only ever its own standalone card.
+    """
+    if title.ordinal is not None:
+        return (title.canonical_key, title.ordinal.number)
+    matches = list(_SERIES_NUM_RE.finditer(title.canonical_key))
+    if not matches:
+        return (title.canonical_key, None)
+    m = matches[-1]
+    key = title.canonical_key[: m.start()] + "#" + title.canonical_key[m.end():]
+    return (key, int(m.group()))
+
+
+def _title_to_part(title: "TitleCluster", folder_path: Path) -> ScenePart:
+    e = _title_to_entry(title, folder_path)
+    if title.ordinal is not None:
+        label, num = title.ordinal.label, title.ordinal.number
+    else:
+        num = _series_signature(title)[1] or 0
+        label = str(num)
+    return ScenePart(
+        label=label, ordinal_number=num,
+        videos=e.videos, funscript_sets=e.funscript_sets,
+        audio_tracks=e.audio_tracks, bundle_path=e.bundle_path,
+    )
+
+
+def _series_entry(titles_sorted: list, folder_path: Path) -> SceneCatalogEntry:
+    """Build one multi-part card from a sorted list of series-member titles."""
+    parts = [_title_to_part(t, folder_path) for t in titles_sorted]
+    default = parts[0]
+    base = titles_sorted[0].display_name
+    if " · " in base:                       # 'Darling · 3' → 'Darling'
+        base = base.rsplit(" · ", 1)[0]
+    else:                                    # glued 'darling3 high' → 'darling high'
+        base = re.sub(r"\d+", "", base)
+        base = re.sub(r"\s+", " ", base).strip() or titles_sorted[0].display_name
+    entry = SceneCatalogEntry(
+        folder_path=str(folder_path), name=base,
+        videos=list(default.videos), funscript_sets=list(default.funscript_sets),
+        audio_tracks=list(default.audio_tracks), bundle_path=default.bundle_path,
+        parts=parts,
+    )
+    return entry
+
+
 def scan_scene_titles(folder: str | os.PathLike) -> list[SceneCatalogEntry]:
     """Scan one folder and return ONE entry per detected TITLE (empty if none
     playable). Multi-title aware — the Library's per-work cards come from here."""
@@ -516,13 +575,32 @@ def scan_scene_titles(folder: str | os.PathLike) -> list[SceneCatalogEntry]:
     )
     titles = consolidate_videos_by_duration(titles, duration_of=scan_duration_ms)
 
+    # Group titles that form a same-name ordinal SERIES (darling 3/4/5, Magik
+    # Vol 1/2) into ONE multi-part card; everything else is a title per card.
+    playable = [t for t in titles if t.is_playable]
+    groups: dict[str, list] = {}
+    order: list[str] = []
+    for t in playable:
+        sk = _series_signature(t)[0]
+        if sk not in groups:
+            groups[sk] = []
+            order.append(sk)
+        groups[sk].append(t)
+
     entries: list[SceneCatalogEntry] = []
-    for t in titles:
-        if not t.is_playable:
-            continue
-        entry = _title_to_entry(t, folder_path)
-        if entry.is_playable:
-            entries.append(entry)
+    for sk in order:
+        group = groups[sk]
+        nums = {n for n in (_series_signature(t)[1] for t in group) if n is not None}
+        if len(group) >= 2 and len(nums) >= 2:
+            ordered = sorted(group, key=lambda t: _series_signature(t)[1] or 0)
+            entry = _series_entry(ordered, folder_path)
+            if entry.is_playable:
+                entries.append(entry)
+        else:
+            for t in group:
+                entry = _title_to_entry(t, folder_path)
+                if entry.is_playable:
+                    entries.append(entry)
 
     # A folder that resolves to ONE work is named after the folder — the label
     # users expect, and what the classic single-entry scanner produced. Two
