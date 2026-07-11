@@ -328,6 +328,12 @@ def canonicalize(path: str | Path) -> RecognizedFile:
 
     Pure and fast — no filesystem access beyond reading the path string.
     """
+    # Normalize Windows separators up front so a backslash path reduces to its
+    # filename on any host OS (on POSIX, Path won't split on '\\', leaving the
+    # drive/dirs glued to the stem). Titles are authored on Windows; the tests
+    # and CI run cross-platform.
+    if isinstance(path, str):
+        path = path.replace("\\", "/")
     p = Path(path)
     role, channel, channel_info, stem = _role_and_stem(p)
 
