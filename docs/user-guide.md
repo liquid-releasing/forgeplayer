@@ -77,6 +77,17 @@ plus the video it matches by name. A video with **no** funscript / bundle /
 stim sound isn't a haptic scene, so it doesn't get a tile in the default view
 (you can still show plain videos — see **Filters** below).
 
+!!! note "ForgePlayer plays finished output, not FunscriptForge work files"
+    ForgePlayer plays **loose funscripts**, `.output/` device folders, and
+    `.forge` / `.forgeplay` **bundles** — the finished, shareable output of
+    FunscriptForge. It deliberately **ignores FunscriptForge's working files
+    and sidecars**: hidden `.< stem>.forge/` working directories and the
+    intermediate `.chapters.json`, `.phrases.json`, `.peaks.json`, etc. sidecars
+    an FSF project leaves next to your media. Those are editor state, not
+    playable haptics, so they never create tiles or get played here. Finish your
+    project in FunscriptForge (export a `.forge` bundle or an `.output/` folder)
+    and *that* is what ForgePlayer picks up.
+
 ### How the Library matches files to a video
 
 The **haptic asset leads**: the scanner finds the funscripts / bundles / stim
