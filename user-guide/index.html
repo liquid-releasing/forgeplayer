@@ -557,10 +557,43 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#what-becomes-a-tile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What becomes a tile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-the-library-matches-files-to-a-video" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the Library matches files to a video
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#scene-tiles" class="md-nav__link">
     <span class="md-ellipsis">
       
         Scene tiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filters
       
     </span>
   </a>
@@ -1094,10 +1127,43 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#what-becomes-a-tile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What becomes a tile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-the-library-matches-files-to-a-video" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the Library matches files to a video
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#scene-tiles" class="md-nav__link">
     <span class="md-ellipsis">
       
         Scene tiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filters
       
     </span>
   </a>
@@ -1546,16 +1612,70 @@ set a comfortable level on the box's own knob first.</p>
 </blockquote>
 <hr />
 <h2 id="library-tab">Library tab<a class="headerlink" href="#library-tab" title="Permanent link">&para;</a></h2>
+<p>The Library is a <strong>launcher for haptic scenes</strong> — not a video catalog. Point
+it at a media folder (<strong>📁 Root…</strong>) and it lists one tile per <em>work</em> that has
+something to play on your device.</p>
+<h3 id="what-becomes-a-tile">What becomes a tile<a class="headerlink" href="#what-becomes-a-tile" title="Permanent link">&para;</a></h3>
+<p>A tile is a <strong>haptic asset paired with its video</strong>: a funscript (or set of
+funscripts), a <code>.forge</code> / <code>.output</code> bundle, or a pre-rendered e-stim sound —
+plus the video it matches by name. A video with <strong>no</strong> funscript / bundle /
+stim sound isn't a haptic scene, so it doesn't get a tile in the default view
+(you can still show plain videos — see <strong>Filters</strong> below).</p>
+<h3 id="how-the-library-matches-files-to-a-video">How the Library matches files to a video<a class="headerlink" href="#how-the-library-matches-files-to-a-video" title="Permanent link">&para;</a></h3>
+<p>The <strong>haptic asset leads</strong>: the scanner finds the funscripts / bundles / stim
+sounds in a folder, and each one finds <em>its</em> video by name. Matching is on a
+<strong>work key</strong> — the filename reduced to the underlying work by stripping the
+noise:</p>
+<ul>
+<li>codec / resolution / upscaler / quality tags (<code>x265</code>, <code>1080p</code>, <code>2160p</code>,
+  <code>Iris3</code>, <code>Chf3</code>, <code>Hq</code>, <code>hb</code>, <code>5120x1440</code>, …)</li>
+<li>bracket / paren annotations (<code>[Supermassive 2022]</code>, <code>[E-Stim &amp; Popper Edit]</code>)</li>
+<li>pipeline render <em>pass-numbers</em> — <strong>but real ordinals are kept</strong> (<code>Part 1</code>,
+  <code>Vol 2</code>, so Part 1 and Part 2 stay separate works).</li>
+</ul>
+<p>So <code>Klinik Industries Vi22 Hq Chf3 Iris3 5120x1440.mkv</code> and
+<code>Klinik Industries Vi22 - Triphase.mp3</code> both reduce to <code>klinik industries
+vi22</code> and pair into one tile. Matching runs strictest-first — exact key, then
+"the video's name plus a descriptive tail" (<code>5sod_high - emily edit</code>), then
+word-overlap for re-ordered names, then a within-folder fallback for a sound
+whose video kept a stray encoder tag — and it never crosses an ordinal
+boundary (<code>Vol 1</code> ≠ <code>Vol 2</code>).</p>
+<p>Consequences:</p>
+<ul>
+<li>All <strong>renders of one work</strong> (4K + 1080p + ultrawide + upscaled) collapse
+  into <strong>one tile</strong>; the picker lets you choose which to play.</li>
+<li>Funscripts / sounds in a <strong>subfolder</strong> fold into the parent scene — even
+  nested ones like <code>Extras/Estim files/…</code>.</li>
+<li>A subfolder named exactly <code>hb</code> (handbrake re-encodes) folds its videos in as
+  extra renders; the same work sitting <strong>loose at the root <em>and</em> in a
+  subfolder</strong> merges into one tile.</li>
+<li>A stim <strong>sound that matches no video is dropped</strong> (a stray beat track never
+  becomes a tile).</li>
+</ul>
 <h3 id="scene-tiles">Scene tiles<a class="headerlink" href="#scene-tiles" title="Permanent link">&para;</a></h3>
-<p>Each tile shows the scene's video thumbnail, name, and small badges for
-"has funscript", "has stim audio", "has prostate". A green dot in the
-corner means there's a saved pin (your variant picks).</p>
-<p>Thumbnails are real frames pulled from the scene's video (one frame ~12 %
-in), generated <strong>lazily</strong> — only for tiles you actually scroll past — and
-cached to <code>~/.forgeplayer/thumb_cache/</code>, so the grid stays responsive even
-on a large library and the frames are instant on the next visit. A tile
-shows a flat placeholder until its frame is ready (or for audio-only
-scenes that have no video).</p>
+<p>Each tile shows a thumbnail, the work name, running time, and content pills
+(<strong>VIDEO / AUDIO / FUNSCRIPT / FORGE</strong>). Two corner controls:</p>
+<ul>
+<li><strong>↗ (top-right)</strong> — open the scene's file location in Explorer, handy for
+  checking what got grouped.</li>
+<li><strong>📌</strong> — appears once you've saved picks for the scene; <strong>click it to
+  re-pick</strong>. Clicking anywhere else on the tile just plays your saved pick.</li>
+<li><strong>"pick"</strong> — shown when a scene has choices to make and you haven't picked
+  yet.</li>
+</ul>
+<p>Thumbnails are real frames pulled from the scene's video, generated <strong>lazily</strong>
+(only for tiles you scroll past) and cached to <code>~/.forgeplayer/thumb_cache/</code>,
+so the grid stays responsive on a large library and frames are instant next
+visit. They prefer a standard-aspect render (an ultrawide frame makes a poor
+letterboxed thumbnail) and skip near-black leader frames.</p>
+<h3 id="filters">Filters<a class="headerlink" href="#filters" title="Permanent link">&para;</a></h3>
+<p>Buttons under the root bar switch what's shown, each with a live count:</p>
+<ul>
+<li><strong>Videos with Funscripts</strong> <em>(default)</em> — the curated haptic scenes.</li>
+<li><strong>Videos</strong> — standalone videos with no haptics (source pieces, unscripted
+  clips) that the player can still just play.</li>
+<li><strong>All</strong> — both.</li>
+</ul>
 <h3 id="activating-a-scene">Activating a scene<a class="headerlink" href="#activating-a-scene" title="Permanent link">&para;</a></h3>
 <p><strong>Single-click</strong> a tile to activate. If the scene has multiple variants
 (more than one funscript set, or alternate video edits), a <strong>picker
@@ -1571,13 +1691,13 @@ dialog</strong> opens:</p>
 </ul>
 <p>Defaults are sensible: highest-numbered set, original video, first
 matched stim audio, no subtitle. Click <strong>OK</strong>.</p>
-<p>Your picks are saved as a <code>.forgeplayer.pin.json</code> in the scene folder.
-Next time you single-click the tile, ForgePlayer skips the picker and
-re-uses the pinned choices.</p>
+<p>Your picks are saved as a <code>&lt;scene&gt;.forgeplayer.json</code> pin in the scene
+folder. Next time you single-click the tile, ForgePlayer skips the picker
+and re-uses the pinned choices.</p>
 <h3 id="re-opening-the-picker">Re-opening the picker<a class="headerlink" href="#re-opening-the-picker" title="Permanent link">&para;</a></h3>
-<p>Click the <strong>Change picks…</strong> menu on a tile (or the title-bar button on
-the Live tab) to re-open the picker for the active scene. New picks
-overwrite the pin.</p>
+<p>Click the <strong>📌</strong> button on a tile (or right-click → <strong>Change picks…</strong>, or
+the title-bar button on the Live tab) to re-open the picker for the active
+scene. New picks overwrite the pin.</p>
 <h3 id="refresh">Refresh<a class="headerlink" href="#refresh" title="Permanent link">&para;</a></h3>
 <p>If you add or remove files in a scene folder while ForgePlayer is
 running, click <strong>Refresh</strong> to re-scan.</p>
