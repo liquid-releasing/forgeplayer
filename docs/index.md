@@ -130,3 +130,14 @@ choose **Open** the first time to bypass Gatekeeper.
 
 Source on GitHub:
 [liquid-releasing/forgeplayer](https://github.com/liquid-releasing/forgeplayer).
+
+---
+
+<p align="center">
+  <img src="assets/liquid-releasing-logo.svg" alt="Liquid Releasing" width="120">
+</p>
+
+<p align="center"><small>
+ForgePlayer is made by <strong>Liquid Releasing</strong>.<br>
+© 2026 Liquid Releasing. All rights reserved.
+</small></p>

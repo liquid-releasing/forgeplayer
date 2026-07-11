@@ -10,6 +10,9 @@ edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
 
+# Rendered in the site footer on every page.
+copyright: Copyright &copy; 2026 Liquid Releasing
+
 # Internal-only pages stay out of the rendered site. Keep this list in
 # sync with anything dev-facing that lives under docs/.
 exclude_docs: |
