@@ -22,6 +22,7 @@ from app.recognizer.canonicalize import (
     resolution_rank,
 )
 from app.recognizer.cluster import TitleCluster, cluster_files
+from app.recognizer.match import reconcile
 
 __all__ = [
     "Ordinal",
@@ -30,5 +31,17 @@ __all__ = [
     "TitleCluster",
     "canonicalize",
     "cluster_files",
+    "reconcile",
     "resolution_rank",
 ]
+
+
+def recognize_titles(files, *, fuzzy_threshold: float = 0.6):
+    """Convenience: canonicalize → cluster → reconcile a list of paths/files.
+
+    Accepts paths (str/Path) or pre-canonicalized RecognizedFile objects and
+    returns the reconciled list of TitleClusters. The pure NAME pipeline — the
+    duration probe (probe.py) layers on top only when confidence is low.
+    """
+    recs = [f if isinstance(f, RecognizedFile) else canonicalize(f) for f in files]
+    return reconcile(cluster_files(recs), fuzzy_threshold=fuzzy_threshold)
