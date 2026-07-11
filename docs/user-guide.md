@@ -65,18 +65,77 @@ Modern, audio-driven hardware:
 
 ## Library tab
 
+The Library is a **launcher for haptic scenes** — not a video catalog. Point
+it at a media folder (**📁 Root…**) and it lists one tile per *work* that has
+something to play on your device.
+
+### What becomes a tile
+
+A tile is a **haptic asset paired with its video**: a funscript (or set of
+funscripts), a `.forge` / `.output` bundle, or a pre-rendered e-stim sound —
+plus the video it matches by name. A video with **no** funscript / bundle /
+stim sound isn't a haptic scene, so it doesn't get a tile in the default view
+(you can still show plain videos — see **Filters** below).
+
+### How the Library matches files to a video
+
+The **haptic asset leads**: the scanner finds the funscripts / bundles / stim
+sounds in a folder, and each one finds *its* video by name. Matching is on a
+**work key** — the filename reduced to the underlying work by stripping the
+noise:
+
+- codec / resolution / upscaler / quality tags (`x265`, `1080p`, `2160p`,
+  `Iris3`, `Chf3`, `Hq`, `hb`, `5120x1440`, …)
+- bracket / paren annotations (`[Supermassive 2022]`, `[E-Stim & Popper Edit]`)
+- pipeline render *pass-numbers* — **but real ordinals are kept** (`Part 1`,
+  `Vol 2`, so Part 1 and Part 2 stay separate works).
+
+So `Klinik Industries Vi22 Hq Chf3 Iris3 5120x1440.mkv` and
+`Klinik Industries Vi22 - Triphase.mp3` both reduce to `klinik industries
+vi22` and pair into one tile. Matching runs strictest-first — exact key, then
+"the video's name plus a descriptive tail" (`5sod_high - emily edit`), then
+word-overlap for re-ordered names, then a within-folder fallback for a sound
+whose video kept a stray encoder tag — and it never crosses an ordinal
+boundary (`Vol 1` ≠ `Vol 2`).
+
+Consequences:
+
+- All **renders of one work** (4K + 1080p + ultrawide + upscaled) collapse
+  into **one tile**; the picker lets you choose which to play.
+- Funscripts / sounds in a **subfolder** fold into the parent scene — even
+  nested ones like `Extras/Estim files/…`.
+- A subfolder named exactly `hb` (handbrake re-encodes) folds its videos in as
+  extra renders; the same work sitting **loose at the root *and* in a
+  subfolder** merges into one tile.
+- A stim **sound that matches no video is dropped** (a stray beat track never
+  becomes a tile).
+
 ### Scene tiles
 
-Each tile shows the scene's video thumbnail, name, and small badges for
-"has funscript", "has stim audio", "has prostate". A green dot in the
-corner means there's a saved pin (your variant picks).
+Each tile shows a thumbnail, the work name, running time, and content pills
+(**VIDEO / AUDIO / FUNSCRIPT / FORGE**). Two corner controls:
 
-Thumbnails are real frames pulled from the scene's video (one frame ~12 %
-in), generated **lazily** — only for tiles you actually scroll past — and
-cached to `~/.forgeplayer/thumb_cache/`, so the grid stays responsive even
-on a large library and the frames are instant on the next visit. A tile
-shows a flat placeholder until its frame is ready (or for audio-only
-scenes that have no video).
+- **↗ (top-right)** — open the scene's file location in Explorer, handy for
+  checking what got grouped.
+- **📌** — appears once you've saved picks for the scene; **click it to
+  re-pick**. Clicking anywhere else on the tile just plays your saved pick.
+- **"pick"** — shown when a scene has choices to make and you haven't picked
+  yet.
+
+Thumbnails are real frames pulled from the scene's video, generated **lazily**
+(only for tiles you scroll past) and cached to `~/.forgeplayer/thumb_cache/`,
+so the grid stays responsive on a large library and frames are instant next
+visit. They prefer a standard-aspect render (an ultrawide frame makes a poor
+letterboxed thumbnail) and skip near-black leader frames.
+
+### Filters
+
+Buttons under the root bar switch what's shown, each with a live count:
+
+- **Videos with Funscripts** *(default)* — the curated haptic scenes.
+- **Videos** — standalone videos with no haptics (source pieces, unscripted
+  clips) that the player can still just play.
+- **All** — both.
 
 ### Activating a scene
 
@@ -95,15 +154,15 @@ dialog** opens:
 Defaults are sensible: highest-numbered set, original video, first
 matched stim audio, no subtitle. Click **OK**.
 
-Your picks are saved as a `.forgeplayer.pin.json` in the scene folder.
-Next time you single-click the tile, ForgePlayer skips the picker and
-re-uses the pinned choices.
+Your picks are saved as a `<scene>.forgeplayer.json` pin in the scene
+folder. Next time you single-click the tile, ForgePlayer skips the picker
+and re-uses the pinned choices.
 
 ### Re-opening the picker
 
-Click the **Change picks…** menu on a tile (or the title-bar button on
-the Live tab) to re-open the picker for the active scene. New picks
-overwrite the pin.
+Click the **📌** button on a tile (or right-click → **Change picks…**, or
+the title-bar button on the Live tab) to re-open the picker for the active
+scene. New picks overwrite the pin.
 
 ### Refresh
 
