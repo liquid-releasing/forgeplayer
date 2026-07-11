@@ -395,11 +395,11 @@ def test_library_root_tags_standalone_videos(tmp_path):
     assert by_name["Raw"].is_video_only
 
 
-def test_scenes_still_pinnable(tmp_path):
-    from app.library.pins import is_pinnable
+def test_scene_has_distinct_pin_path(tmp_path):
+    from app.library.pins import pin_path_for
 
     d = tmp_path / "Solo"
     _touch(d, "Solo.mp4")
     _touch(d, "Solo.alpha.funscript")
     solo = scan_scene_titles(d)[0]
-    assert is_pinnable(solo) is True
+    assert str(pin_path_for(solo)).endswith(".forgeplayer.json")

@@ -30,7 +30,6 @@ from app.library.catalog import (
     AudioVariant,
     FunscriptSet,
     SceneCatalogEntry,
-    ScenePart,
     SubtitleTrack,
     VideoVariant,
 )
@@ -55,9 +54,6 @@ class SelectionChoices:
     audio: AudioVariant | None = None
     funscript_set: FunscriptSet | None = None
     subtitle: SubtitleTrack | None = None
-    part: ScenePart | None = None
-    """For a same-name ordinal series, which part the user chose this time. Never
-    persisted to a pin — the user picks a part every activation."""
 
 
 # ── Theme (matches library_panel palette) ────────────────────────────────────
@@ -118,14 +114,12 @@ class SelectPicker(QDialog):
         self._preselect = preselect
 
         # Track radio-group state so choices() can read them after accept
-        self._part_group: QButtonGroup | None = None
         self._video_group: QButtonGroup | None = None
         self._audio_group: QButtonGroup | None = None
         self._funscript_group: QButtonGroup | None = None
         self._subtitle_group: QButtonGroup | None = None
 
-        # Index-per-group → ScenePart / VideoVariant / AudioVariant / FunscriptSet
-        self._part_map: dict[int, ScenePart] = {}
+        # Index-per-group → VideoVariant / AudioVariant / FunscriptSet
         self._video_map: dict[int, VideoVariant] = {}
         self._audio_map: dict[int, AudioVariant] = {}
         self._funscript_map: dict[int, FunscriptSet] = {}
@@ -144,17 +138,6 @@ class SelectPicker(QDialog):
         """Read the current radio state into a SelectionChoices dataclass.
         Call after `exec()` returns Accepted."""
         out = SelectionChoices()
-
-        # A part choice fully determines what plays this activation — resolve the
-        # part's default video / stim and return early (never pinned).
-        if self._part_group is not None and self._part_group.checkedId() >= 0:
-            part = self._part_map.get(self._part_group.checkedId())
-            out.part = part
-            if part is not None:
-                out.video = part.default_video
-                out.audio = part.default_audio
-                out.funscript_set = part.default_funscript_set
-            return out
 
         if self._video_group is not None and self._video_group.checkedId() >= 0:
             out.video = self._video_map.get(self._video_group.checkedId())
@@ -218,26 +201,20 @@ class SelectPicker(QDialog):
         # report: "the UI doesn't say which one it picked."
         body_layout.addWidget(self._build_summary())
 
-        if self._entry.needs_part_choice:
-            # A same-name ordinal series: the primary choice is WHICH PART. Its
-            # per-variant sub-choices belong to a specific part, so we offer just
-            # the parts here (the Sources dropdowns handle finer picks in-scene).
-            body_layout.addWidget(self._build_part_group())
-        else:
-            # Only offer a funscript-set choice among real e-stim sets — hide the
-            # per-toy renders (.handy/.lovense/…). If that leaves a single set,
-            # there's nothing to choose, so the group is skipped entirely.
-            estim_sets = [
-                fs for fs in self._entry.funscript_sets if not _is_device_target(fs)
-            ]
-            if len(estim_sets) > 1:
-                body_layout.addWidget(self._build_funscript_group(estim_sets))
-            if self._entry.needs_video_choice:
-                body_layout.addWidget(self._build_video_group())
-            if self._entry.needs_audio_choice:
-                body_layout.addWidget(self._build_audio_group())
-            if self._entry.needs_subtitle_choice:
-                body_layout.addWidget(self._build_subtitle_group())
+        # Only offer a funscript-set choice among real e-stim sets — hide the
+        # per-toy renders (.handy/.lovense/…). If that leaves a single set,
+        # there's nothing to choose, so the group is skipped entirely.
+        estim_sets = [
+            fs for fs in self._entry.funscript_sets if not _is_device_target(fs)
+        ]
+        if len(estim_sets) > 1:
+            body_layout.addWidget(self._build_funscript_group(estim_sets))
+        if self._entry.needs_video_choice:
+            body_layout.addWidget(self._build_video_group())
+        if self._entry.needs_audio_choice:
+            body_layout.addWidget(self._build_audio_group())
+        if self._entry.needs_subtitle_choice:
+            body_layout.addWidget(self._build_subtitle_group())
 
         # Generation-variant indicator (informational for now — phase 2 will
         # add a proper per-channel picker).
@@ -328,31 +305,6 @@ class SelectPicker(QDialog):
         return box
 
     # ── Radio group builders ──
-
-    def _build_part_group(self) -> QWidget:
-        """Which part of a same-name ordinal series to play. Always defaults to
-        the first part and is never preselected from a pin — the user picks a
-        part every time."""
-        box = _group_box("Part")
-        layout = box.layout()
-
-        self._part_group = QButtonGroup(self)
-        for i, part in enumerate(self._entry.parts):
-            v = part.default_video
-            detail = (
-                v.filename if v
-                else (part.default_audio.filename if part.default_audio else "")
-            )
-            label = part.label + (f"  ({detail})" if detail else "")
-            rb = QRadioButton(label)
-            rb.setMinimumHeight(28)
-            if i == 0:
-                rb.setChecked(True)
-            self._part_group.addButton(rb, i)
-            self._part_map[i] = part
-            layout.addWidget(rb)
-
-        return box
 
     def _build_funscript_group(self, sets: list[FunscriptSet]) -> QWidget:
         """Funscript edit-variants (Magik-style). *sets* is the already-filtered

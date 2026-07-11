@@ -294,10 +294,9 @@ class LibraryCardDelegate(QStyledItemDelegate):
         painter.drawRoundedRect(thumb_rect, 4, 4)
 
         pixmap = None
-        if self._thumbs is not None:
-            default_video = entry.default_video
-            if default_video is not None:
-                pixmap = self._thumbs.pixmap_for(default_video.path)
+        thumb_video = entry.thumbnail_video   # prefers a standard-aspect render
+        if self._thumbs is not None and thumb_video is not None:
+            pixmap = self._thumbs.pixmap_for(thumb_video.path)
         if pixmap is not None and not pixmap.isNull():
             # Cover-crop: scale the frame to fill the thumb rect, centered,
             # clipped to the rounded rectangle so corners stay clean.
@@ -352,9 +351,8 @@ class LibraryCardDelegate(QStyledItemDelegate):
         # `ready` repaint swaps in the real time.
         painter.setPen(QPen(_TEXT_MUTED))
         duration = "—:—:—"
-        dv = entry.default_video
-        if self._thumbs is not None and dv is not None:
-            secs = self._thumbs.duration_for(dv.path)
+        if self._thumbs is not None and thumb_video is not None:
+            secs = self._thumbs.duration_for(thumb_video.path)
             if secs:
                 duration = _fmt_card_duration(secs)
         painter.drawText(

@@ -132,6 +132,14 @@ def _extract_video_tags(filename: str) -> frozenset[str]:
     for pattern, tag in _ASPECT_PATTERNS:
         if pattern.search(filename):
             tags.add(tag)
+    # Ultrawide by RESOLUTION, not just the literal word: a WxH like 5120x1440
+    # (3.55:1) is an ultrawide render even without an 'ultrawide' tag. Anything
+    # wider than ~2.2:1 counts (normal is 16:9≈1.78, 2.39:1 cinemascope is the
+    # grey zone; 2.2 keeps standard widescreen out).
+    for wh in re.finditer(r"(?<!\d)(\d{3,5})x(\d{2,4})(?!\d)", filename):
+        w, h = int(wh.group(1)), int(wh.group(2))
+        if h and w / h > 2.2:
+            tags.add("ultrawide")
     for pattern, tag in _UPSCALER_PATTERNS:
         if pattern.search(filename):
             tags.add(tag)
@@ -821,9 +829,10 @@ def _merge_work_key(entry: SceneCatalogEntry) -> str | None:
     if not stem:
         return None
     wk = _work_key(stem)
-    # Only merge on a distinctive key — ≥2 words or a long single token — so a
-    # short generic name never merges unrelated folders.
-    return wk if (len(wk.split()) >= 2 or len(wk) >= 12) else None
+    # Only merge on a distinctive key — ≥2 words or a fairly long single token
+    # (≥8 chars, e.g. 'decendant') — so a short generic name never merges
+    # unrelated folders.
+    return wk if (len(wk.split()) >= 2 or len(wk) >= 8) else None
 
 
 def _merge_scene_into(dst: SceneCatalogEntry, src: SceneCatalogEntry) -> None:

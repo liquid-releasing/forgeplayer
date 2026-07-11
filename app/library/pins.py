@@ -75,15 +75,6 @@ def pin_path_for(entry: SceneCatalogEntry) -> Path:
     return Path(entry.folder_path) / f"{safe}{_PIN_SUFFIX}"
 
 
-def is_pinnable(entry: SceneCatalogEntry) -> bool:
-    """Whether this scene's picks may be remembered across activations.
-
-    False for a same-name ordinal SERIES (a multi-part card): the user picks
-    which part to play every time, so we neither replay nor save a pin — the
-    part picker always reappears. Everything else pins normally."""
-    return not entry.needs_part_choice
-
-
 def has_pin(entry: SceneCatalogEntry) -> bool:
     return pin_path_for(entry).is_file()
 

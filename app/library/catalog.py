@@ -151,37 +151,6 @@ class SubtitleTrack:
 
 
 @dataclass
-class ScenePart:
-    """One part of a multi-part work — a same-name ordinal series member
-    (darling 3 / 4 / 5, the_torch sc 1 / 2 / 3, Magik Vol 1 / 2).
-
-    A folder of such a series becomes ONE card whose picker offers the parts;
-    each part carries its own videos / funscript sets / audio / bundle. The part
-    choice is deliberately NOT pinned — the user picks which part to play every
-    time (they're assembling / reviewing pieces), unlike video/audio picks.
-    """
-    label: str
-    """Human label for the part radio — 'Part 1', '3', 'Vol 2'."""
-    ordinal_number: int = 0
-    videos: list["VideoVariant"] = field(default_factory=list)
-    funscript_sets: list["FunscriptSet"] = field(default_factory=list)
-    audio_tracks: list["AudioVariant"] = field(default_factory=list)
-    bundle_path: str | None = None
-
-    @property
-    def default_video(self) -> "VideoVariant | None":
-        return self.videos[0] if self.videos else None
-
-    @property
-    def default_funscript_set(self) -> "FunscriptSet | None":
-        return self.funscript_sets[0] if self.funscript_sets else None
-
-    @property
-    def default_audio(self) -> "AudioVariant | None":
-        return self.audio_tracks[0] if self.audio_tracks else None
-
-
-@dataclass
 class SceneCatalogEntry:
     """A classified scene folder — the scanner's per-folder output.
 
@@ -227,13 +196,6 @@ class SceneCatalogEntry:
     `bundle_importer.load_bundle` so the card plays WITH its e-stim channels —
     grafted onto the user's own loose video variants."""
 
-    parts: list[ScenePart] = field(default_factory=list)
-    """Non-empty when this card is a same-name ordinal SERIES (darling 3/4/5,
-    the_torch sc 1/2/3, Magik Vol 1/2). Each part carries its own media; the
-    picker offers them and the choice is never pinned (pick every time). The
-    entry's top-level `videos` / `funscript_sets` / `audio_tracks` mirror the
-    default (first) part so part-unaware code paths still work."""
-
     is_video_only: bool = False
     """True for a STANDALONE-VIDEO card: a video (or same-name render group)
     with no funscript / bundle / e-stim sound. These are hidden from the curated
@@ -256,6 +218,16 @@ class SceneCatalogEntry:
     def default_video(self) -> VideoVariant | None:
         """First entry in self.videos — the scanner's default-pick."""
         return self.videos[0] if self.videos else None
+
+    @property
+    def thumbnail_video(self) -> VideoVariant | None:
+        """Video to grab the card THUMBNAIL from. Prefers a standard-aspect
+        render — an ultrawide/cropped frame makes a poor, letterboxed thumbnail —
+        falling back to the default pick when only aspect variants exist."""
+        for v in self.videos:
+            if not v.is_aspect_variant:
+                return v
+        return self.default_video
 
     @property
     def default_audio(self) -> AudioVariant | None:
@@ -326,23 +298,11 @@ class SceneCatalogEntry:
         return len(self.subtitles) > 1
 
     @property
-    def needs_part_choice(self) -> bool:
-        """True when this card is a same-name ordinal series (2+ parts). The
-        user picks a part every time — this choice is never pinned, and its
-        presence forces the picker even when a pin exists."""
-        return len(self.parts) > 1
-
-    @property
-    def default_part(self) -> ScenePart | None:
-        return self.parts[0] if self.parts else None
-
-    @property
     def is_ambiguous(self) -> bool:
         """True when the select picker must be shown at tap time — union of
         all per-group 'needs choice' flags."""
         return (
-            self.needs_part_choice
-            or self.needs_funscript_set_choice
+            self.needs_funscript_set_choice
             or self.needs_generation_variant_choice
             or self.needs_audio_choice
             or self.needs_video_choice
