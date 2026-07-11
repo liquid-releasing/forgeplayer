@@ -971,15 +971,35 @@
 
 <h1 id="live">Live<a class="headerlink" href="#live" title="Permanent link">&para;</a></h1>
 <h2 id="output-panel">Output panel<a class="headerlink" href="#output-panel" title="Permanent link">&para;</a></h2>
-<p>Shows the live source → destination map for the loaded scene:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Scene Audio: &lt;device&gt;           &lt;-- mp3 / mp4 audio of the video
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  &lt;video filename&gt;
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Haptic 1: &lt;device&gt;              &lt;-- main stim port
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  &lt;funscript or .mp3 filename&gt;
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>Haptic 2: &lt;device&gt;              &lt;-- prostate port
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  &lt;prostate source or &quot;(mirror H1)&quot; or &quot;(silent — ...)&quot;
-</span></code></pre></div>
-<p>The H2 line tells you exactly what's playing there:</p>
+<p>Shows the live source → destination map for the loaded scene — which
+<strong>source</strong> is routed to which <strong>device</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>Device</th>
+<th>What plays there</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Scene Audio</strong></td>
+<td>scene-audio output</td>
+<td>the video's own audio (the <code>.mp4</code> / <code>.mp3</code>)</td>
+</tr>
+<tr>
+<td><strong>Haptic 1</strong></td>
+<td>main stim port</td>
+<td>the funscript synth or the pre-rendered stim <code>.mp3</code></td>
+</tr>
+<tr>
+<td><strong>Haptic 2</strong></td>
+<td>prostate / second stim port</td>
+<td>the prostate source, <code>(mirror H1)</code>, or <code>(silent — …)</code></td>
+</tr>
+</tbody>
+</table>
+<p>The <strong>Haptic 2</strong> row tells you exactly what's playing there:</p>
 <ul>
 <li><code>&lt;scene-stem&gt;-prostate.funscript</code> — the prostate funscript synth.</li>
 <li><code>&lt;scene-stem&gt;.prostate.wav</code> — the pre-rendered prostate audio file.</li>
