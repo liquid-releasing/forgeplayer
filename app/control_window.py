@@ -32,6 +32,15 @@ from app.library_panel import LibraryPanel
 from app.library.catalog import (
     SceneCatalogEntry, VideoVariant, AudioVariant, FunscriptSet,
 )
+from app.library.channels import (
+    STEREOSTIM_CHANNELS, FOC_STIM_CHANNELS, FOUR_PHASE_ELECTRODE_CHANNELS,
+)
+
+# Channel cores restim actually plays as e-stim — position (alpha/beta/gamma),
+# the FOC-stim parameters (volume/frequency/pulse_*), and 4-phase electrodes.
+# Multi-axis (roll/pitch/…) and device tracks (handy/lovense/…) are NOT e-stim
+# and are excluded from the Haptic-output channel list.
+_ESTIM_CORES = STEREOSTIM_CHANNELS | FOC_STIM_CHANNELS | FOUR_PHASE_ELECTRODE_CHANNELS
 from app.select_picker import SelectPicker, SelectionChoices
 from app.library.pins import has_pin, load_pin, resolve_pin, save_pin
 from app.debug_log import DebugLog
@@ -926,9 +935,10 @@ class ControlWindow(QMainWindow):
             # List exactly the channel files restim plays. The old code showed
             # `main_path` (motion.funscript) first, mislabeling every e-stim
             # scene as if it played motion.
-            estim = self._estim_channel_files(fs, prostate=False)
+            estim = self._estim_channel_names(
+                fs, prostate=False, as_types=self._is_packaged_bundle())
             if estim:
-                return self._bulleted_sources("restim:", estim)
+                return self._bulleted_sources("restim channels:", estim)
             if getattr(fs, "main_path", None):
                 # ONLY a motion/stroke track exists — no e-stim channels for
                 # this scene. Flag it rather than presenting motion as e-stim.
@@ -938,22 +948,57 @@ class ControlWindow(QMainWindow):
         return "(no source loaded)"
 
     @staticmethod
-    def _estim_channel_files(fs, *, prostate: bool) -> list[str]:
-        """Basenames of the e-stim channel funscripts restim plays for this
-        set — the main e-stim channels, or the `-prostate` side-chain when
-        prostate=True. Sorted, alpha/beta first so the list reads naturally.
-        Empty when the set has no matching e-stim channels."""
+    def _set_has_estim(fs) -> bool:
+        """True when a funscript set carries e-stim POSITION channels (alpha or
+        beta) — the signal that it's a playable stim set, not a motion-only
+        stroke track. Prostate variants count too."""
         chans = getattr(fs, "channels", {}) or {}
-        if prostate:
-            keys = [k for k in chans if k.endswith("-prostate")]
-        else:
-            keys = [k for k in chans if not k.endswith("-prostate")]
+        def _core(k: str) -> str:
+            return k[: -len("-prostate")] if k.endswith("-prostate") else k
+        return any(_core(k) in STEREOSTIM_CHANNELS for k in chans)
+
+    def _is_packaged_bundle(self) -> bool:
+        """True when the active scene came from a PACKAGED `.forge`/`.forgeplay`
+        ZIP — its funscripts live in an extracted cache the user can't reach, so
+        we show channel TYPES. A loose `.output` FOLDER (or plain scene folder)
+        is NOT packaged: its funscripts are on disk, so we name the FILES."""
+        entry = self._current_entry
+        bp = getattr(entry, "bundle_path", None) if entry else None
+        if not bp:
+            return False
+        return os.path.isfile(bp) and bp.lower().endswith((".forge", ".forgeplay"))
+
+    @staticmethod
+    def _estim_channel_names(fs, *, prostate: bool, as_types: bool) -> list[str]:
+        """The e-stim channels restim plays for this set — restricted to actual
+        e-stim cores (alpha/beta/gamma, volume, frequency, pulse_*, e1..e4);
+        multi-axis (roll/pitch/…) and device tracks are NOT restim channels and
+        are excluded. The `-prostate` side-chain when prostate=True. Sorted
+        alpha/beta first so the list reads naturally. Empty when none match.
+
+        as_types=True  → human channel TYPES (alpha, beta, volume, pulse
+                         frequency) — for a packaged `.forge` where filenames
+                         aren't reachable.
+        as_types=False → the funscript FILENAMES — for a loose `.output` folder
+                         whose files are on disk and worth naming."""
+        chans = getattr(fs, "channels", {}) or {}
+
+        def _core(k: str) -> str:
+            return k[: -len("-prostate")] if k.endswith("-prostate") else k
+
+        keys = [
+            k for k in chans
+            if (k.endswith("-prostate") == prostate) and _core(k) in _ESTIM_CORES
+        ]
 
         def _rank(k: str) -> tuple[int, str]:
-            order = {"alpha": 0, "beta": 1, "alpha-prostate": 0, "beta-prostate": 1}
-            return (order.get(k, 2), k)
+            order = {"alpha": 0, "beta": 1}
+            return (order.get(_core(k), 2), k)
 
-        return [os.path.basename(chans[k]) for k in sorted(keys, key=_rank)]
+        keys.sort(key=_rank)
+        if as_types:
+            return [_core(k).replace("_", " ") for k in keys]  # pulse_frequency → "pulse frequency"
+        return [os.path.basename(chans[k]) for k in keys]
 
     @staticmethod
     def _bulleted_sources(header: str, files: list[str]) -> str:
@@ -987,7 +1032,8 @@ class ControlWindow(QMainWindow):
         # mirrors H1), never the motion track.
         fs = slot1_data.get("funscript_set")
         if fs is not None:
-            prostate = self._estim_channel_files(fs, prostate=True)
+            prostate = self._estim_channel_names(
+                fs, prostate=True, as_types=self._is_packaged_bundle())
             if prostate:
                 return self._bulleted_sources("restim prostate:", prostate)
         if slot1_data.get("funscript_set") or slot1_data.get("audio_path"):
@@ -2364,13 +2410,24 @@ class ControlWindow(QMainWindow):
         loose video variants (their real 4K/1080p files) onto the bundle's
         haptics so they still pick the video they want and get stim.
 
-        Only fires when the card has a bundle AND no loose funscripts of its
-        own — a folder with loose funscripts already plays via the normal path
-        and must take precedence. Any failure falls back to the original
-        video-only entry (never worse than today).
+        Fires when the card has a bundle AND the scene's own loose funscripts
+        DON'T already provide e-stim (alpha/beta). Two cases it covers:
+          - no loose funscripts at all (haptics live only in the bundle), and
+          - a loose MOTION-only funscript sitting next to a `.forge`/`.output`
+            that carries the real e-stim channels (the common FunscriptForge
+            working-folder shape — the loose `<stem>.funscript` is the stroke
+            track, the bundle has alpha/beta/…). Without this the motion track
+            wins and Haptic 1 shows "no e-stim channels (motion only)".
+        A scene whose OWN loose funscripts already include e-stim takes
+        precedence (no import). Any failure falls back to the original entry.
         """
         bundle_path = getattr(entry, "bundle_path", None)
-        if not bundle_path or entry.funscript_sets:
+        if not bundle_path:
+            return entry
+        # The scene's own loose funscripts already have e-stim → they win.
+        if entry.funscript_sets and any(
+            self._set_has_estim(s) for s in entry.funscript_sets
+        ):
             return entry
 
         from app.bundle_importer import load_bundle  # noqa: PLC0415
@@ -2381,6 +2438,12 @@ class ControlWindow(QMainWindow):
             return entry
         if bundled is None or not bundled.funscript_sets:
             return entry  # unreadable / no haptics — keep the video-only card
+        # If the scene has loose (motion-only) funscripts, only override them
+        # when the bundle actually ADDS e-stim — otherwise keep the loose track.
+        if entry.funscript_sets and not any(
+            self._set_has_estim(s) for s in bundled.funscript_sets
+        ):
+            return entry
 
         # Keep the user's own loose media (better variants, real on-disk paths);
         # take only the haptics from the bundle. Preserve folder identity so

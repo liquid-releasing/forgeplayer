@@ -235,9 +235,19 @@ def scan_scene_folder(folder: str | os.PathLike) -> SceneCatalogEntry | None:
                 except OSError:
                     pass
             elif item.is_dir():
-                prio = _bundle_priority(item.name)
-                if prio and prio > best_bundle_prio:
-                    best_bundle, best_bundle_prio = str(item), prio
+                # Only a `<stem>.output/` FOLDER is a usable export bundle.
+                # FunscriptForge WORKING dirs are `.<stem>.forge/` (dot-prefixed,
+                # hidden) — internal editor state, NOT distribution output — so
+                # they must never be played. And `.forge`/`.forgeplay` bundles
+                # are ZIP FILES (handled in the is_file branch above); a `.forge`
+                # DIRECTORY is a working dir, not a bundle. So: skip hidden dirs,
+                # and only accept a non-hidden `.output` folder here.
+                if item.name.startswith("."):
+                    continue
+                if item.name.lower().endswith(".output"):
+                    prio = _bundle_priority(item.name)
+                    if prio and prio > best_bundle_prio:
+                        best_bundle, best_bundle_prio = str(item), prio
     except OSError:
         return None
 
