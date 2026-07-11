@@ -358,24 +358,25 @@ def scan_scene_folder(folder: str | os.PathLike) -> SceneCatalogEntry | None:
 # them (user rule 2026-07-11, feedback_recognizer_skip_dot_folders).
 
 
-def _is_funscript_subfolder(d: Path) -> bool:
-    """A subfolder that holds funscripts but NO video is a scripts sidecar whose
-    contents belong to the parent scene (the 'funscripts live in their own
-    folder' layout). A subfolder WITH a video is its own scene — left alone."""
-    has_fs = has_vid = False
+def _is_companion_subfolder(d: Path) -> bool:
+    """A subfolder that holds funscripts and/or audio but NO video — a sidecar
+    whose scripts/audio belong to the parent scene: the 'funscripts live in
+    their own folder' layout, or an estim-audio variants folder like
+    'Clutch spicy'. A subfolder WITH a video is its own scene — left alone."""
+    has_media = has_vid = False
     try:
         for f in d.iterdir():
             if not f.is_file():
                 continue
             ext = f.suffix.lower()
-            if ext == FUNSCRIPT_EXT:
-                has_fs = True
-            elif ext in VIDEO_EXTS:
+            if ext in VIDEO_EXTS:
                 has_vid = True
                 break
+            if ext == FUNSCRIPT_EXT or ext in AUDIO_EXTS:
+                has_media = True
     except OSError:
         return False
-    return has_fs and not has_vid
+    return has_media and not has_vid
 
 
 def _gather_scene_files(folder_path: Path) -> list[Path]:
@@ -400,12 +401,19 @@ def _gather_scene_files(folder_path: Path) -> list[Path]:
                 if name.lower().endswith(".output"):
                     files.append(item)  # export bundle folder → BUNDLE role
                     continue
-                if _is_funscript_subfolder(item):
-                    for sub in sorted(item.rglob("*.funscript")):
+                if _is_companion_subfolder(item):
+                    # Pull the sidecar's funscripts AND audio (estim variants like
+                    # 'Clutch spicy') into the parent scene; they fold onto the
+                    # parent's title by name.
+                    for sub in sorted(item.rglob("*")):
+                        if not sub.is_file():
+                            continue
                         rel = sub.relative_to(item).parts[:-1]
                         if any(p.startswith(".") for p in rel):
                             continue
-                        files.append(sub)
+                        ext = sub.suffix.lower()
+                        if ext == FUNSCRIPT_EXT or ext in AUDIO_EXTS:
+                            files.append(sub)
     except OSError:
         pass
     if len(files) > _MAX_FILES_PER_SCENE:
@@ -517,10 +525,12 @@ def scan_scene_titles(folder: str | os.PathLike) -> list[SceneCatalogEntry]:
             entries.append(entry)
 
     # A folder that resolves to ONE work is named after the folder — the label
-    # users expect, and what the classic single-entry scanner produced. Only a
-    # genuine multi-title folder keeps the recognizer's per-work display names,
-    # since one folder name can't label several works.
-    if len(entries) == 1:
+    # users expect, and what the classic single-entry scanner produced. Two
+    # exceptions keep the recognizer's content-derived name: a genuine
+    # multi-title folder (one folder name can't label several works), and a
+    # '_'-prefixed staging/container folder (e.g. '_forgeplayme' holding a loose
+    # 'Prisoner.mp4' + its '.output') where the folder name isn't the work.
+    if len(entries) == 1 and not folder_path.name.startswith("_"):
         entries[0].name = folder_path.name
     return entries
 
@@ -574,8 +584,8 @@ def scan_library_root(root: str | os.PathLike) -> list[SceneCatalogEntry]:
                         continue
                     if _is_export_bundle_dir(grandchild.name):
                         continue
-                    if _is_funscript_subfolder(grandchild):
-                        continue  # scripts already folded into the parent scene
+                    if _is_companion_subfolder(grandchild):
+                        continue  # scripts/audio already folded into the parent
                     for sub in scan_scene_titles(grandchild):
                         sub.name = f"{child.name} / {sub.name}"
                         scenes.append(sub)

@@ -149,6 +149,34 @@ def test_library_root_per_folder_single_title_named_by_folder(tmp_path):
 
 # ── Per-title pins don't collide (two titles, one folder) ─────────────────────
 
+def test_estim_audio_subfolder_folds_into_parent(tmp_path):
+    # 'Clutch spicy' style: an audio-only subfolder of a video scene folds its
+    # estim audio into the parent's audio picker, not a separate card.
+    scene = tmp_path / "Clutch"
+    _touch(scene, "Clutch.mp4")
+    _touch(scene, "Clutch ESTIM mild.mp3")
+    _touch(scene / "Clutch spicy", "Clutch ESTIM Spicy Ramp.mp3")
+    _touch(scene / "Clutch spicy", "Clutch ESTIM Spicy Ramp Ending.mp3")
+
+    scenes = scan_library_root(tmp_path)
+    assert _names(scenes) == {"Clutch"}          # one card, spicy folded in
+    clutch = scenes[0]
+    assert len(clutch.audio_tracks) == 3         # mild + 2 spicy ramps
+
+
+def test_underscore_staging_folder_named_by_content(tmp_path):
+    # A '_'-prefixed staging folder holding a loose video + its .output keeps the
+    # video's name, not the folder name.
+    stage = tmp_path / "_forgeplayme"
+    _touch(stage, "Prisoner.mp4")
+    _touch(stage / "Prisoner.output" / "E-Stim", "Prisoner.alpha.funscript")
+
+    entries = scan_scene_titles(stage)
+    assert len(entries) == 1
+    assert entries[0].name == "Prisoner"         # not '_forgeplayme'
+    assert entries[0].bundle_path is not None     # .output attached
+
+
 def test_scripts_subfolder_does_not_leak_a_card(tmp_path):
     # A Scripts-only subfolder folds into the parent and must NOT also appear as
     # its own empty card at library level.
