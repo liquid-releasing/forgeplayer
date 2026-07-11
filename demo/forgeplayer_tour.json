@@ -1,0 +1,177 @@
+{
+  "meta": {
+    "title": "ForgePlayer — Getting Started (Big Buck Bunny)",
+    "purpose": "Show a new user the get-started flow end to end: add a folder, set up screens + audio outputs once, pick the synthesis algorithm, calibrate, launch, and play in sync. Doubles as a self-contained TEST FIXTURE for the demofoundry pipeline.",
+    "example": "Big Buck Bunny",
+    "targetDurationSec": 360,
+    "estimatedDurationSec": 358,
+    "voiceWpm": 150,
+    "voiceStyle": "warm, confident, practical — a friend walking you through first-time setup. No hype; just 'here's what you do, and why.'",
+    "runtime": "self-contained static HTML test app — serve demo/getting-started.html (no backend, no device, no libmpv). Unlike the FunscriptForge tour (which needs the full vite app at :1430), this fixture is one file the runner can serve and drive deterministically.",
+    "narrativeSpine": "Setup-once, play-forever. Lead with the pain (juggling windows + a stim box), then walk the four tabs in nav order — Library (add a folder) -> Setup (screens + crop, then audio roles) -> Preferences (synthesis algorithm) -> Live (calibrate -> launch -> play) — landing on the payoff: one play button drives every screen and every haptic output, frame for frame.",
+    "sceneOrderNote": "Scene order follows the app nav: Library -> Setup -> Preferences -> Live. Setup is split into two scenes (screens/crop, then audio roles) because each is its own column and its own idea.",
+    "honestyNote": "This is a MOCK for demo capture. It shows and animates the UI; it does not play real video, generate a real stim carrier, or drive a device. Narration may say 'press play' / 'the carrier runs alongside' because that's true of the real app — but the fixture itself only animates a transport. Don't imply the HTML is doing real playback.",
+    "schemaNotes": "Each scene's narrationSec is the AUTHORITY for scene length — the runner holds the scene that long while the voiceover plays, regardless of how fast the mock responds. Actions fire in order and should total <= narrationSec, with a trailing 'hold' filling the remainder. Prefer 'dataTour' selectors (every targeted element in getting-started.html carries data-tour); 'css'/'text' are fallbacks; 'approxXY' (at the declared 1440x900 viewport) is a camera/zoom hint, not a click target. The page also exposes window.__forgeHighlight(name,on) to ring a [data-tour] target without relying on hover."
+  },
+
+  "viewport": { "width": 1440, "height": 900, "deviceScaleFactor": 2 },
+
+  "baseUrl": "http://localhost:5050/getting-started.html",
+
+  "dataTourHooks": {
+    "why": "Every element the tour targets already carries a stable data-tour attribute in getting-started.html, so this tour is reliable and re-runnable with no extra dev work.",
+    "hooks": [
+      { "dataTour": "nav-strip",        "element": "the top tab strip (Library / Setup / Preferences / Live)" },
+      { "dataTour": "tab-library",      "element": "Library tab button" },
+      { "dataTour": "tab-setup",        "element": "Setup tab button" },
+      { "dataTour": "tab-preferences",  "element": "Preferences tab button" },
+      { "dataTour": "tab-live",         "element": "Live tab button" },
+      { "dataTour": "choose-folder",    "element": "the 'Choose folder…' button on Library" },
+      { "dataTour": "library-grid",     "element": "the scene-card grid (revealed after Choose folder)" },
+      { "dataTour": "library-card-bbb", "element": "the Big Buck Bunny scene card" },
+      { "dataTour": "monitor-roles",    "element": "Setup -> Monitor roles card" },
+      { "dataTour": "playback-screens", "element": "the playback-screen checkboxes" },
+      { "dataTour": "crop-toggle",      "element": "the ultrawide Crop toggle" },
+      { "dataTour": "crop-position",    "element": "the Top/Center/Bottom crop-position radios" },
+      { "dataTour": "audio-roles",      "element": "Setup -> Audio device roles card" },
+      { "dataTour": "scene-audio",      "element": "Scene audio row (+ its Test button: scene-audio-test)" },
+      { "dataTour": "haptic1",          "element": "Haptic 1 row (+ its Test button: haptic1-test)" },
+      { "dataTour": "haptic2",          "element": "Haptic 2 row" },
+      { "dataTour": "refresh-devices",  "element": "Refresh devices button" },
+      { "dataTour": "gen-algorithm",    "element": "Preferences -> Generation algorithm card" },
+      { "dataTour": "algo-continuous",  "element": "Continuous algorithm option" },
+      { "dataTour": "algo-pulse",       "element": "Pulse-based algorithm option (default)" },
+      { "dataTour": "haptic-offset",    "element": "the Haptic offset slider" },
+      { "dataTour": "live-video",       "element": "Live -> the player wall (Left / Center-ultrawide / Right)" },
+      { "dataTour": "calibrate-h1",     "element": "Calibrate Haptic 1 button" },
+      { "dataTour": "calibrate-h2",     "element": "Calibrate Haptic 2 button" },
+      { "dataTour": "fullscreen-toggle","element": "Fullscreen players toggle" },
+      { "dataTour": "launch",           "element": "Launch button (reveals the live player wall)" },
+      { "dataTour": "play-control",     "element": "the play/pause button on the transport" },
+      { "dataTour": "next-chapter",     "element": "next-chapter button" },
+      { "dataTour": "transport",        "element": "the transport row (seek bar + chapter buttons)" }
+    ]
+  },
+
+  "scenes": [
+    {
+      "id": "00-cold-open",
+      "title": "Welcome",
+      "section": "Open / Library",
+      "narrationSec": 22,
+      "narration": "This is ForgePlayer. If you've ever tried to play a scene across two monitors and an e-stim box by juggling video windows and hoping they stay in sync — this is the fix. One scene folder, one play button, every screen and every haptic output locked together, frame for frame. Let me show you how to get started.",
+      "actions": [
+        { "type": "goto", "url": "http://localhost:5050/getting-started.html" },
+        { "type": "waitForSelector", "target": { "dataTour": "nav-strip", "region": "top tab strip", "approxXY": [200, 40] }, "state": "visible", "timeoutMs": 15000 },
+        { "type": "highlight", "target": { "dataTour": "nav-strip", "region": "soft sweep across the four tabs to imply the whole flow", "approxXY": [200, 40] }, "ms": 3000 },
+        { "type": "hold", "ms": 18000 }
+      ]
+    },
+    {
+      "id": "01-library-add-folder",
+      "title": "Add a folder → the Library",
+      "section": "Library",
+      "narrationSec": 38,
+      "narration": "Everything starts with a folder. I point ForgePlayer at a folder of my scenes, and it scans them into a library. Each card pulls a real frame from the video, and the little badges tell me which device families that scene already has scripts for — e-stim, Handy, OSR2, SR6. We'll use Big Buck Bunny — it's royalty-free, so it's safe to show. The important idea: everything about a scene — the video, the audio, the funscripts for every channel — travels together as one card. Nothing to wire up by hand.",
+      "actions": [
+        { "type": "highlight", "target": { "dataTour": "choose-folder", "css": "#chooseFolder", "text": "Choose folder", "region": "Choose folder button", "approxXY": [110, 150] }, "ms": 1500 },
+        { "type": "click", "target": { "dataTour": "choose-folder", "css": "#chooseFolder", "region": "Choose folder button", "approxXY": [110, 150] } },
+        { "type": "waitForSelector", "target": { "dataTour": "library-grid", "region": "scene-card grid fills in", "approxXY": [700, 400] }, "state": "visible", "timeoutMs": 8000 },
+        { "type": "highlight", "target": { "dataTour": "library-card-bbb", "text": "Big Buck Bunny", "region": "Big Buck Bunny card — thumbnail + device badges", "approxXY": [230, 360] }, "ms": 5000, "note": "linger so the thumbnail + the four device badges read on camera" },
+        { "type": "hold", "ms": 30000 }
+      ]
+    },
+    {
+      "id": "02-setup-screens-crop",
+      "title": "Setup → screens & crop",
+      "section": "Setup",
+      "narrationSec": 58,
+      "narration": "First-time setup, done once. Setup is where I tell ForgePlayer about my rig. I pick which monitors are for playback — here, my two external screens — and keep the controls on my laptop, so it stays free. One decoder, several screens, all in sync. My middle screen is an ultrawide. Instead of living with black bars, I turn on Crop — it scales the video to fill the monitor's aspect ratio. And I choose where the crop sits: keep the top of the frame, the center, or the bottom, each with a small margin so nobody gets sliced off at the edge. Center is the default, and it's the right choice most of the time. That's the whole screen story — set it once, and ForgePlayer remembers it for every scene from now on.",
+      "actions": [
+        { "type": "click", "target": { "dataTour": "tab-setup", "text": "Setup", "region": "nav strip, 2nd tab", "approxXY": [150, 40] } },
+        { "type": "waitForSelector", "target": { "dataTour": "monitor-roles", "region": "Monitor roles card", "approxXY": [400, 380] }, "state": "visible", "timeoutMs": 8000 },
+        { "type": "highlight", "target": { "dataTour": "playback-screens", "region": "playback-screen checkboxes", "approxXY": [400, 320] }, "ms": 6000, "note": "as VO says 'which monitors are for playback'" },
+        { "type": "highlight", "target": { "dataTour": "crop-toggle", "region": "ultrawide Crop toggle", "approxXY": [400, 520] }, "ms": 4000 },
+        { "type": "highlight", "target": { "dataTour": "crop-position", "region": "Top / Center / Bottom radios", "approxXY": [560, 560] }, "ms": 5000, "note": "pan the three radios as the VO names them" },
+        { "type": "hold", "ms": 41000 }
+      ]
+    },
+    {
+      "id": "03-setup-audio-roles",
+      "title": "Setup → audio device roles",
+      "section": "Setup",
+      "narrationSec": 50,
+      "narration": "Now the outputs — and this is the part that replaces the device-picker dance. Scene audio, the video's own sound, goes to my speakers or headphones. I can Test any output right here to confirm it's alive before I commit. Haptic 1 is my main e-stim output — the USB dongle. Its Test plays a short, gentle stim sample, so I know the signal is reaching the box before a scene ever starts. Haptic 2 is an optional second stim output — a prostate channel, or a second device entirely. And if you plug something in after launch, Refresh devices re-scans without a restart. Assign each role once; ForgePlayer routes every scene to the right output automatically.",
+      "actions": [
+        { "type": "highlight", "target": { "dataTour": "audio-roles", "region": "Audio device roles card", "approxXY": [1050, 380] }, "ms": 2000 },
+        { "type": "highlight", "target": { "dataTour": "scene-audio", "region": "Scene audio row", "approxXY": [1050, 300] }, "ms": 3000 },
+        { "type": "click", "target": { "dataTour": "scene-audio-test", "text": "Test", "region": "Scene audio Test button", "approxXY": [1330, 300] } },
+        { "type": "highlight", "target": { "dataTour": "haptic1", "region": "Haptic 1 row", "approxXY": [1050, 360] }, "ms": 3000 },
+        { "type": "click", "target": { "dataTour": "haptic1-test", "text": "Test", "region": "Haptic 1 Test button (gentle stim sample)", "approxXY": [1330, 360] } },
+        { "type": "highlight", "target": { "dataTour": "haptic2", "region": "Haptic 2 row", "approxXY": [1050, 430] }, "ms": 3000 },
+        { "type": "highlight", "target": { "dataTour": "refresh-devices", "region": "Refresh devices button", "approxXY": [1300, 520] }, "ms": 2000 },
+        { "type": "hold", "ms": 33000 }
+      ]
+    },
+    {
+      "id": "04-preferences-algorithm",
+      "title": "Preferences → synthesis algorithm",
+      "section": "Preferences",
+      "narrationSec": 40,
+      "narration": "One choice matters for how the stim actually feels: the generation algorithm. Continuous is the classic waveform — pick it for a 312 or a 2B. Pulse-based is power-efficient and slower to numb; it's built for modern audio-based stereostim like the Tingler or EstimHero, and it's ForgePlayer's default. Two clicks, set once. And if your dongle or electrode placement runs a hair ahead of or behind the video, the haptic offset nudges the stim into sync. That's every preference that matters for getting started.",
+      "actions": [
+        { "type": "click", "target": { "dataTour": "tab-preferences", "text": "Preferences", "region": "nav strip, 3rd tab", "approxXY": [255, 40] } },
+        { "type": "waitForSelector", "target": { "dataTour": "gen-algorithm", "region": "Generation algorithm card", "approxXY": [400, 300] }, "state": "visible", "timeoutMs": 8000 },
+        { "type": "highlight", "target": { "dataTour": "algo-continuous", "region": "Continuous option", "approxXY": [350, 330] }, "ms": 4000 },
+        { "type": "highlight", "target": { "dataTour": "algo-pulse", "region": "Pulse-based option (default)", "approxXY": [760, 330] }, "ms": 5000, "note": "linger on the default + its 'default' pill" },
+        { "type": "highlight", "target": { "dataTour": "haptic-offset", "region": "Haptic offset slider", "approxXY": [560, 470] }, "ms": 4000 },
+        { "type": "hold", "ms": 26000 }
+      ]
+    },
+    {
+      "id": "05-go-live-launch",
+      "title": "Go Live → calibrate & launch",
+      "section": "Live",
+      "narrationSec": 68,
+      "narration": "Setup is done — now we go Live. ForgePlayer already knows my screens and my outputs, so the Live panel stays clean: just the scene and the controls. Before I launch, I calibrate each haptic output — a quick level check, so the stim arrives at a comfortable strength, not a surprise. One for Haptic 1, one for Haptic 2. Fullscreen players takes each window edge-to-edge on its monitor — kiosk mode, no chrome — and it's live, so I can flip it even while a scene is playing. Everything's set: screens chosen, outputs tested and calibrated, the algorithm picked. There's nothing left to wire up. So I press Launch — and ForgePlayer opens a player on each screen I chose, all pointed at the same scene, all waiting on a single play button. This is the moment the whole rig becomes one instrument.",
+      "actions": [
+        { "type": "click", "target": { "dataTour": "tab-live", "text": "Live", "region": "nav strip, 4th tab", "approxXY": [350, 40] } },
+        { "type": "waitForSelector", "target": { "dataTour": "live-video", "region": "the player wall + transport", "approxXY": [720, 360] }, "state": "visible", "timeoutMs": 8000 },
+        { "type": "highlight", "target": { "dataTour": "calibrate-h1", "region": "Calibrate Haptic 1", "approxXY": [120, 640] }, "ms": 2000 },
+        { "type": "click", "target": { "dataTour": "calibrate-h1", "region": "Calibrate Haptic 1", "approxXY": [120, 640] } },
+        { "type": "highlight", "target": { "dataTour": "calibrate-h2", "region": "Calibrate Haptic 2", "approxXY": [300, 640] }, "ms": 2000 },
+        { "type": "click", "target": { "dataTour": "calibrate-h2", "region": "Calibrate Haptic 2", "approxXY": [300, 640] } },
+        { "type": "highlight", "target": { "dataTour": "fullscreen-toggle", "region": "Fullscreen players toggle", "approxXY": [480, 640] }, "ms": 3000 },
+        { "type": "highlight", "target": { "dataTour": "launch", "css": "#launchBtn", "text": "Launch", "region": "Launch button", "approxXY": [1330, 640] }, "ms": 2000 },
+        { "type": "click", "target": { "dataTour": "launch", "css": "#launchBtn", "region": "Launch — reveals the live player wall", "approxXY": [1330, 640] } },
+        { "type": "hold", "ms": 57000 }
+      ]
+    },
+    {
+      "id": "06-play",
+      "title": "Play — every screen in lockstep",
+      "section": "Live (playing)",
+      "narrationSec": 50,
+      "narration": "And there it is — one scene, every screen, in lockstep. The ultrawide is cropped to fill, the side screens are pillar-free, and they're all decoding the same timeline. I press play once, and everything moves together. Seek anywhere on the bar, jump to the next chapter or the previous one — every window and every output stays frame-accurate. No resync, no drift, no chasing windows around. And on the haptic outputs, the stim carrier is running right alongside the picture — the same scene driving what you see and what you'd feel. From here you just watch. The juggling act is gone.",
+      "actions": [
+        { "type": "click", "target": { "dataTour": "play-control", "css": "#playBtn", "region": "play button — starts the synced transport", "approxXY": [200, 560] } },
+        { "type": "highlight", "target": { "dataTour": "live-video", "region": "the three screens playing in sync (center cropped to fill)", "approxXY": [720, 360] }, "ms": 5000 },
+        { "type": "highlight", "target": { "dataTour": "transport", "region": "seek bar filling as it plays", "approxXY": [720, 560] }, "ms": 3000 },
+        { "type": "highlight", "target": { "dataTour": "next-chapter", "region": "next-chapter button", "approxXY": [250, 560] }, "ms": 3000 },
+        { "type": "hold", "ms": 39000 }
+      ]
+    },
+    {
+      "id": "07-close",
+      "title": "Close",
+      "section": "Back to Library",
+      "narrationSec": 30,
+      "narration": "That's how you get started with ForgePlayer. Point it at a folder, set up your screens and outputs once, and from then on every scene plays everywhere at once — video, sound, and e-stim, perfectly in sync. One player for the whole rig. Add your scenes, press play, and enjoy. Welcome to ForgePlayer.",
+      "actions": [
+        { "type": "highlight", "target": { "dataTour": "nav-strip", "region": "full tab strip", "approxXY": [200, 40] }, "ms": 3000 },
+        { "type": "click", "target": { "dataTour": "tab-library", "text": "Library", "region": "nav strip, 1st tab", "approxXY": [70, 40] } },
+        { "type": "hold", "ms": 26000 }
+      ]
+    }
+  ]
+}

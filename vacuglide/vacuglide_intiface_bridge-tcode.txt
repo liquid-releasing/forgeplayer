@@ -1,0 +1,11 @@
+https://github.com/DeluxMel/Vacuglide-Initface-Bridge-tcode#speed-behavior
+
+ui to connct is here
+https://discuss.eroscripts.com/t/vacufunplayer-1-0-2-connect-vacuglide2-to-mpc-hc-or-heresphere/294123/1
+
+https://github.com/Yoooi0/MultiFunPlayer
+
+https://github.com/Yoooi0/ToySerialController
+
+https://github.com/Yoooi0/BusDriver
+BusDriver is a VaM (Virt-a-Mate) plugin that accepts motion data from various sources and animates selected target in the scene.

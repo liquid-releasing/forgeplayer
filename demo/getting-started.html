@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ForgePlayer — Getting Started (demo test app)</title>
+<!--
+  ForgePlayer "getting started" — a SELF-CONTAINED HTML mock of the desktop app,
+  built as a deterministic test fixture for the demofoundry pipeline.
+
+  WHY THIS EXISTS: the real ForgePlayer is a native PySide6/Qt + libmpv app —
+  no DOM, so Playwright can't drive it. demofoundry drives a browser. This page
+  reproduces the getting-started FLOW (Library -> Setup -> Preferences -> Live ->
+  Play) as real, clickable HTML so the tour (forgeplayer_tour.json) can run
+  against stable [data-tour] hooks and demofoundry can record the visual track.
+
+  It is a MOCK: it shows and (optionally) animates; it does not play real video
+  or drive any device. Every interactive element the tour targets carries a
+  data-tour attribute. Tab clicks really switch screens; buttons give visual
+  feedback; Launch reveals the player wall; Play animates the transport.
+
+  Palette mirrors the forgeplayer-web landing page.
+-->
+<style>
+  :root {
+    --bg:      #0e1117;
+    --surface: #1a1d27;
+    --surface2:#12151e;
+    --border:  #2d3148;
+    --accent:  #ff6b30;
+    --accent2: #ff8a5c;
+    --text:    #fafafa;
+    --muted:   #9ba3c4;
+    --good:    #4ade80;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { width: 1440px; min-height: 900px; margin: 0 auto; display: flex; flex-direction: column; }
+
+  /* ── Top bar + tab strip ───────────────────────────────────────── */
+  .topbar {
+    height: 64px; flex: 0 0 64px;
+    display: flex; align-items: center; gap: 28px;
+    padding: 0 24px;
+    background: rgba(14,17,23,0.96);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; letter-spacing: 0.2px; }
+  .brand .anvil { font-size: 20px; filter: saturate(1.4); }
+  .brand .accent { color: var(--accent); }
+  nav.tabstrip { display: flex; gap: 4px; }
+  .tab {
+    appearance: none; border: 0; background: transparent; color: var(--muted);
+    font: inherit; font-weight: 600; font-size: 14px;
+    padding: 8px 16px; border-radius: 8px; cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .tab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+  .tab.active { color: var(--text); background: rgba(255,107,48,0.10); border-color: rgba(255,107,48,0.35); }
+  .topbar .spacer { flex: 1; }
+  .ver { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  /* ── Content ───────────────────────────────────────────────────── */
+  .content { flex: 1; padding: 28px 32px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  h2.screen-title { margin: 0 0 4px; font-size: 22px; }
+  .subtle { color: var(--muted); font-size: 13px; margin: 0 0 22px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+  .col2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .group-title { font-size: 11px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+  .row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+  .row .grow { flex: 1; }
+  label.chk { display: flex; align-items: center; gap: 10px; padding: 7px 0; cursor: pointer; }
+  input[type=checkbox], input[type=radio] { accent-color: var(--accent); width: 16px; height: 16px; }
+  select, .fakeselect {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; min-width: 200px;
+  }
+  .btn {
+    appearance: none; font: inherit; font-weight: 700; font-size: 13px; cursor: pointer;
+    border-radius: 8px; padding: 8px 14px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text);
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #1a0d05; }
+  .btn.primary:hover { background: var(--accent2); }
+  .btn.ghost { background: transparent; }
+  .btn.testing { box-shadow: 0 0 0 2px rgba(74,222,128,0.5) inset; color: var(--good); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
+          padding: 3px 9px; border-radius: 999px; background: rgba(255,107,48,0.12); color: var(--accent2); }
+  .radios { display: flex; gap: 8px; }
+  .radios label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
+                  border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+
+  /* highlight target ring the tour can light up (it sets [data-hot]) */
+  [data-hot] { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 10px;
+               transition: outline-color 0.2s; }
+
+  /* ── Library ───────────────────────────────────────────────────── */
+  .welcome { text-align: center; padding: 40px 0 28px; }
+  .welcome h3 { font-size: 26px; margin: 0 0 8px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 8px; }
+  .grid.hidden { display: none; }
+  .pcard { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; cursor: pointer; }
+  .pcard:hover { border-color: var(--accent); }
+  .thumb { aspect-ratio: 16/9; background: linear-gradient(135deg,#2a5d8f,#7fc4a0 55%,#c9d36b);
+           display: flex; align-items: center; justify-content: center; position: relative; }
+  .thumb .play { width: 46px; height: 46px; border-radius: 50%; background: rgba(0,0,0,0.45);
+                 display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
+  .pcard .meta { padding: 11px 13px; }
+  .pcard .name { font-weight: 700; font-size: 14px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px;
+           background: var(--surface2); border: 1px solid var(--border); color: var(--muted); }
+
+  /* ── Live / player wall ────────────────────────────────────────── */
+  .videopanel { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .wall { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 12px; }
+  .screen { aspect-ratio: 16/9; border-radius: 8px; border: 1px solid var(--border); position: relative; overflow: hidden;
+            background: #06080c; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+  .screen .frame { position: absolute; inset: 0; background: linear-gradient(135deg,#2a5d8f,#7fc4a0 55%,#c9d36b); opacity: 0; transition: opacity 0.4s; }
+  .app.live .screen .frame { opacity: 1; }
+  .screen.crop .frame { background-size: cover; transform: scale(1.18); }
+  .screen .tag { position: absolute; left: 8px; top: 8px; z-index: 2; font-size: 10px; font-weight: 700;
+                 background: rgba(0,0,0,0.5); padding: 2px 7px; border-radius: 6px; }
+  .transport { display: flex; align-items: center; gap: 14px; margin-top: 16px; opacity: 0.45; pointer-events: none; }
+  .app.live .transport { opacity: 1; pointer-events: auto; }
+  .seek { flex: 1; height: 8px; border-radius: 999px; background: var(--surface); position: relative; overflow: hidden; }
+  .seek .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 8%; background: var(--accent); }
+  .app.playing .seek .fill { animation: seek 30s linear forwards; }
+  @keyframes seek { from { width: 8%; } to { width: 100%; } }
+  .iconbtn { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+             border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; font-size: 14px; }
+  .iconbtn.primary { background: var(--accent); border-color: var(--accent); color: #1a0d05; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- Top bar + tab strip ─────────────────────────────────────────── -->
+  <div class="topbar">
+    <div class="brand"><span class="anvil">⚒</span><span>Forge<span class="accent">Player</span></span></div>
+    <nav class="tabstrip" data-tour="nav-strip">
+      <button class="tab active" data-tour="tab-library"     data-target="library">Library</button>
+      <button class="tab"        data-tour="tab-setup"       data-target="setup">Setup</button>
+      <button class="tab"        data-tour="tab-preferences" data-target="preferences">Preferences</button>
+      <button class="tab"        data-tour="tab-live"        data-target="live">Live</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="ver">v0.0.7</div>
+  </div>
+
+  <div class="content">
+
+    <!-- ── LIBRARY ──────────────────────────────────────────────── -->
+    <section class="panel active" data-panel="library">
+      <h2 class="screen-title">Library</h2>
+      <p class="subtle">Every scene in one place. Each card travels with its video, audio, and funscripts.</p>
+
+      <div class="row">
+        <button class="btn primary" data-tour="choose-folder" id="chooseFolder">Choose folder…</button>
+        <span class="grow"></span>
+        <button class="btn ghost">Refresh</button>
+      </div>
+
+      <div class="welcome" data-tour="welcome-panel" id="welcomePanel">
+        <h3>Welcome to ForgePlayer</h3>
+        <p class="subtle">Point ForgePlayer at a folder of scenes to begin.</p>
+      </div>
+
+      <div class="grid hidden" data-tour="library-grid" id="libraryGrid">
+        <div class="pcard" data-tour="library-card-bbb" id="bbbCard">
+          <div class="thumb"><div class="play">▶</div></div>
+          <div class="meta">
+            <div class="name">Big Buck Bunny</div>
+            <div class="badges">
+              <span class="badge">E-Stim</span><span class="badge">Handy</span>
+              <span class="badge">OSR2</span><span class="badge">SR6</span>
+            </div>
+          </div>
+        </div>
+        <div class="pcard"><div class="thumb" style="background:linear-gradient(135deg,#3a2a5d,#8f5fa0 60%,#d36ba0)"></div><div class="meta"><div class="name">Scene 02</div><div class="badges"><span class="badge">E-Stim</span></div></div></div>
+        <div class="pcard"><div class="thumb" style="background:linear-gradient(135deg,#5d2a2a,#a08f5f 60%,#6bd3c9)"></div><div class="meta"><div class="name">Scene 03</div><div class="badges"><span class="badge">Handy</span><span class="badge">OSR2</span></div></div></div>
+        <div class="pcard"><div class="thumb" style="background:linear-gradient(135deg,#2a5d3a,#5fa08f 60%,#6b8ad3)"></div><div class="meta"><div class="name">Scene 04</div><div class="badges"><span class="badge">SR6</span></div></div></div>
+      </div>
+    </section>
+
+    <!-- ── SETUP ────────────────────────────────────────────────── -->
+    <section class="panel" data-panel="setup">
+      <h2 class="screen-title">Setup</h2>
+      <p class="subtle">First-time setup, done once — tell ForgePlayer about your screens and outputs.</p>
+
+      <div class="col2">
+        <!-- Monitor roles -->
+        <div class="card" data-tour="monitor-roles">
+          <p class="group-title">Monitor roles</p>
+
+          <div data-tour="playback-screens">
+            <div class="group-title" style="opacity:0.8">Playback screens</div>
+            <label class="chk"><input type="checkbox"> Laptop (built-in) — controls</label>
+            <label class="chk"><input type="checkbox" checked> External — Left</label>
+            <label class="chk"><input type="checkbox" checked> External — Center (ultrawide)</label>
+            <label class="chk"><input type="checkbox" checked> External — Right</label>
+          </div>
+
+          <div class="row" style="margin-top:14px">
+            <span>Control panel screen</span>
+            <span class="grow"></span>
+            <select><option>Laptop (built-in)</option><option>External — Left</option></select>
+          </div>
+
+          <div class="row" data-tour="crop-toggle">
+            <label class="chk"><input type="checkbox" checked> Crop ultrawide to fill (no black bars)</label>
+          </div>
+          <div class="row" data-tour="crop-position">
+            <span>Crop position</span>
+            <span class="grow"></span>
+            <div class="radios">
+              <label><input type="radio" name="crop"> Top</label>
+              <label><input type="radio" name="crop" checked> Center</label>
+              <label><input type="radio" name="crop"> Bottom</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audio device roles -->
+        <div class="card" data-tour="audio-roles">
+          <p class="group-title">Audio device roles</p>
+
+          <div class="row" data-tour="scene-audio">
+            <div class="grow"><strong>Scene audio</strong><div class="subtle" style="margin:2px 0 0">The video's own sound</div></div>
+            <select><option>Speakers / Headphones</option></select>
+            <button class="btn" data-tour="scene-audio-test">Test</button>
+          </div>
+
+          <div class="row" data-tour="haptic1">
+            <div class="grow"><strong>Haptic 1 — main stim</strong><div class="subtle" style="margin:2px 0 0">USB stim dongle</div></div>
+            <select><option>USB Audio DAC #1</option></select>
+            <button class="btn" data-tour="haptic1-test">Test</button>
+          </div>
+
+          <div class="row" data-tour="haptic2">
+            <div class="grow"><strong>Haptic 2 — alt stim</strong><div class="subtle" style="margin:2px 0 0">Optional second device / prostate</div></div>
+            <select><option>USB Audio DAC #2</option><option>— none —</option></select>
+            <button class="btn">Test</button>
+          </div>
+
+          <div class="row" style="margin-top:16px">
+            <span class="grow"></span>
+            <button class="btn ghost" data-tour="refresh-devices">↻ Refresh devices</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── PREFERENCES ──────────────────────────────────────────── -->
+    <section class="panel" data-panel="preferences">
+      <h2 class="screen-title">Preferences</h2>
+      <p class="subtle">One choice shapes how the stim feels: the synthesis algorithm.</p>
+
+      <div class="card" data-tour="gen-algorithm" style="max-width:760px">
+        <p class="group-title">Audio synthesis · Generation algorithm</p>
+        <div class="col2" style="gap:14px">
+          <label class="card" data-tour="algo-continuous" style="cursor:pointer; background:var(--surface2)">
+            <div class="row"><input type="radio" name="algo"> <strong>Continuous</strong></div>
+            <div class="subtle" style="margin:6px 0 0">Classic waveform — for a 312 or a 2B.</div>
+          </label>
+          <label class="card" data-tour="algo-pulse" style="cursor:pointer; background:var(--surface2); border-color:var(--accent)">
+            <div class="row"><input type="radio" name="algo" checked> <strong>Pulse-based</strong> <span class="pill">default</span></div>
+            <div class="subtle" style="margin:6px 0 0">Power-efficient, slower to numb — for the Tingler / EstimHero.</div>
+          </label>
+        </div>
+
+        <div class="row" data-tour="haptic-offset" style="margin-top:18px">
+          <span class="grow"><strong>Haptic offset</strong><div class="subtle" style="margin:2px 0 0">Nudge the stim into sync with the picture</div></span>
+          <input type="range" min="-200" max="200" value="0" style="width:240px; accent-color:var(--accent)">
+          <span class="ver">0 ms</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── LIVE ─────────────────────────────────────────────────── -->
+    <section class="panel" data-panel="live">
+      <h2 class="screen-title">Live</h2>
+      <p class="subtle">Setup's done — ForgePlayer already knows your screens and outputs.</p>
+
+      <div class="videopanel" data-tour="live-video">
+        <div class="wall">
+          <div class="screen"><span class="tag">Left</span><div class="frame"></div></div>
+          <div class="screen crop"><span class="tag">Center · ultrawide (crop)</span><div class="frame"></div></div>
+          <div class="screen"><span class="tag">Right</span><div class="frame"></div></div>
+        </div>
+
+        <div class="transport" data-tour="transport">
+          <button class="iconbtn" data-tour="prev-chapter">⏮</button>
+          <button class="iconbtn primary" data-tour="play-control" id="playBtn">▶</button>
+          <button class="iconbtn" data-tour="next-chapter">⏭</button>
+          <div class="seek"><div class="fill"></div></div>
+          <span class="ver" id="clock">0:00</span>
+        </div>
+        <div class="hint" id="liveHint">Calibrate your outputs, then Launch to open the players on your screens.</div>
+      </div>
+
+      <div class="row" style="margin-top:18px; flex-wrap:wrap">
+        <button class="btn" data-tour="calibrate-h1">Calibrate Haptic 1</button>
+        <button class="btn" data-tour="calibrate-h2">Calibrate Haptic 2</button>
+        <label class="chk" data-tour="fullscreen-toggle"><input type="checkbox"> Fullscreen players</label>
+        <span class="grow"></span>
+        <button class="btn primary" data-tour="launch" id="launchBtn">Launch ▸</button>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+  // Tab switching — real, so a Playwright click on a tab changes the screen.
+  const app = document.getElementById('app');
+  document.querySelectorAll('.tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.target;
+      document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
+      document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === target));
+    });
+  });
+
+  // Library: Choose folder reveals the grid + hides the welcome panel.
+  document.getElementById('chooseFolder').addEventListener('click', () => {
+    document.getElementById('welcomePanel').style.display = 'none';
+    document.getElementById('libraryGrid').classList.remove('hidden');
+  });
+
+  // Test / Calibrate buttons: brief "signal alive" pulse (visual only).
+  function pulse(el) {
+    if (!el) return;
+    el.classList.add('testing');
+    setTimeout(() => el.classList.remove('testing'), 1100);
+  }
+  document.querySelectorAll('[data-tour^="haptic"], [data-tour^="scene-audio-test"], [data-tour^="calibrate"]').forEach((b) => {
+    if (b.tagName === 'BUTTON') b.addEventListener('click', () => pulse(b));
+  });
+
+  // Launch: open the player wall (frames light up; transport enabled).
+  document.getElementById('launchBtn').addEventListener('click', () => {
+    app.classList.add('live');
+    document.getElementById('liveHint').textContent = 'Players are live on your screens. Press play.';
+  });
+
+  // Play: animate the seek + a running clock (mock).
+  let playing = false, t = 0, timer = null;
+  const clock = document.getElementById('clock');
+  document.getElementById('playBtn').addEventListener('click', () => {
+    if (!app.classList.contains('live')) return;        // must Launch first
+    playing = !playing;
+    app.classList.toggle('playing', playing);
+    document.getElementById('playBtn').textContent = playing ? '❚❚' : '▶';
+    if (playing) {
+      timer = setInterval(() => { t += 1; const m = Math.floor(t/60), s = String(t%60).padStart(2,'0'); clock.textContent = `${m}:${s}`; }, 1000);
+    } else {
+      clearInterval(timer);
+    }
+  });
+
+  // Tour hook: demofoundry can call window.__forgeHighlight('data-tour-name', onOff)
+  // to ring a target without depending on CSS hover. Pure convenience.
+  window.__forgeHighlight = (name, on) => {
+    const el = document.querySelector(`[data-tour="${name}"]`);
+    if (!el) return false;
+    if (on) el.setAttribute('data-hot', ''); else el.removeAttribute('data-hot');
+    return true;
+  };
+</script>
+</body>
+</html>
