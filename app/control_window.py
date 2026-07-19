@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QRadioButton, QButtonGroup, QDoubleSpinBox,
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QScreen, QAction
+from PySide6.QtGui import QScreen, QAction, QPixmap
 
 from app.chapters import (
     Chapter,
@@ -228,6 +228,7 @@ class ControlWindow(QMainWindow):
         self._tabs.addTab(self._live_tab, "Live")
         self._tabs.addTab(self._build_setup_tab(), "Setup")
         self._tabs.addTab(self._build_preferences_tab(), "Preferences")
+        self._tabs.addTab(self._build_about_tab(), "About")
 
         vbox.addWidget(self._tabs, 1)
 
@@ -1182,6 +1183,86 @@ class ControlWindow(QMainWindow):
         # the tab on a tall window.
         outer.addLayout(columns, 1)
         return container
+
+    def _build_about_tab(self) -> QWidget:
+        """About — version, ownership, and upstream attribution. Credits the
+        projects ForgePlayer is built on (mpv, restim, funscript-tools, …) as
+        their licenses ask, and gives users a version string + links to docs
+        and source. Wrapped in a scroll area so the credits list stays reachable
+        on the short (~720 px) control window."""
+        from app.version import __version__  # noqa: PLC0415
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(28, 22, 28, 22)
+        outer.setSpacing(10)
+
+        # Wordmark logo. branding/ ships beside the exe in PyInstaller bundles
+        # and beside main.py in dev; skip gracefully if it isn't found.
+        logo_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "branding", "forgeplayer_horizontal.png",
+        )
+        if os.path.isfile(logo_path):
+            pix = QPixmap(logo_path)
+            if not pix.isNull():
+                logo = QLabel()
+                logo.setPixmap(pix.scaledToWidth(
+                    340, Qt.TransformationMode.SmoothTransformation))
+                outer.addWidget(logo)
+
+        title = QLabel("ForgePlayer")
+        tf = title.font(); tf.setPointSize(22); tf.setBold(True); title.setFont(tf)
+        outer.addWidget(title)
+
+        ver = QLabel(f"Version {__version__}")
+        ver.setStyleSheet("color: #9aa0aa; font-size: 12px;")
+        outer.addWidget(ver)
+
+        tagline = QLabel("Synchronized multi-screen playback with device routing.")
+        tagline.setWordWrap(True)
+        tagline.setStyleSheet("color: #c7ccd4;")
+        outer.addWidget(tagline)
+
+        outer.addSpacing(6)
+
+        # Copyright, links, and credits in one rich-text block so external-link
+        # handling lives in one place. Displays "Liquid Releasing" (the brand),
+        # not the LICENSE file's legal-entity name.
+        body = QLabel()
+        body.setTextFormat(Qt.TextFormat.RichText)
+        body.setOpenExternalLinks(True)
+        body.setWordWrap(True)
+        body.setText(
+            "<p>&copy; 2026 <b>Liquid Releasing</b> &middot; MIT License</p>"
+            "<p><a href='https://forgeplayer.app/'>Documentation</a> &middot; "
+            "<a href='https://github.com/liquid-releasing/forgeplayer'>"
+            "Source on GitHub</a></p>"
+            "<hr>"
+            "<p><b>Built on the work of others</b></p>"
+            "<ul>"
+            "<li><a href='https://mpv.io/'>mpv / libmpv</a> — video &amp; audio "
+            "playback (LGPL)</li>"
+            "<li><a href='https://github.com/diglet48/restim'>restim</a> by "
+            "diglet48 — vendored e-stim synthesis math (MIT, v1.59)</li>"
+            "<li><a href='https://github.com/edger477/funscript-tools'>"
+            "funscript-tools</a> by edger477 — funscript channel handling "
+            "(MIT)</li>"
+            "<li><a href='https://github.com/jaseg/python-mpv'>python-mpv</a>, "
+            "<a href='https://www.qt.io/'>Qt</a> / PySide6, "
+            "<a href='https://python-sounddevice.readthedocs.io/'>sounddevice</a>"
+            " / PortAudio, <a href='https://numpy.org/'>NumPy</a></li>"
+            "</ul>"
+        )
+        outer.addWidget(body)
+
+        outer.addStretch(1)
+        scroll.setWidget(container)
+        return scroll
 
     def _build_preferences_synth_page(self) -> QWidget:
         """Audio-synthesis column for the Preferences tab — algorithm

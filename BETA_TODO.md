@@ -51,8 +51,8 @@ mkdocs docs, PyInstaller packaging.
       forgegen produces the shaker `.funscript` from the audio beat track;
       ForgePlayer plays it like any channel + adds a shaker destination in the
       device routing. First step toward body-shaker / 7.1 audio-channel haptics.
-- [ ] **In-app About page** — version, credits, and upstream attribution
-      (mpv, restim, funscript-tools), links to docs.
+- [x] **In-app About page** — version, credits, and upstream attribution
+      (mpv, restim, funscript-tools), links to docs. **Shipped: About tab.**
 - [ ] **Auto-update check** — point at forgeplayer-releases / a release feed.
 - [ ] **Apply algorithm / haptic-offset change without relaunch** — both are
       captured at launch today. (Natural fit with the Settings/Preferences tab
