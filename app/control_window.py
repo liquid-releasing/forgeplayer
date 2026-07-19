@@ -1019,7 +1019,9 @@ class ControlWindow(QMainWindow):
         if not h2_device:
             return "(silent — no device set in Setup)"
         if h2_device == self._prefs.haptic1_audio_device:
-            return "(silent — same device as Haptic 1)"
+            # Same physical box as Haptic 1 — H1's signal already drives it; a
+            # second exclusive stream would just fail. Not an error state.
+            return "↳ plays through Haptic 1 (same device)"
         silent_reason = slot1_data.get("aux_silent_reason")
         if silent_reason:
             return f"(silent — {silent_reason})"
@@ -1036,8 +1038,11 @@ class ControlWindow(QMainWindow):
                 fs, prostate=True, as_types=self._is_packaged_bundle())
             if prostate:
                 return self._bulleted_sources("restim prostate:", prostate)
+        # Scene has an H1 source but no prostate side-chain → Haptic 2 will
+        # mirror whatever Haptic 1 plays. Say so up front (matches the
+        # `(mirror H1)` label the resolver sets once playing).
         if slot1_data.get("funscript_set") or slot1_data.get("audio_path"):
-            return "(resolves at launch)"
+            return "↳ mirrors Haptic 1 (no prostate side-chain)"
         return "(no source loaded)"
 
     # ── Prefs lookup helpers ────────────────────────────────────────────────
@@ -1380,15 +1385,37 @@ class ControlWindow(QMainWindow):
             return os.path.dirname(ch.video.path)
         return os.path.expanduser("~")
 
+    def _pick_source_file(
+        self, title: str, filters_qt: str, filters_win: list[tuple[str, str]],
+    ) -> str | None:
+        """Open a file picker rooted at the active scene folder.
+
+        Prefers the native OS dialog run on a dedicated STA thread — Qt's own
+        dialog, called on the GUI thread while libmpv is playing in-process,
+        either drops to the non-native chrome (no Quick Access) or deadlocks the
+        modal pump against mpv's event delivery (a hang bad enough to force a
+        kill). Falls back to QFileDialog on non-Windows or any native error."""
+        start = self._browse_start_dir()
+        from app.native_dialog import (  # noqa: PLC0415
+            NativeDialogUnavailable, native_open_file,
+        )
+        try:
+            return native_open_file(title, start, filters_win)
+        except NativeDialogUnavailable:
+            path, _ = QFileDialog.getOpenFileName(self, title, start, filters_qt)
+            return path or None
+
     def _on_browse_video(self) -> None:
         """Pick any video file as the scene's video → route the live scene to
         it (one video, all monitors). Added to the scene so it shows in the
         Video source combo too."""
         if self._current_entry is None or self._current_choices is None:
             return
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Choose a video", self._browse_start_dir(),
+        path = self._pick_source_file(
+            "Choose a video",
             "Video files (*.mp4 *.mkv *.mov *.avi *.webm *.m4v *.ts);;All files (*)",
+            [("Video files", "*.mp4;*.mkv;*.mov;*.avi;*.webm;*.m4v;*.ts"),
+             ("All files", "*.*")],
         )
         if not path:
             return
@@ -1411,10 +1438,12 @@ class ControlWindow(QMainWindow):
         (scanning its folder); anything else plays as a stim audio file."""
         if self._current_entry is None or self._current_choices is None:
             return
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Choose a stim source", self._browse_start_dir(),
+        path = self._pick_source_file(
+            "Choose a stim source",
             "Stim sources (*.funscript *.wav *.mp3 *.flac *.m4a *.ogg);;"
             "All files (*)",
+            [("Stim sources", "*.funscript;*.wav;*.mp3;*.flac;*.m4a;*.ogg"),
+             ("All files", "*.*")],
         )
         if not path:
             return
