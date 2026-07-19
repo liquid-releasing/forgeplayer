@@ -106,9 +106,9 @@ double-click a `.forge`.
 
 ## Download
 
-**v0.0.12 — released 2026-07-11.**
+**v0.0.13 — released 2026-07-19.**
 
-[:material-download: Download v0.0.12 (Windows / macOS / Linux)](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest){ .md-button .md-button--primary }
+[:material-download: Download v0.0.13 (Windows / macOS / Linux)](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest){ .md-button .md-button--primary }
 
 ### Windows: keeping the download
 
