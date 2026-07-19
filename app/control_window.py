@@ -3958,11 +3958,13 @@ class ControlWindow(QMainWindow):
                 aux_source = AudioFilePlaybackSource(
                     src.audio_path, h2_rate,
                 )
-            except (ValueError, OSError) as exc:
-                # Sample-rate mismatch, unsupported format, file IO
-                # error — surface for debugging. We don't auto-fall to
-                # mirror because the user explicitly placed this file;
-                # silently routing around it would mask the bug.
+            except Exception as exc:  # noqa: BLE001
+                # Sample-rate mismatch, unsupported format (WAV-only reader —
+                # a non-RIFF file raises wave.Error, which is NOT an
+                # OSError/ValueError), file IO error — surface for debugging.
+                # We don't auto-fall to mirror because the user explicitly
+                # placed this prostate file; silently routing around it would
+                # mask the bug.
                 slot_data["aux_silent_reason"] = (
                     f"Failed to open prostate audio file: {exc}"
                 )
@@ -4051,31 +4053,45 @@ class ControlWindow(QMainWindow):
         else:
             # No prostate-specific content → mirror Haptic 1. The form
             # depends on what H1 itself is playing:
-            #   - H1 audio_file (mp3) → mirror with another
-            #     AudioFilePlaybackSource on the same file
-            #   - H1 funscript synth → fresh StimSynth on the same
-            #     primary channels (two synth instances since the
-            #     vendored restim algorithms aren't documented as
-            #     thread-safe under concurrent generate_audio() calls)
+            #   - H1 audio_file (mp3/wav) → play the SAME file on the H2
+            #     device via a headless mpv (mpv decodes any format; the
+            #     sounddevice AudioFilePlaybackSource is WAV-only and would
+            #     die with `wave.Error` on the mp3 stim files real scenes
+            #     ship). Handled here and returns early — no StimAudioStream.
+            #   - H1 funscript synth → fresh StimSynth on the same primary
+            #     channels (two synth instances since the vendored restim
+            #     algorithms aren't documented as thread-safe under
+            #     concurrent generate_audio() calls)
             if primary_audio_path:
-                try:
-                    aux_source = AudioFilePlaybackSource(
-                        primary_audio_path, h2_rate,
-                    )
-                except (ValueError, OSError) as exc:
+                mirror = self._engine.init_stim_audio_mirror(
+                    primary_audio_path, h2_device,
+                )
+                if mirror is None:
                     slot_data["aux_silent_reason"] = (
-                        f"Failed to open mirror audio file: {exc}"
+                        "Haptic 2 mirror could not open the sound file on the "
+                        "H2 device"
                     )
                     DebugLog.record(
-                        "stim.aux_mirror_audio_failed",
+                        "stim.aux_mirror_mpv_failed",
                         slot=slot_idx,
-                        path=primary_audio_path, error=repr(exc),
+                        path=primary_audio_path, device=h2_device,
                     )
                     return
-                aux_kind = "mirror_h1_audio"
                 resolved_label = (
                     f"{os.path.basename(primary_audio_path)} (mirror H1)"
                 )
+                slot_data["aux_resolved_source"] = {
+                    "kind": "mirror_h1_audio",
+                    "label": resolved_label,
+                }
+                DebugLog.record(
+                    "stim.aux_resolved",
+                    slot=slot_idx, source_kind="mirror_h1_audio",
+                    resolved_label=resolved_label,
+                    device=h2_device,
+                    transport="mpv",
+                )
+                return
             else:
                 aux_source = StimSynth(
                     primary_channels, media_sync,

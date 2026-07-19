@@ -44,6 +44,14 @@ class SyncEngine:
         # Preferences.scene_audio_secondary_device. Included in
         # _active so play_all/pause_all/seek_all keep it in sync.
         self._scene_audio_mirror: Optional[mpv.MPV] = None
+        # Optional headless mpv that plays the stim SOUND FILE on the
+        # Haptic 2 device when a scene has no prostate-specific source —
+        # i.e. Haptic 2 mirrors whatever Haptic 1 is playing. We use mpv
+        # (not the sounddevice StimAudioStream) because H1's own audio-file
+        # dispatch plays through mpv too, and mpv decodes MP3/FLAC/etc. —
+        # the sounddevice AudioFilePlaybackSource is WAV-only. Also in
+        # _active so it stays synced.
+        self._stim_audio_mirror: Optional[mpv.MPV] = None
 
     # ── Player lifecycle ──────────────────────────────────────────────────────
 
@@ -239,6 +247,7 @@ class SyncEngine:
         for i in range(self.MAX_SLOTS):
             self.terminate_player(i)
         self.terminate_scene_audio_mirror()
+        self.terminate_stim_audio_mirror()
         self._last_position = 0.0
 
     # ── Scene-audio mirror ────────────────────────────────────────────────────
@@ -297,6 +306,63 @@ class SyncEngine:
     def has_scene_audio_mirror(self) -> bool:
         return self._scene_audio_mirror is not None
 
+    # ── Stim-audio mirror (Haptic 2 = mirror of H1's sound file) ────────────────
+
+    def init_stim_audio_mirror(
+        self,
+        media_path: str,
+        audio_device: str,
+    ) -> Optional[mpv.MPV]:
+        """Spawn a headless, audio-only mpv playing *media_path* on
+        *audio_device* — the Haptic 2 device. Used to mirror Haptic 1's
+        stim sound file (mp3/wav/…) onto the second stim box when the scene
+        ships no prostate-specific source. mpv decodes any format H1 can
+        play, so this works where the WAV-only sounddevice path can't.
+
+        Idempotent; failures are non-fatal (primary stim keeps working).
+        Included in `_active`, so play/pause/seek keep it locked to the
+        master clock.
+        """
+        with self._lock:
+            if self._stim_audio_mirror is not None:
+                try:
+                    self._stim_audio_mirror.terminate()
+                except Exception:
+                    pass
+                self._stim_audio_mirror = None
+            kwargs: dict = {
+                "force_window": "no",
+                "vid": "no",
+                "keep_open": True,
+                "pause": True,
+                "input_default_bindings": False,
+                "input_vo_keyboard": False,
+                "osc": False,
+                "hr_seek": "yes",
+            }
+            if audio_device:
+                kwargs["audio_device"] = audio_device
+            try:
+                p = mpv.MPV(**kwargs)
+                p.play(media_path)
+                self._stim_audio_mirror = p
+                return p
+            except Exception:
+                self._stim_audio_mirror = None
+                return None
+
+    def terminate_stim_audio_mirror(self) -> None:
+        with self._lock:
+            if self._stim_audio_mirror is not None:
+                try:
+                    self._stim_audio_mirror.terminate()
+                except Exception:
+                    pass
+                self._stim_audio_mirror = None
+
+    def has_stim_audio_mirror(self) -> bool:
+        return self._stim_audio_mirror is not None
+
     # ── Sync transport ────────────────────────────────────────────────────────
 
     @property
@@ -304,6 +370,8 @@ class SyncEngine:
         out = [p for p in self._players if p is not None]
         if self._scene_audio_mirror is not None:
             out.append(self._scene_audio_mirror)
+        if self._stim_audio_mirror is not None:
+            out.append(self._stim_audio_mirror)
         return out
 
     def play_all(self) -> None:
