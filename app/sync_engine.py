@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Callable, Optional
 
 import mpv
@@ -118,15 +119,17 @@ class SyncEngine:
                 # scenes. Bytes, not seconds — caps the readahead RAM.
                 "demuxer_max_bytes": "256MiB",
                 "demuxer_max_back_bytes": "64MiB",
-                # HDR handling. On a display with Windows HDR ON, the embedded
-                # mpv child window blew content out to solid WHITE (SDR content
-                # too) — the default `gpu` VO doesn't match the HDR desktop's
-                # composition. `gpu-next` (libplacebo) DOES, and it's the only VO
-                # that honours `target-colorspace-hint` (set post-construction),
-                # so the surface composits correctly instead of over-bright. A
-                # perceptual tone-map (not the default clip) keeps colours from
-                # washing out / looking muted when mpv converts HDR→SDR.
-                "vo": "gpu-next",
+                # VO: mpv's default `gpu`. We previously used `gpu-next`
+                # (libplacebo) for HDR-on-Windows compositing, but its D3D11
+                # render-context teardown reliably access-violates when the
+                # embedded (wid) player is destroyed — closing a video or the
+                # app crashed the whole process (exit 139). Releasing the
+                # context via `vo=null` before terminate didn't dodge it. HDR
+                # passthrough is a v1 nice-to-have, not a requirement, so we
+                # revert to `gpu`, whose teardown is stable. (Re-evaluate
+                # gpu-next once libplacebo's Windows teardown is fixed
+                # upstream.) A perceptual tone-map still helps HDR→SDR on gpu.
+                "vo": "gpu",
                 "tone_mapping": "bt.2390",
                 "hdr_compute_peak": "yes",
             }
@@ -236,15 +239,31 @@ class SyncEngine:
         with self._lock:
             p = self._players[slot]
             if p:
-                # Wind the render down BEFORE mpv_terminate_destroy. libmpv's
-                # gpu-next (libplacebo/D3D11) teardown has been seen to
-                # access-violate when the handle is destroyed mid-render; a
-                # `stop` releases the current file, decoders, and video surface
-                # first, which avoids destroying an active GPU context. Native
-                # crashes can't be caught in Python, so this is preventative,
-                # not a rescue — best-effort, ignore any error.
+                # Release the GPU render context BEFORE mpv_terminate_destroy.
+                # libmpv's gpu-next (libplacebo/D3D11) teardown access-violates
+                # when its render context — bound to the embedded Qt window
+                # (wid) — is destroyed inside the full mpv shutdown. Switching
+                # `vo` to `null` uninits that context as a normal vo change
+                # while the core is still alive (the safe path), so the
+                # subsequent terminate destroys a context-free handle. We stop
+                # playback first, then wait (bounded) for the vo to actually
+                # detach before destroying. Native crashes can't be caught in
+                # Python, so this is preventative, not a rescue.
                 try:
                     p.command("stop")
+                except Exception:
+                    pass
+                try:
+                    p["vo"] = "null"
+                    deadline = time.monotonic() + 0.5
+                    while time.monotonic() < deadline:
+                        try:
+                            cur = p["current-vo"]
+                        except Exception:
+                            break
+                        if not cur or cur == "null":
+                            break
+                        time.sleep(0.01)
                 except Exception:
                     pass
                 try:
