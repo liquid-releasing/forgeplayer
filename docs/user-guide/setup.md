@@ -4,14 +4,28 @@
 
 Three dropdowns:
 
-- **Scene Audio** — the video's audio.
-- **Haptic 1** — main stim port.
-- **Haptic 2** — prostate / second stim port (optional).
+- **Scene Audio** — the video's own audio → your speakers / headphones.
+- **Haptic 1** — the main stim port → your USB stim dongle.
+- **Haptic 2** — an *optional* second stim port (prostate side-chain, or it
+  mirrors Haptic 1). **Leave it "— not set —" if you only have one stim box.**
 
-Dropdowns list every audio output Windows reports through mpv. If a
-dongle isn't there, plug it in. ForgePlayer doesn't open these for
-exclusive mode automatically; only stim streams (H1 / H2) attempt
-exclusive on launch.
+Dropdowns list every audio output Windows reports through mpv. If a dongle
+isn't there, plug it in and press **Refresh devices**.
+
+!!! danger "E-stim never plays through your speakers"
+    A stim port only outputs to a device that resolves. If a Haptic device
+    reads **"(unavailable — reselect in Setup)"** — the saved device was
+    unplugged or its name changed — that port stays **silent** rather than
+    falling back to the default output. ForgePlayer will not route the raw
+    e-stim waveform to your speakers. If a stim port is unexpectedly silent,
+    open Setup and **reselect the device** (its name may have shifted after a
+    reboot or a USB re-plug).
+
+!!! note "Bluetooth audio is untested"
+    The tested path is **wired / USB** audio outputs. Bluetooth audio devices
+    (BT headphones/speakers for scene audio, or a BT-connected stim box)
+    **haven't been tested** — expect added latency and possible dropouts. Use
+    a USB dongle for stim.
 
 ## Test device buttons
 

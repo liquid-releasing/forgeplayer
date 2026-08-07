@@ -9,7 +9,7 @@ libmpv is the reference media engine for modern desktop playback. It consistentl
 Out of the box, ForgePlayer ships with a baked-in `mpv-defaults.conf` tuned for flagship image quality:
 
 ```ini
-vo=gpu-next
+vo=gpu
 hwdec=auto-safe
 scale=ewa_lanczossharp
 cscale=ewa_lanczossharp
@@ -18,7 +18,6 @@ video-sync=display-resample
 interpolation=yes
 deband=yes
 dither-depth=auto
-target-colorspace-hint=yes
 ```
 
 You don't need to configure anything. It Just Works.
@@ -45,6 +44,14 @@ Technically, it's Elliptical Weighted Averaging Lanczos with a sharpening varian
 You don't have to do anything to get this. Load a 1080p pack onto a 4K wall, and upscaling happens automatically.
 
 ## HDR
+
+!!! warning "HDR passthrough is disabled in v0.0.14"
+    The HDR-on-Windows renderer (`gpu-next` / libplacebo) crashed on teardown,
+    so v0.0.14 reverts to mpv's stable `gpu` renderer and **does not pass HDR
+    through to the display**. HDR10 content plays tone-mapped to SDR; on an
+    **HDR-ON** display it can look over-bright — turn Windows HDR **off** while
+    testing. Passthrough returns once libplacebo's Windows teardown is fixed
+    upstream. The rest of this section describes the intended (future) behavior.
 
 ForgePlayer hands HDR content to your display correctly when:
 

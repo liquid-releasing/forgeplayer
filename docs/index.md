@@ -13,9 +13,9 @@ hide:
 
 One seek bar. Every screen. Every device. All in sync.
 
-Play a video on your 4K monitor, companion view on your phone, estim
-audio to your device, haptics to whatever you have — all from the same
-timeline. Mark a favorite moment with one tap. Loop it. Share it.
+Play a video across your monitors and drive an e-stim device from the
+**same timeline and seek bar** — video and haptics stay in sync through
+every play, pause, and scrub.
 
 ---
 
@@ -41,8 +41,9 @@ timeline. Mark a favorite moment with one tap. Loop it. Share it.
 
 -   :material-television: **[HDR Content](hdr-content.md)**
 
-    Producing HDR10 content (Topaz Video AI workflows) that
-    ForgePlayer plays correctly out of the box.
+    Producing HDR10 content (Topaz Video AI workflows). Note: HDR
+    *passthrough* in the player is temporarily disabled in v0.0.14 for
+    stability — see the page for details.
 
 </div>
 
@@ -51,9 +52,8 @@ timeline. Mark a favorite moment with one tap. Loop it. Share it.
 ## What it does
 
 ```
-Video           → any monitor, GPU-color-correct
-Estim audio     → dedicated audio port (restim embedded, two instances)
-Haptics         → serial / USB / audio-channel routing
+Video     → your monitors, GPU color pipeline + high-quality upscaling
+E-stim    → dedicated USB audio port(s), up to two (restim synthesis)
 ```
 
 All driven by the same pack. All synced to the same timestamp.

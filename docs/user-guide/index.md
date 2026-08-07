@@ -113,9 +113,43 @@ See [BACKLOG.md][backlog] (on GitHub) for the full roadmap.
 
 ---
 
+## Troubleshooting
+
+**A stim port is silent / reads "(unavailable — reselect in Setup)".**
+The saved audio device was unplugged or its Windows name changed (common after
+a reboot or a USB re-plug). Open **Setup → Audio device roles** and reselect the
+device, then **Refresh devices**. ForgePlayer keeps the port silent rather than
+routing e-stim to your speakers. If you only have one stim box, set **Haptic 2**
+to "— not set —".
+
+**I hear e-stim through my computer speakers.**
+That shouldn't happen in v0.0.14. Check that **Haptic 1 / Haptic 2** point at
+your **USB dongle** (not "Speakers"), and that **Scene Audio** is a *different*
+device. Reselect and **Refresh devices**.
+
+**HDR video looks washed-out or over-bright.**
+HDR passthrough is disabled in v0.0.14 for stability. Turn **Windows HDR off**
+for the playback monitor (Settings → Display → HDR) while testing.
+
+**Bluetooth output is glitchy / laggy.** Bluetooth audio is untested — use a
+**wired / USB** output, especially for stim.
+
+**Closing a video closed the whole app.** That shouldn't happen — grab the crash
+log below and file an issue. (A crash *as the app itself exits* is a known
+harmless teardown quirk.)
+
+**Filing a good bug report.** Turn on **Debug** (top bar) *before* reproducing,
+then attach:
+
+- `~/.forgeplayer/debug-stream-*.jsonl` — the event log for that session
+- `~/.forgeplayer/faulthandler.log` — native crash stacks, if it crashed
+
+---
+
 ## Where files live
 
 - **Per-scene pin file** — `<scene-folder>/<stem>.forgeplayer.json`
+- **Native crash log** — `~/.forgeplayer/faulthandler.log`
 - **Library catalog index** — `~/.forgeplayer/catalog.json`
 - **App preferences** — `~/.forgeplayer/preferences.json`
 - **Library thumbnails (cache)** — `~/.forgeplayer/thumb_cache/*.jpg`
