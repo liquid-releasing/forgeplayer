@@ -4951,24 +4951,36 @@ class ControlWindow(QMainWindow):
                 except Exception:
                     pass
                 setattr(self, port_attr, None)
-        # Tear down the player windows + their stim streams. closeEvent used to
-        # call only _engine.terminate_all(), which kills the mpv instances but
-        # leaves the PlayerWindow widgets on screen (and any stim stream still
-        # holding its device) after the controller closes. _close_players does
-        # the full teardown: stops every stim/aux stream, terminates each
-        # engine slot, and w.close()s every window.
-        try:
-            self._close_players()
-        except Exception as exc:  # noqa: BLE001 — never block app close
-            DebugLog.record("app.close_players_error", error=repr(exc))
-        # Auto-export captured debug events. Saves the user from the
-        # "did I click Export before closing?" friction that's bitten
-        # multiple dogfood sessions. Best-effort — if export fails for
-        # any reason (disk full, permissions), don't block the close.
+        # Stop the stim / aux audio streams cleanly (their fade-out) so the
+        # dongle doesn't pop as we exit. These are sounddevice streams — safe
+        # to stop on the GUI thread; the crashing part is mpv teardown, handled
+        # by the hard exit below.
+        for i in range(_NUM_SLOTS):
+            data = self._slot_data(i)
+            s = data.get("stim_audio_stream")
+            if s is not None:
+                try:
+                    s.stop()
+                except Exception:
+                    pass
+            for aux in data.get("aux_audio_streams", []) or []:
+                try:
+                    aux.stop()
+                except Exception:
+                    pass
+        # Auto-export captured debug events BEFORE we exit — saves the user from
+        # the "did I click Export before closing?" friction. Best-effort.
         if DebugLog.event_count() > 0:
             try:
                 DebugLog.export()
             except Exception:
                 pass
-        self._engine.terminate_all()
-        super().closeEvent(event)
+        # HARD EXIT — skip libmpv's teardown. mpv_terminate_destroy
+        # access-violates when the whole app is shutting down (Qt tearing down
+        # the embedded player windows concurrently), which crashed the process
+        # on every close with exit 139. The OS reclaims the mpv instances, GPU
+        # contexts, and audio-device handles on process death, so a hard exit
+        # is clean and dodges the crash. (Mid-session Close Players / scene
+        # change still runs the full _close_players teardown, which — on the
+        # gpu VO — does NOT crash, so those paths keep their graceful cleanup.)
+        os._exit(0)
