@@ -201,10 +201,10 @@ Off by default; zero overhead when off.
   silent with a valid device? Try **Calibrate H1** to isolate wiring vs
   playback.
 - **I hear e-stim through my computer speakers** — shouldn't happen in
-  v0.0.14. Confirm **Haptic 1 / 2** point at your **USB dongle** (not
+  v0.0.15. Confirm **Haptic 1 / 2** point at your **USB dongle** (not
   "Speakers") and that **Scene Audio** is a *different* device.
 - **HDR video looks washed-out / over-bright** — HDR passthrough is disabled
-  in v0.0.14 for stability; turn **Windows HDR off** for the playback monitor.
+  in v0.0.15 for stability; turn **Windows HDR off** for the playback monitor.
 - **Bluetooth output is glitchy** — Bluetooth audio is untested; use wired /
   USB, especially for stim.
 - **WASAPI exclusive mode warnings** — the stim stream tried to grab the
