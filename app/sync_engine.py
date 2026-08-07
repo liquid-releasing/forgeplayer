@@ -236,7 +236,21 @@ class SyncEngine:
         with self._lock:
             p = self._players[slot]
             if p:
-                p.terminate()
+                # Wind the render down BEFORE mpv_terminate_destroy. libmpv's
+                # gpu-next (libplacebo/D3D11) teardown has been seen to
+                # access-violate when the handle is destroyed mid-render; a
+                # `stop` releases the current file, decoders, and video surface
+                # first, which avoids destroying an active GPU context. Native
+                # crashes can't be caught in Python, so this is preventative,
+                # not a rescue — best-effort, ignore any error.
+                try:
+                    p.command("stop")
+                except Exception:
+                    pass
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
                 self._players[slot] = None
         # Drop cached position so the next scene starts fresh — last
         # scene's final time_pos is meaningless to a new file.

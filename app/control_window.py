@@ -4144,6 +4144,29 @@ class ControlWindow(QMainWindow):
             #     algorithms aren't documented as thread-safe under
             #     concurrent generate_audio() calls)
             if primary_audio_path:
+                # SAFETY: never let the raw e-stim audio leak to the speakers.
+                # mpv silently falls back to the DEFAULT output when its
+                # audio_device isn't a currently-present device, so a stale /
+                # unplugged Haptic 2 id would blast the estim mp3 through the
+                # standard output. Refuse unless H2 is a real, present device
+                # that isn't the scene-audio (speaker) output.
+                device_present = any(
+                    d.get("name") == h2_device for d in (mpv_devices or [])
+                )
+                if not device_present or h2_device == self._prefs.scene_audio_device:
+                    slot_data["aux_silent_reason"] = (
+                        "Haptic 2 device unavailable or is the scene-audio "
+                        "output — refusing to play e-stim on the speakers"
+                    )
+                    DebugLog.record(
+                        "stim.aux_mirror_device_rejected",
+                        slot=slot_idx, device=h2_device,
+                        present=device_present,
+                        is_scene_audio=(
+                            h2_device == self._prefs.scene_audio_device
+                        ),
+                    )
+                    return
                 mirror = self._engine.init_stim_audio_mirror(
                     primary_audio_path, h2_device,
                 )
@@ -4459,6 +4482,25 @@ class ControlWindow(QMainWindow):
             # Audio-only: no PlayerWindow, no monitor. Headless mpv still
             # participates in sync (seek/pause/play apply via _active list).
             if audio_path and not video_path:
+                # SAFETY: the Haptic 1 stim audio-file. If its device is unset
+                # or is the scene-audio (speaker) output, mpv would play the raw
+                # e-stim mp3 on the DEFAULT output — blasting estim through the
+                # speakers. Refuse and surface it rather than route estim to the
+                # speakers.
+                if i == 1 and primary_dispatch == "audio_file" and (
+                    not audio_device
+                    or audio_device == self._prefs.scene_audio_device
+                ):
+                    data["primary_dispatch"] = "none"
+                    DebugLog.record(
+                        "stim.h1_audio_file_refused",
+                        slot=i, device=audio_device,
+                        reason=("no Haptic 1 device set"
+                                if not audio_device
+                                else "Haptic 1 device is the scene-audio output"),
+                    )
+                    self._refresh_live_panels()
+                    continue
                 DebugLog.record("players.launch_slot", slot=i, mode="audio_only")
                 self._engine.init_player_audio_only(i, audio_device)
                 self._engine.load_file(i, audio_path)

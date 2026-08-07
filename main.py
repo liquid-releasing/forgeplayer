@@ -5,6 +5,23 @@
 import sys
 from pathlib import Path
 
+# Crash diagnostics: on a fatal native signal (segfault etc.), dump every
+# thread's C-level stack to ~/.forgeplayer/faulthandler.log. libmpv runs
+# in-process and we spawn a worker thread for the native file dialog, so a
+# hard crash needs the per-thread stack to attribute it (mpv vs dialog vs Qt).
+# Keep the file handle alive at module scope so it isn't garbage-collected.
+try:
+    import faulthandler
+    import os as _os
+    _FAULT_LOG = _os.path.join(_os.path.expanduser("~"), ".forgeplayer",
+                               "faulthandler.log")
+    _os.makedirs(_os.path.dirname(_FAULT_LOG), exist_ok=True)
+    _FAULT_FP = open(_FAULT_LOG, "a", buffering=1)
+    _FAULT_FP.write("\n===== ForgePlayer session start =====\n")
+    faulthandler.enable(file=_FAULT_FP, all_threads=True)
+except Exception:
+    pass
+
 # Claim a single-threaded COM apartment for the GUI thread BEFORE anything
 # (libmpv, imported transitively below) can initialize COM as multi-threaded.
 # The modern Windows folder/file picker (IFileDialog) requires STA; when mpv

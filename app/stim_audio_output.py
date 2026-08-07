@@ -675,6 +675,18 @@ class StimAudioStream:
         with self._lock:
             if self._stream is not None:
                 return
+            # SAFETY: never open an e-stim stream on the system default output.
+            # A configured device that no longer resolves (unplugged / stale
+            # pref, or a name sounddevice can't find) makes resolve_audio_device
+            # return None, and sounddevice would silently use the DEFAULT device
+            # — blasting the raw e-stim waveform through the computer speakers.
+            # Refuse instead; callers surface this (H1 → dialog, H2 → silent).
+            if self._device_name is None and self._device_id and self._device_id != "auto":
+                raise RuntimeError(
+                    f"Stim device {self._device_id!r} is unavailable — refusing "
+                    f"to play e-stim on the system default output (the speakers). "
+                    f"Reselect the device in Setup."
+                )
             sd = _load_sounddevice()
             stream = self._open_stream_with_fallback(sd)
             stream.start()
