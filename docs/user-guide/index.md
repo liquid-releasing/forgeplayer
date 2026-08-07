@@ -1,6 +1,6 @@
 # ForgePlayer User Guide
 
-Feature-by-feature reference for v0.0.13. If you're brand new, start at
+Feature-by-feature reference for v0.0.14. If you're brand new, start at
 [Getting Started](../getting-started.md) and come back here when you
 need detail.
 
@@ -90,7 +90,7 @@ session unless you explicitly start a new one via the Library scan.
 
 ---
 
-## Known limitations (v0.0.13)
+## Known limitations (v0.0.14)
 
 - **Control panel sizing on monitor change** — moving the control
   window to a smaller secondary screen can leave it taller than
@@ -102,6 +102,10 @@ session unless you explicitly start a new one via the Library scan.
 - **Single-decoder for video walls** — currently three independent
   decoders synced via mpv time-pos. Frame-perfect single-decoder
   rendering is a future feature for true video-wall use cases.
+- **HDR passthrough disabled (v0.0.14)** — the HDR-on-Windows renderer
+  (`gpu-next` / libplacebo) crashed on teardown, so playback uses the stable
+  `gpu` renderer. HDR10 content can look over-bright on an **HDR-ON** display;
+  turn Windows HDR **off** for now. Re-enabling awaits an upstream fix.
 
 See [BACKLOG.md][backlog] (on GitHub) for the full roadmap.
 
