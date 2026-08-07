@@ -37,12 +37,19 @@ install — everything is bundled.
 
 | Platform | File | How to run |
 |---|---|---|
-| Windows | `ForgePlayer-windows.zip` | Unzip, double-click `ForgePlayer.exe` |
+| Windows | `ForgePlayer-Setup.exe` (installer) or `ForgePlayer-windows.zip` (portable) | Run the installer (registers `.forge` double-click), or unzip and run `ForgePlayer.exe` |
 | macOS | `ForgePlayer-macos.zip` | Unzip, open `ForgePlayer.app` (right-click → Open the first time, since the app isn't notarized yet) |
 | Linux | `ForgePlayer-linux.tar.gz` | Extract, run `ForgePlayer/ForgePlayer` |
 
-The window opens with four tabs: **Library**, **Live**, **Setup**,
-**Preferences**.
+!!! note "Windows: keeping the download past SmartScreen"
+    ForgePlayer isn't code-signed yet, so Windows flags it as an unknown
+    publisher — the file is safe, you just have to allow it. **In your browser**
+    the download may be blocked: open Downloads → **⋯ / Keep → Keep anyway**.
+    **On first run** a blue "Windows protected your PC" box appears: click
+    **More info → Run anyway**. This is a one-time step per download.
+
+The window opens with five tabs: **Library**, **Live**, **Setup**,
+**Preferences**, **About**.
 
 ### Run from source (developers)
 
@@ -98,10 +105,14 @@ Library refresh and remembers it after that.
 - **Scene Audio** — where the video's mp3 / mp4 audio plays. Usually
   your headset or speakers.
 - **Haptic 1** — your main stim USB dongle.
-- **Haptic 2** — second USB dongle for prostate, OR leave unset.
+- **Haptic 2** — second USB dongle for prostate, OR **leave unset** if you
+  only have one stim box.
 
-The dropdowns show every audio output Windows reports. If your dongle
-isn't there, plug it in and click "Refresh".
+The dropdowns show every audio output Windows reports. If your dongle isn't
+there, plug it in and click **Refresh devices**. If a stim port later reads
+**(unavailable — reselect in Setup)**, that port stays **silent** and you just
+reselect it — ForgePlayer never routes e-stim to your speakers. Use **wired /
+USB** outputs; Bluetooth audio is untested.
 
 ![ForgePlayer Setup tab — audio device roles and monitors](assets/forgeplayer-setup.png)
 
@@ -182,18 +193,31 @@ Off by default; zero overhead when off.
 
 ## Troubleshooting
 
-- **No sound on Haptic 1** — Setup tab, verify a device is selected.
-  If selected and still silent: try **Calibrate H1** to isolate
-  whether the issue is wiring or playback.
-- **WASAPI exclusive mode warnings in stderr** — the stim stream tried
-  to grab the device exclusively (no other app can play through it
-  while ForgePlayer runs) and failed. It auto-falls-back to shared
-  mode. Most dongles support exclusive mode; some drivers don't.
-- **Multi-monitor layout looks wrong after moving the control window
-  to a different screen** — known cosmetic limitation; will be fixed
-  post-alpha.
-- **Pops on close** — also being chased post-alpha. Stim audio data
-  itself is provably clean; close-pop is hardware-side.
+- **No sound on a Haptic port / it reads "(unavailable — reselect in
+  Setup)"** — the saved device was unplugged or its Windows name changed
+  (common after a reboot or USB re-plug). Reselect it in **Setup → Audio
+  device roles** and click **Refresh devices**. The port stays silent until a
+  device resolves — ForgePlayer will not route e-stim to your speakers. Still
+  silent with a valid device? Try **Calibrate H1** to isolate wiring vs
+  playback.
+- **I hear e-stim through my computer speakers** — shouldn't happen in
+  v0.0.14. Confirm **Haptic 1 / 2** point at your **USB dongle** (not
+  "Speakers") and that **Scene Audio** is a *different* device.
+- **HDR video looks washed-out / over-bright** — HDR passthrough is disabled
+  in v0.0.14 for stability; turn **Windows HDR off** for the playback monitor.
+- **Bluetooth output is glitchy** — Bluetooth audio is untested; use wired /
+  USB, especially for stim.
+- **WASAPI exclusive mode warnings** — the stim stream tried to grab the
+  device exclusively and failed; it auto-falls-back to shared mode. Harmless.
+- **Multi-monitor layout looks wrong after moving the control window** —
+  known cosmetic limitation; post-alpha fix.
+- **Closing a video closed the whole app** — that shouldn't happen. Grab
+  `~/.forgeplayer/faulthandler.log` and file an issue. (A crash *as the app
+  exits* is a separate, harmless teardown quirk.)
+
+**Filing a bug report:** turn on **Debug** before reproducing, then attach
+`~/.forgeplayer/debug-stream-*.jsonl` (session events) and, if it crashed,
+`~/.forgeplayer/faulthandler.log` (native crash stack).
 
 ---
 
