@@ -1163,8 +1163,8 @@ install — everything is bundled.</p>
 <tbody>
 <tr>
 <td>Windows</td>
-<td><code>ForgePlayer-windows.zip</code></td>
-<td>Unzip, double-click <code>ForgePlayer.exe</code></td>
+<td><code>ForgePlayer-Setup.exe</code> (installer) or <code>ForgePlayer-windows.zip</code> (portable)</td>
+<td>Run the installer (registers <code>.forge</code> double-click), or unzip and run <code>ForgePlayer.exe</code></td>
 </tr>
 <tr>
 <td>macOS</td>
@@ -1178,8 +1178,16 @@ install — everything is bundled.</p>
 </tr>
 </tbody>
 </table>
-<p>The window opens with four tabs: <strong>Library</strong>, <strong>Live</strong>, <strong>Setup</strong>,
-<strong>Preferences</strong>.</p>
+<div class="admonition note">
+<p class="admonition-title">Windows: keeping the download past SmartScreen</p>
+<p>ForgePlayer isn't code-signed yet, so Windows flags it as an unknown
+publisher — the file is safe, you just have to allow it. <strong>In your browser</strong>
+the download may be blocked: open Downloads → <strong>⋯ / Keep → Keep anyway</strong>.
+<strong>On first run</strong> a blue "Windows protected your PC" box appears: click
+<strong>More info → Run anyway</strong>. This is a one-time step per download.</p>
+</div>
+<p>The window opens with five tabs: <strong>Library</strong>, <strong>Live</strong>, <strong>Setup</strong>,
+<strong>Preferences</strong>, <strong>About</strong>.</p>
 <h3 id="run-from-source-developers">Run from source (developers)<a class="headerlink" href="#run-from-source-developers" title="Permanent link">&para;</a></h3>
 <p>If you'd rather hack on the code:</p>
 <ol>
@@ -1224,10 +1232,14 @@ Library refresh and remembers it after that.</p>
 <li><strong>Scene Audio</strong> — where the video's mp3 / mp4 audio plays. Usually
   your headset or speakers.</li>
 <li><strong>Haptic 1</strong> — your main stim USB dongle.</li>
-<li><strong>Haptic 2</strong> — second USB dongle for prostate, OR leave unset.</li>
+<li><strong>Haptic 2</strong> — second USB dongle for prostate, OR <strong>leave unset</strong> if you
+  only have one stim box.</li>
 </ul>
-<p>The dropdowns show every audio output Windows reports. If your dongle
-isn't there, plug it in and click "Refresh".</p>
+<p>The dropdowns show every audio output Windows reports. If your dongle isn't
+there, plug it in and click <strong>Refresh devices</strong>. If a stim port later reads
+<strong>(unavailable — reselect in Setup)</strong>, that port stays <strong>silent</strong> and you just
+reselect it — ForgePlayer never routes e-stim to your speakers. Use <strong>wired /
+USB</strong> outputs; Bluetooth audio is untested.</p>
 <p><img alt="ForgePlayer Setup tab — audio device roles and monitors" src="../assets/forgeplayer-setup.png" /></p>
 <h3 id="2-choose-a-content-preference-preferences-tab">2. Choose a content preference (Preferences tab)<a class="headerlink" href="#2-choose-a-content-preference-preferences-tab" title="Permanent link">&para;</a></h3>
 <ul>
@@ -1296,19 +1308,31 @@ scene — it's a signal-path check, not a content preview.</p>
 <hr />
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>No sound on Haptic 1</strong> — Setup tab, verify a device is selected.
-  If selected and still silent: try <strong>Calibrate H1</strong> to isolate
-  whether the issue is wiring or playback.</li>
-<li><strong>WASAPI exclusive mode warnings in stderr</strong> — the stim stream tried
-  to grab the device exclusively (no other app can play through it
-  while ForgePlayer runs) and failed. It auto-falls-back to shared
-  mode. Most dongles support exclusive mode; some drivers don't.</li>
-<li><strong>Multi-monitor layout looks wrong after moving the control window
-  to a different screen</strong> — known cosmetic limitation; will be fixed
-  post-alpha.</li>
-<li><strong>Pops on close</strong> — also being chased post-alpha. Stim audio data
-  itself is provably clean; close-pop is hardware-side.</li>
+<li><strong>No sound on a Haptic port / it reads "(unavailable — reselect in
+  Setup)"</strong> — the saved device was unplugged or its Windows name changed
+  (common after a reboot or USB re-plug). Reselect it in <strong>Setup → Audio
+  device roles</strong> and click <strong>Refresh devices</strong>. The port stays silent until a
+  device resolves — ForgePlayer will not route e-stim to your speakers. Still
+  silent with a valid device? Try <strong>Calibrate H1</strong> to isolate wiring vs
+  playback.</li>
+<li><strong>I hear e-stim through my computer speakers</strong> — shouldn't happen in
+  v0.0.14. Confirm <strong>Haptic 1 / 2</strong> point at your <strong>USB dongle</strong> (not
+  "Speakers") and that <strong>Scene Audio</strong> is a <em>different</em> device.</li>
+<li><strong>HDR video looks washed-out / over-bright</strong> — HDR passthrough is disabled
+  in v0.0.14 for stability; turn <strong>Windows HDR off</strong> for the playback monitor.</li>
+<li><strong>Bluetooth output is glitchy</strong> — Bluetooth audio is untested; use wired /
+  USB, especially for stim.</li>
+<li><strong>WASAPI exclusive mode warnings</strong> — the stim stream tried to grab the
+  device exclusively and failed; it auto-falls-back to shared mode. Harmless.</li>
+<li><strong>Multi-monitor layout looks wrong after moving the control window</strong> —
+  known cosmetic limitation; post-alpha fix.</li>
+<li><strong>Closing a video closed the whole app</strong> — that shouldn't happen. Grab
+  <code>~/.forgeplayer/faulthandler.log</code> and file an issue. (A crash <em>as the app
+  exits</em> is a separate, harmless teardown quirk.)</li>
 </ul>
+<p><strong>Filing a bug report:</strong> turn on <strong>Debug</strong> before reproducing, then attach
+<code>~/.forgeplayer/debug-stream-*.jsonl</code> (session events) and, if it crashed,
+<code>~/.forgeplayer/faulthandler.log</code> (native crash stack).</p>
 <hr />
 <h2 id="next-steps">Next steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>
