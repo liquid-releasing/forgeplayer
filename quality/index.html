@@ -1008,9 +1008,9 @@
 <p>You don't have to do anything to get this. Load a 1080p pack onto a 4K wall, and upscaling happens automatically.</p>
 <h2 id="hdr">HDR<a class="headerlink" href="#hdr" title="Permanent link">&para;</a></h2>
 <div class="admonition warning">
-<p class="admonition-title">HDR passthrough is disabled in v0.0.14</p>
+<p class="admonition-title">HDR passthrough is disabled in v0.0.15</p>
 <p>The HDR-on-Windows renderer (<code>gpu-next</code> / libplacebo) crashed on teardown,
-so v0.0.14 reverts to mpv's stable <code>gpu</code> renderer and <strong>does not pass HDR
+so v0.0.15 reverts to mpv's stable <code>gpu</code> renderer and <strong>does not pass HDR
 through to the display</strong>. HDR10 content plays tone-mapped to SDR; on an
 <strong>HDR-ON</strong> display it can look over-bright — turn Windows HDR <strong>off</strong> while
 testing. Passthrough returns once libplacebo's Windows teardown is fixed
