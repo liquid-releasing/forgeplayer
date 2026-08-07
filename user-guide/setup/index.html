@@ -929,14 +929,30 @@
 <h2 id="audio-device-roles">Audio device roles<a class="headerlink" href="#audio-device-roles" title="Permanent link">&para;</a></h2>
 <p>Three dropdowns:</p>
 <ul>
-<li><strong>Scene Audio</strong> — the video's audio.</li>
-<li><strong>Haptic 1</strong> — main stim port.</li>
-<li><strong>Haptic 2</strong> — prostate / second stim port (optional).</li>
+<li><strong>Scene Audio</strong> — the video's own audio → your speakers / headphones.</li>
+<li><strong>Haptic 1</strong> — the main stim port → your USB stim dongle.</li>
+<li><strong>Haptic 2</strong> — an <em>optional</em> second stim port (prostate side-chain, or it
+  mirrors Haptic 1). <strong>Leave it "— not set —" if you only have one stim box.</strong></li>
 </ul>
-<p>Dropdowns list every audio output Windows reports through mpv. If a
-dongle isn't there, plug it in. ForgePlayer doesn't open these for
-exclusive mode automatically; only stim streams (H1 / H2) attempt
-exclusive on launch.</p>
+<p>Dropdowns list every audio output Windows reports through mpv. If a dongle
+isn't there, plug it in and press <strong>Refresh devices</strong>.</p>
+<div class="admonition danger">
+<p class="admonition-title">E-stim never plays through your speakers</p>
+<p>A stim port only outputs to a device that resolves. If a Haptic device
+reads <strong>"(unavailable — reselect in Setup)"</strong> — the saved device was
+unplugged or its name changed — that port stays <strong>silent</strong> rather than
+falling back to the default output. ForgePlayer will not route the raw
+e-stim waveform to your speakers. If a stim port is unexpectedly silent,
+open Setup and <strong>reselect the device</strong> (its name may have shifted after a
+reboot or a USB re-plug).</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Bluetooth audio is untested</p>
+<p>The tested path is <strong>wired / USB</strong> audio outputs. Bluetooth audio devices
+(BT headphones/speakers for scene audio, or a BT-connected stim box)
+<strong>haven't been tested</strong> — expect added latency and possible dropouts. Use
+a USB dongle for stim.</p>
+</div>
 <h2 id="test-device-buttons">Test device buttons<a class="headerlink" href="#test-device-buttons" title="Permanent link">&para;</a></h2>
 <p>Each row has a <strong>Test</strong> button that routes a brief tone to the picked
 device so you can verify the dongle is wired up before launching a

@@ -832,6 +832,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-files-live" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -975,9 +986,36 @@ session unless you explicitly start a new one via the Library scan.</p>
 </ul>
 <p>See <a href="https://github.com/liquid-releasing/forgeplayer/blob/main/BACKLOG.md">BACKLOG.md</a> (on GitHub) for the full roadmap.</p>
 <hr />
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<p><strong>A stim port is silent / reads "(unavailable — reselect in Setup)".</strong>
+The saved audio device was unplugged or its Windows name changed (common after
+a reboot or a USB re-plug). Open <strong>Setup → Audio device roles</strong> and reselect the
+device, then <strong>Refresh devices</strong>. ForgePlayer keeps the port silent rather than
+routing e-stim to your speakers. If you only have one stim box, set <strong>Haptic 2</strong>
+to "— not set —".</p>
+<p><strong>I hear e-stim through my computer speakers.</strong>
+That shouldn't happen in v0.0.14. Check that <strong>Haptic 1 / Haptic 2</strong> point at
+your <strong>USB dongle</strong> (not "Speakers"), and that <strong>Scene Audio</strong> is a <em>different</em>
+device. Reselect and <strong>Refresh devices</strong>.</p>
+<p><strong>HDR video looks washed-out or over-bright.</strong>
+HDR passthrough is disabled in v0.0.14 for stability. Turn <strong>Windows HDR off</strong>
+for the playback monitor (Settings → Display → HDR) while testing.</p>
+<p><strong>Bluetooth output is glitchy / laggy.</strong> Bluetooth audio is untested — use a
+<strong>wired / USB</strong> output, especially for stim.</p>
+<p><strong>Closing a video closed the whole app.</strong> That shouldn't happen — grab the crash
+log below and file an issue. (A crash <em>as the app itself exits</em> is a known
+harmless teardown quirk.)</p>
+<p><strong>Filing a good bug report.</strong> Turn on <strong>Debug</strong> (top bar) <em>before</em> reproducing,
+then attach:</p>
+<ul>
+<li><code>~/.forgeplayer/debug-stream-*.jsonl</code> — the event log for that session</li>
+<li><code>~/.forgeplayer/faulthandler.log</code> — native crash stacks, if it crashed</li>
+</ul>
+<hr />
 <h2 id="where-files-live">Where files live<a class="headerlink" href="#where-files-live" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Per-scene pin file</strong> — <code>&lt;scene-folder&gt;/&lt;stem&gt;.forgeplayer.json</code></li>
+<li><strong>Native crash log</strong> — <code>~/.forgeplayer/faulthandler.log</code></li>
 <li><strong>Library catalog index</strong> — <code>~/.forgeplayer/catalog.json</code></li>
 <li><strong>App preferences</strong> — <code>~/.forgeplayer/preferences.json</code></li>
 <li><strong>Library thumbnails (cache)</strong> — <code>~/.forgeplayer/thumb_cache/*.jpg</code></li>

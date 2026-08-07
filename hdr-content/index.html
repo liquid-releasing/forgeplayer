@@ -1124,7 +1124,19 @@
 
 
 <h1 id="producing-hdr-content-for-forgeplayer">Producing HDR content for ForgePlayer<a class="headerlink" href="#producing-hdr-content-for-forgeplayer" title="Permanent link">&para;</a></h1>
-<p>ForgePlayer plays HDR content with full dynamic range and correct metadata (see <a href="../quality/">Quality</a>). But it can only play what you produce. This page covers how to generate HDR10 content — especially via Topaz Video AI — that ForgePlayer will handle correctly.</p>
+<div class="admonition warning">
+<p class="admonition-title">HDR passthrough is disabled in v0.0.14</p>
+<p>ForgePlayer currently plays with mpv's stable <code>gpu</code> renderer, which does
+<strong>not</strong> pass HDR through to the display (the HDR renderer, <code>gpu-next</code>,
+crashed on teardown and was reverted for stability). HDR10 files still play
+— tone-mapped to SDR — but on an <strong>HDR-ON</strong> display they can look
+over-bright, so turn Windows HDR <strong>off</strong> for now. This page still applies:
+produce proper HDR10 now and it will light up correctly once passthrough
+returns.</p>
+</div>
+<p>This page covers how to generate HDR10 content — especially via Topaz Video AI
+— so it's ready to play at full dynamic range when passthrough is re-enabled.
+It can only play what you produce.</p>
 <h2 id="the-short-version">The short version<a class="headerlink" href="#the-short-version" title="Permanent link">&para;</a></h2>
 <p>To produce HDR content that plays well in ForgePlayer:</p>
 <ol>

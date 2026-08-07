@@ -952,7 +952,7 @@
 <h2 id="the-engine">The engine<a class="headerlink" href="#the-engine" title="Permanent link">&para;</a></h2>
 <p>libmpv is the reference media engine for modern desktop playback. It consistently outperforms VLC on scaling (EWA Lanczos family upscalers), has a proper GPU color pipeline, and handles HDR as a first-class citizen. ForgePlayer exposes it through a single-decoder architecture: one libmpv instance drives every output, so seeks are frame-perfect by construction and the CPU/GPU only does the expensive work (decode, upscale, tone-map) once.</p>
 <p>Out of the box, ForgePlayer ships with a baked-in <code>mpv-defaults.conf</code> tuned for flagship image quality:</p>
-<div class="language-ini highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="na">vo</span><span class="o">=</span><span class="s">gpu-next</span>
+<div class="language-ini highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="na">vo</span><span class="o">=</span><span class="s">gpu</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="na">hwdec</span><span class="o">=</span><span class="s">auto-safe</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="na">scale</span><span class="o">=</span><span class="s">ewa_lanczossharp</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="na">cscale</span><span class="o">=</span><span class="s">ewa_lanczossharp</span>
@@ -961,7 +961,6 @@
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="na">interpolation</span><span class="o">=</span><span class="s">yes</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="na">deband</span><span class="o">=</span><span class="s">yes</span>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="na">dither-depth</span><span class="o">=</span><span class="s">auto</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="na">target-colorspace-hint</span><span class="o">=</span><span class="s">yes</span>
 </span></code></pre></div>
 <p>You don't need to configure anything. It Just Works.</p>
 <h2 id="gpu-support">GPU support<a class="headerlink" href="#gpu-support" title="Permanent link">&para;</a></h2>
@@ -1008,6 +1007,15 @@
 <p>Technically, it's Elliptical Weighted Averaging Lanczos with a sharpening variant — edge-preserving, ring-free, and regarded in the videophile community as the best real-time spatial upscaler not requiring a neural network. Visually: 1080p content on your 4K monitor looks noticeably sharper than VLC's default, without the crispy over-sharpened look some TVs produce.</p>
 <p>You don't have to do anything to get this. Load a 1080p pack onto a 4K wall, and upscaling happens automatically.</p>
 <h2 id="hdr">HDR<a class="headerlink" href="#hdr" title="Permanent link">&para;</a></h2>
+<div class="admonition warning">
+<p class="admonition-title">HDR passthrough is disabled in v0.0.14</p>
+<p>The HDR-on-Windows renderer (<code>gpu-next</code> / libplacebo) crashed on teardown,
+so v0.0.14 reverts to mpv's stable <code>gpu</code> renderer and <strong>does not pass HDR
+through to the display</strong>. HDR10 content plays tone-mapped to SDR; on an
+<strong>HDR-ON</strong> display it can look over-bright — turn Windows HDR <strong>off</strong> while
+testing. Passthrough returns once libplacebo's Windows teardown is fixed
+upstream. The rest of this section describes the intended (future) behavior.</p>
+</div>
 <p>ForgePlayer hands HDR content to your display correctly when:</p>
 <ol>
 <li>The source is HDR-tagged (HDR10, HDR10+, Dolby Vision Profile 5/8)</li>
