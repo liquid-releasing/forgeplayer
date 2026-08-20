@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import html
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtWidgets import (
@@ -218,6 +219,8 @@ class ControlWindow(QMainWindow):
         # re-target the same chapter (stuck). We trust the target until
         # the user does a non-chapter seek (slider, ±N skip).
         self._last_chapter_target_ms: int | None = None
+        # Debounce clock for Prev/Next chapter — see _CHAPTER_SEEK_DEBOUNCE_S.
+        self._last_chapter_seek_at: float = 0.0
 
         # Calibration streams — one per haptic port. None means no
         # active calibration. See _update_calibrate_buttons_enabled.
@@ -5069,6 +5072,20 @@ class ControlWindow(QMainWindow):
     # 500 + 200 + 500 = 1.2 s; predictable, user accepts the pause.
     _SEEK_SETTLE_S = 0.20
 
+    # Minimum gap between Prev/Next-chapter clicks. Rapid-fire clicking
+    # (2026-08-20 dogfood: ~1 click/second) queues a new seek-envelope
+    # before the previous one's ramp-down/settle/ramp-up has finished —
+    # the vendored live-synth math (app/vendor/restim_stim_math/) isn't
+    # safe against that overlap and hard-crashed (access violation) in a
+    # different numpy internal each time it was reproduced, the classic
+    # signature of a race rather than a bad value. Debouncing at the
+    # button level is a small, safe fix in OUR code instead of guessing
+    # at a patch to safety-critical vendored math. Sized to the full
+    # seek-envelope duration above (ramp + settle + ramp) plus a small
+    # margin so a new chapter jump never starts before the previous one
+    # has fully settled.
+    _CHAPTER_SEEK_DEBOUNCE_S = _SEEK_ENVELOPE_S * 2 + _SEEK_SETTLE_S + 0.15
+
     def _all_active_stim_streams(self) -> list:
         """Return every live StimAudioStream / aux stream across slot data.
 
@@ -5164,8 +5181,19 @@ class ControlWindow(QMainWindow):
             return last_target
         return actual_ms
 
+    def _chapter_seek_debounced(self) -> bool:
+        """True if a chapter jump landed too recently to start another one
+        yet — see _CHAPTER_SEEK_DEBOUNCE_S. Updates the clock as a side
+        effect only when NOT debounced, so a rejected click doesn't itself
+        reset the window."""
+        now = time.monotonic()
+        if now - self._last_chapter_seek_at < self._CHAPTER_SEEK_DEBOUNCE_S:
+            return True
+        self._last_chapter_seek_at = now
+        return False
+
     def _on_prev_chapter(self) -> None:
-        if not self._chapters:
+        if not self._chapters or self._chapter_seek_debounced():
             return
         position_ms = self._effective_chapter_position_ms()
         target = prev_chapter(self._chapters, position_ms)
@@ -5179,7 +5207,7 @@ class ControlWindow(QMainWindow):
         self._seek_with_envelope(target.at_ms / 1000.0)
 
     def _on_next_chapter(self) -> None:
-        if not self._chapters:
+        if not self._chapters or self._chapter_seek_debounced():
             return
         position_ms = self._effective_chapter_position_ms()
         target = next_chapter(self._chapters, position_ms)
