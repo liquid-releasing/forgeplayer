@@ -4731,6 +4731,9 @@ class ControlWindow(QMainWindow):
 
             pw = PlayerWindow(i, self._engine)
             pw.close_all_requested.connect(self._close_players)
+            pw.prev_chapter_requested.connect(self._on_prev_chapter)
+            pw.next_chapter_requested.connect(self._on_next_chapter)
+            pw.set_chapter_nav_enabled(bool(self._chapters))
             # Always place WINDOWED at launch — even when "Fullscreen players"
             # is on. Going fullscreen here embeds mpv at the windowed size
             # (Windows applies the showFullScreen resize asynchronously, after
@@ -5032,10 +5035,15 @@ class ControlWindow(QMainWindow):
     def _update_chapter_buttons_enabled(self) -> None:
         """Enable Prev/Next chapter only when chapters have been loaded
         — either from a `<stem>.chapters.json` sidecar or from the
-        video's own embedded chapter atoms."""
+        video's own embedded chapter atoms. Drives both the console's
+        buttons AND every open PlayerWindow's on-screen buttons so they
+        never disagree about whether the active scene has chapters."""
         has_chapters = bool(self._chapters)
         self._btn_prev_chapter.setEnabled(has_chapters)
         self._btn_next_chapter.setEnabled(has_chapters)
+        for w in self._player_windows:
+            if w is not None:
+                w.set_chapter_nav_enabled(has_chapters)
 
     def _maybe_populate_chapters_from_mpv(
         self, attempts_remaining: int = 3,

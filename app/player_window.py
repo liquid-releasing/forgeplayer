@@ -47,6 +47,15 @@ class PlayerWindow(QWidget):
     # queued to the GUI thread where it flips the control bar. A plain method
     # call from mpv's thread would touch Qt widgets off the GUI thread.
     toggle_controls_requested = Signal()
+    # Prev/Next chapter clicks on THIS window's overlay. Chapter state
+    # (the loaded list, the "effective position" bookkeeping) lives on
+    # ControlWindow, not here — these just relay the click to
+    # ControlWindow's own _on_prev_chapter/_on_next_chapter so the
+    # on-screen buttons and the console's Prev/Next buttons are always
+    # driven by the exact same chapter-seek logic, never a second copy
+    # of it that could drift.
+    prev_chapter_requested = Signal()
+    next_chapter_requested = Signal()
 
     def __init__(self, slot_index: int, engine: SyncEngine) -> None:
         super().__init__()
@@ -115,7 +124,22 @@ class PlayerWindow(QWidget):
         lbl.setStyleSheet("color: #9ba3c4; font-size: 10px;")
         h.addWidget(lbl)
 
-        # Play/pause
+        # Prev / Play-pause / Next — Prev and Next flank Play directly so a
+        # viewer who only ever sees this overlay (the console is usually
+        # hidden) can still jump to a favorite spot without hunting for a
+        # separate row of buttons. Disabled until ControlWindow confirms
+        # chapters are loaded for the active scene (set_chapter_nav_enabled).
+        self._btn_prev_chapter = QPushButton("⏮")
+        self._btn_prev_chapter.setFixedSize(28, 28)
+        self._btn_prev_chapter.setStyleSheet(
+            "background: #2d3148; color: #e0e0e0; border-radius: 4px;"
+            " font-size: 11px;"
+        )
+        self._btn_prev_chapter.setToolTip("Previous chapter")
+        self._btn_prev_chapter.setEnabled(False)
+        self._btn_prev_chapter.clicked.connect(self.prev_chapter_requested.emit)
+        h.addWidget(self._btn_prev_chapter)
+
         self._btn_play = QPushButton("▶")
         self._btn_play.setFixedSize(32, 32)
         self._btn_play.setStyleSheet(
@@ -124,6 +148,17 @@ class PlayerWindow(QWidget):
         )
         self._btn_play.clicked.connect(self._on_play_pause)
         h.addWidget(self._btn_play)
+
+        self._btn_next_chapter = QPushButton("⏭")
+        self._btn_next_chapter.setFixedSize(28, 28)
+        self._btn_next_chapter.setStyleSheet(
+            "background: #2d3148; color: #e0e0e0; border-radius: 4px;"
+            " font-size: 11px;"
+        )
+        self._btn_next_chapter.setToolTip("Next chapter")
+        self._btn_next_chapter.setEnabled(False)
+        self._btn_next_chapter.clicked.connect(self.next_chapter_requested.emit)
+        h.addWidget(self._btn_next_chapter)
 
         # Time
         self._time_lbl = QLabel("0:00")
@@ -150,6 +185,13 @@ class PlayerWindow(QWidget):
         return bar
 
     # ── Transport slots ────────────────────────────────────────────────────────
+
+    def set_chapter_nav_enabled(self, enabled: bool) -> None:
+        """Enable/disable this window's Prev/Next chapter buttons — mirrors
+        ControlWindow._update_chapter_buttons_enabled so both button sets
+        always agree on whether the active scene has chapters."""
+        self._btn_prev_chapter.setEnabled(enabled)
+        self._btn_next_chapter.setEnabled(enabled)
 
     def _on_play_pause(self) -> None:
         if not self._engine.has_active_players():
