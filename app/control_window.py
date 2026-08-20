@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QMenu, QToolBar, QFrame, QTabWidget, QMessageBox, QScrollArea,
     QRadioButton, QButtonGroup, QDoubleSpinBox,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import (
+    QObject, QRunnable, Qt, QThreadPool, QTimer, Signal, Slot,
+)
 from PySide6.QtGui import QScreen, QAction, QPixmap
 
 from app.chapters import (
@@ -96,6 +98,32 @@ def _fmt_time(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
+class _StimFolderScanSignals(QObject):
+    done = Signal(str, object)  # (funscript path Browse picked, FunscriptSet | None)
+
+
+class _StimFolderScanJob(QRunnable):
+    """Browse → Stim source's folder scan, off the GUI thread.
+
+    `_funscript_set_from_path` walks the picked file's folder to pick up its
+    channel siblings (alpha/beta/pulse_*/-prostate) — same `scan_scene_folder`
+    call the Library root scan uses, so it hits the same "attached/slow drive
+    blocks the caller" problem if the browsed file happens to live on one.
+    """
+
+    def __init__(self, path: str, signals: _StimFolderScanSignals) -> None:
+        super().__init__()
+        self._path = path
+        self._signals = signals
+
+    def run(self) -> None:  # noqa: D401 — QRunnable entry point
+        try:
+            fset = ControlWindow._funscript_set_from_path(self._path)
+        except Exception:
+            fset = None
+        self._signals.done.emit(self._path, fset)
+
+
 class ControlWindow(QMainWindow):
 
     def __init__(self) -> None:
@@ -121,6 +149,14 @@ class ControlWindow(QMainWindow):
         self._teardown_pool = ThreadPoolExecutor(
             max_workers=_NUM_SLOTS, thread_name_prefix="mpv-teardown",
         )
+        # Browse -> Stim source's folder scan (see _StimFolderScanJob) — off
+        # the GUI thread for the same reason the Library root scan is: a
+        # single-threaded pool since only one Browse pick is ever in flight.
+        self._stim_scan_pool = QThreadPool(self)
+        self._stim_scan_pool.setMaxThreadCount(1)
+        self._stim_scan_signals = _StimFolderScanSignals(self)
+        self._stim_scan_signals.done.connect(self._on_stim_folder_scanned)
+        self._stim_scan_target_entry = None
         self._player_windows: list[PlayerWindow | None] = [None] * _NUM_SLOTS
         self._seek_dragging = False
         self._session_path: str = ""
@@ -696,6 +732,7 @@ class ControlWindow(QMainWindow):
             "Stim source", self._setup_stim_source_combo, self._on_browse_stim,
             "Funscript or audio file that drives the haptics. "
             "Choose None for silent stim.",
+            store_as="_stim_browse_btn",
         ))
 
         # Haptic 1 carries the full e-stim channel set (FOC_STIM scenes can run
@@ -1451,11 +1488,15 @@ class ControlWindow(QMainWindow):
 
     def _labeled_row_with_browse(
         self, label_text: str, combo: QComboBox, on_browse, help_text: str = "",
+        store_as: str | None = None,
     ) -> QVBoxLayout:
         """Source-picker row: bold label, then [combo | Browse…], then help.
         Browse opens the native picker at the current scene folder so the user
         can grab a file the scanner didn't surface (a 4K alongside the scene,
-        an alternate audio/funscript) without re-importing from the Library."""
+        an alternate audio/funscript) without re-importing from the Library.
+        `store_as`, when given, saves the Browse button as that attribute so
+        a caller whose scan runs async (Stim source) can disable/re-enable
+        it around the in-flight scan."""
         row = QVBoxLayout()
         row.setSpacing(2)
         label = QLabel(label_text)
@@ -1468,6 +1509,8 @@ class ControlWindow(QMainWindow):
         btn.setMinimumHeight(32)
         btn.setFixedWidth(86)
         btn.clicked.connect(on_browse)
+        if store_as:
+            setattr(self, store_as, btn)
         h.addWidget(btn)
         row.addLayout(h)
         if help_text:
@@ -1552,29 +1595,51 @@ class ControlWindow(QMainWindow):
         if not path:
             return
         path = os.path.normpath(path)
-        from dataclasses import replace  # noqa: PLC0415
         if path.lower().endswith(".funscript"):
-            fset = self._funscript_set_from_path(path)
-            if fset is None:
-                return
-            if not any(f.base_stem == fset.base_stem
-                       for f in self._current_entry.funscript_sets):
-                self._current_entry.funscript_sets.append(fset)
-            self._current_choices = replace(
-                self._current_choices, funscript_set=fset, audio=None,
+            # _funscript_set_from_path scans the file's folder (channel
+            # siblings) — same scan_scene_folder call the Library root scan
+            # uses, so it hits the same "attached/slow drive blocks the
+            # caller" problem if this file happens to live on one. Runs off
+            # the GUI thread; _on_stim_folder_scanned applies the result.
+            self._stim_browse_btn.setEnabled(False)
+            # Single-threaded pool -> at most one scan in flight, so one
+            # instance attribute is enough to guard against it landing after
+            # the user has already moved to a different scene.
+            self._stim_scan_target_entry = self._current_entry
+            self._stim_scan_pool.start(
+                _StimFolderScanJob(path, self._stim_scan_signals)
             )
-        else:
-            track = next(
-                (a for a in self._current_entry.audio_tracks
-                 if os.path.normpath(a.path) == path),
-                None,
-            )
-            if track is None:
-                track = AudioVariant(path=path)
-                self._current_entry.audio_tracks.append(track)
-            self._current_choices = replace(
-                self._current_choices, audio=track, funscript_set=None,
-            )
+            return
+        from dataclasses import replace  # noqa: PLC0415
+        track = next(
+            (a for a in self._current_entry.audio_tracks
+             if os.path.normpath(a.path) == path),
+            None,
+        )
+        if track is None:
+            track = AudioVariant(path=path)
+            self._current_entry.audio_tracks.append(track)
+        self._current_choices = replace(
+            self._current_choices, audio=track, funscript_set=None,
+        )
+        self._reload_current_scene()
+
+    @Slot(str, object)
+    def _on_stim_folder_scanned(self, path: str, fset: object) -> None:
+        self._stim_browse_btn.setEnabled(True)
+        if fset is None:
+            return
+        if self._current_entry is None or self._current_choices is None:
+            return  # Close landed while the scan was in flight
+        if self._current_entry is not self._stim_scan_target_entry:
+            return  # user picked a different scene before this scan returned
+        from dataclasses import replace  # noqa: PLC0415
+        if not any(f.base_stem == fset.base_stem
+                   for f in self._current_entry.funscript_sets):
+            self._current_entry.funscript_sets.append(fset)
+        self._current_choices = replace(
+            self._current_choices, funscript_set=fset, audio=None,
+        )
         self._reload_current_scene()
 
     @staticmethod

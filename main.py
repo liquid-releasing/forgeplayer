@@ -10,12 +10,47 @@ from pathlib import Path
 # in-process and we spawn a worker thread for the native file dialog, so a
 # hard crash needs the per-thread stack to attribute it (mpv vs dialog vs Qt).
 # Keep the file handle alive at module scope so it isn't garbage-collected.
+#
+# Always-on (not gated by the in-app Debug toggle), so unlike the Debug
+# stream files this one grows on literally every launch forever if left
+# unchecked — a session-start marker every time, plus a full per-thread
+# dump on any genuine crash. _cap_faulthandler_log trims it back before
+# each session so it can't grow without bound, while still keeping enough
+# recent history that we can ask a user for the file after a crash.
+_FAULT_LOG_MAX_BYTES = 5 * 1024 * 1024
+_FAULT_LOG_KEEP_BYTES = 2 * 1024 * 1024
+
+
+def _cap_faulthandler_log(path, os_mod) -> None:
+    try:
+        if os_mod.path.getsize(path) <= _FAULT_LOG_MAX_BYTES:
+            return
+        with open(path, "rb") as f:
+            f.seek(-_FAULT_LOG_KEEP_BYTES, os_mod.SEEK_END)
+            tail = f.read()
+        # Drop a possibly-truncated partial line so the kept text starts
+        # cleanly at a line boundary instead of mid-stack-frame.
+        nl = tail.find(b"\n")
+        if nl != -1:
+            tail = tail[nl + 1:]
+        kept_mb = _FAULT_LOG_KEEP_BYTES // (1024 * 1024)
+        with open(path, "wb") as f:
+            f.write(
+                f"===== faulthandler.log truncated (kept most recent "
+                f"~{kept_mb}MB) =====\n".encode("utf-8")
+            )
+            f.write(tail)
+    except OSError:
+        pass
+
+
 try:
     import faulthandler
     import os as _os
     _FAULT_LOG = _os.path.join(_os.path.expanduser("~"), ".forgeplayer",
                                "faulthandler.log")
     _os.makedirs(_os.path.dirname(_FAULT_LOG), exist_ok=True)
+    _cap_faulthandler_log(_FAULT_LOG, _os)
     _FAULT_FP = open(_FAULT_LOG, "a", buffering=1)
     _FAULT_FP.write("\n===== ForgePlayer session start =====\n")
     faulthandler.enable(file=_FAULT_FP, all_threads=True)

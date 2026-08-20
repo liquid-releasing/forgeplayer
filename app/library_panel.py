@@ -27,7 +27,8 @@ import subprocess
 from enum import Enum
 
 from PySide6.QtCore import (
-    QAbstractListModel, QEvent, QModelIndex, QPoint, QRect, QSize, Qt, Signal,
+    QAbstractListModel, QEvent, QModelIndex, QObject, QPoint, QRect,
+    QRunnable, QSize, Qt, QThreadPool, Signal, Slot,
 )
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPalette, QPen,
@@ -454,6 +455,32 @@ class LibraryCardDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+# ── Background scan ──────────────────────────────────────────────────────────
+# scan_library_root() walks the filesystem — os.scandir on a root that's on a
+# spun-down external disk or a stale network share can block the calling
+# thread for a long time before the OS gives up or the drive wakes. Run it
+# off the GUI thread (same QRunnable + signal-back-to-GUI-thread shape as
+# ThumbnailService's frame grabs) so a slow/attached drive makes the scan
+# slow, not the whole app unresponsive.
+
+class _ScanSignals(QObject):
+    done = Signal(str, list)  # (root the scan was for, entries)
+
+
+class _ScanJob(QRunnable):
+    def __init__(self, root: str, signals: _ScanSignals) -> None:
+        super().__init__()
+        self._root = root
+        self._signals = signals
+
+    def run(self) -> None:  # noqa: D401 — QRunnable entry point
+        try:
+            entries = scan_library_root(self._root)
+        except Exception:
+            entries = []
+        self._signals.done.emit(self._root, entries)
+
+
 # ── Panel widget ──────────────────────────────────────────────────────────────
 
 class LibraryPanel(QWidget):
@@ -472,6 +499,14 @@ class LibraryPanel(QWidget):
         super().__init__(parent)
         self._root: str = ""
         self._model = LibraryModel(self)
+        # Single-threaded pool: only one scan needs to run at a time, and
+        # capping it means a rapid root-change-then-change-back can't have
+        # two scans racing. A late result for a root that's since been
+        # superseded is dropped in _on_scan_done (root != self._root).
+        self._scan_pool = QThreadPool(self)
+        self._scan_pool.setMaxThreadCount(1)
+        self._scan_signals = _ScanSignals(self)
+        self._scan_signals.done.connect(self._on_scan_done)
         self._build_ui()
 
     # ── Public API ──
@@ -499,20 +534,20 @@ class LibraryPanel(QWidget):
         # Top toolbar: root picker + rescan + search
         top = QHBoxLayout()
 
-        pick_btn = QPushButton("📁 Root…")
-        pick_btn.setMinimumHeight(36)
-        pick_btn.clicked.connect(self._pick_root)
-        top.addWidget(pick_btn)
+        self._pick_btn = QPushButton("📁 Root…")
+        self._pick_btn.setMinimumHeight(36)
+        self._pick_btn.clicked.connect(self._pick_root)
+        top.addWidget(self._pick_btn)
 
         self._root_label = QLabel("(no root selected)")
         self._root_label.setStyleSheet("color: #9ba3c4;")
         self._root_label.setMinimumWidth(200)
         top.addWidget(self._root_label, 1)
 
-        rescan_btn = QPushButton("⟳ Rescan")
-        rescan_btn.setMinimumHeight(36)
-        rescan_btn.clicked.connect(self._rescan)
-        top.addWidget(rescan_btn)
+        self._rescan_btn = QPushButton("⟳ Rescan")
+        self._rescan_btn.setMinimumHeight(36)
+        self._rescan_btn.clicked.connect(self._rescan)
+        top.addWidget(self._rescan_btn)
 
         search_label = QLabel("🔍")
         search_label.setStyleSheet("color: #9ba3c4; font-size: 14px;")
@@ -692,8 +727,22 @@ class LibraryPanel(QWidget):
         if not self._root or not os.path.isdir(self._root):
             self._model.load([])
             return
-        scenes = scan_library_root(self._root)
-        self._model.load(scenes)
+        # Scan runs on a worker thread (see _ScanJob) — a root on a
+        # spun-down/disconnected drive can take a long time to even list,
+        # and that used to block the whole app. Buttons disable so a second
+        # click can't queue a redundant scan while this one is in flight.
+        self._pick_btn.setEnabled(False)
+        self._rescan_btn.setEnabled(False)
+        self._count_label.setText("Scanning…")
+        self._scan_pool.start(_ScanJob(self._root, self._scan_signals))
+
+    @Slot(str, list)
+    def _on_scan_done(self, root: str, entries: list) -> None:
+        self._pick_btn.setEnabled(True)
+        self._rescan_btn.setEnabled(True)
+        if root != self._root:
+            return  # stale — the root changed again before this scan returned
+        self._model.load(entries)
 
     def _update_count(self) -> None:
         total = len(self._model._all)
