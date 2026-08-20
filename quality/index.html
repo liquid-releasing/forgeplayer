@@ -950,19 +950,52 @@
 <h1 id="why-forgeplayer-looks-great">Why ForgePlayer looks great<a class="headerlink" href="#why-forgeplayer-looks-great" title="Permanent link">&para;</a></h1>
 <p>ForgePlayer is built on <a href="https://mpv.io/">libmpv</a> — the engine behind mpv — configured for image quality over speed. If you've been using a Windows Media Player wrapper or a basic VLC setup, the difference is immediate and visible.</p>
 <h2 id="the-engine">The engine<a class="headerlink" href="#the-engine" title="Permanent link">&para;</a></h2>
-<p>libmpv is the reference media engine for modern desktop playback. It consistently outperforms VLC on scaling (EWA Lanczos family upscalers), has a proper GPU color pipeline, and handles HDR as a first-class citizen. ForgePlayer exposes it through a single-decoder architecture: one libmpv instance drives every output, so seeks are frame-perfect by construction and the CPU/GPU only does the expensive work (decode, upscale, tone-map) once.</p>
-<p>Out of the box, ForgePlayer ships with a baked-in <code>mpv-defaults.conf</code> tuned for flagship image quality:</p>
-<div class="language-ini highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="na">vo</span><span class="o">=</span><span class="s">gpu</span>
+<p>libmpv is the reference media engine for modern desktop playback. It has a proper GPU color pipeline and handles HDR as a first-class citizen. ForgePlayer runs one independent libmpv instance per output (primary + up to two mirrors), all driven from the same <code>SyncEngine</code> — play/pause/seek commands are issued to every active instance together, and each one decodes and renders its own copy against the same media clock. That's what keeps seeks in sub-frame sync across monitors; it's coordinated playback across N decoders, not a single shared decoder feeding multiple screens.</p>
+<p>Out of the box, ForgePlayer configures libmpv directly in code
+(<code>app/sync_engine.py</code>) rather than through a separate config file —
+every player instance gets the same settings with no setup step:</p>
+<div class="language-ini highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="na">hr_seek</span><span class="o">=</span><span class="s">yes</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="na">hwdec</span><span class="o">=</span><span class="s">auto-safe</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="na">scale</span><span class="o">=</span><span class="s">ewa_lanczossharp</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="na">cscale</span><span class="o">=</span><span class="s">ewa_lanczossharp</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="na">dscale</span><span class="o">=</span><span class="s">mitchell</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="na">video-sync</span><span class="o">=</span><span class="s">display-resample</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="na">interpolation</span><span class="o">=</span><span class="s">yes</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="na">deband</span><span class="o">=</span><span class="s">yes</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="na">dither-depth</span><span class="o">=</span><span class="s">auto</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="na">demuxer_max_bytes</span><span class="o">=</span><span class="s">256MiB</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="na">demuxer_max_back_bytes</span><span class="o">=</span><span class="s">64MiB</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="na">vo</span><span class="o">=</span><span class="s">gpu</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="na">tone_mapping</span><span class="o">=</span><span class="s">bt.2390</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="na">hdr_compute_peak</span><span class="o">=</span><span class="s">yes</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="na">target-colorspace-hint</span><span class="o">=</span><span class="s">yes</span>
 </span></code></pre></div>
-<p>You don't need to configure anything. It Just Works.</p>
+<ul>
+<li><strong><code>hr_seek=yes</code></strong> — frame-accurate seeking. mpv's default lands on
+  the nearest prior keyframe (often several seconds short on typical
+  encodes); this decodes forward from the keyframe to land exactly on
+  the target, which the seek bar and chapter-nav both depend on.</li>
+<li><strong><code>hwdec=auto-safe</code></strong> — GPU-decodes the video whenever a known-good
+  hardware decoder is available (NVDEC, D3D11VA, …), falling back to
+  software decode automatically for anything it can't offload. This
+  is what keeps a high-bitrate 4K source from pegging the CPU and
+  stalling haptic sync.</li>
+<li><strong><code>demuxer_max_bytes</code> / <code>demuxer_max_back_bytes</code></strong> — a roomier
+  read-ahead buffer so a big 4K file streams off disk without
+  stalling the decode thread.</li>
+<li><strong><code>vo=gpu</code></strong> — mpv's standard GPU video output. ForgePlayer
+  previously used <code>gpu-next</code> (libplacebo) for its HDR compositing,
+  but reverted after its Windows teardown reliably crashed the
+  process when a player closed; see <a href="#hdr">HDR</a> below.</li>
+<li><strong><code>tone_mapping=bt.2390</code> / <code>hdr_compute_peak=yes</code></strong> — perceptual
+  HDR→SDR tone-mapping so HDR content still looks reasonable while
+  passthrough is disabled.</li>
+<li><strong><code>target-colorspace-hint=yes</code></strong> — tells Windows to composite the
+  mpv surface in the right colorspace when the desktop itself is in
+  HDR mode (best-effort — skipped silently on older libmpv builds
+  that don't support the option).</li>
+</ul>
+<p>On machines with more than one GPU, ForgePlayer also pins mpv to the
+NVIDIA adapter (<code>gpu_context=d3d11</code>, <code>d3d11_adapter=NVIDIA</code>) when one
+is present — a confirmed AMD D3D11 driver bug otherwise let mpv land
+on the wrong adapter on some hybrid-GPU laptops.</p>
+<p>There's no separate "quality profile" to turn on, and no
+<code>scale=</code>/<code>cscale=</code>/<code>deband=</code>/<code>interpolation=</code> tuning beyond mpv's own
+built-in defaults — the list above is the complete, current set of
+overrides. You don't need to configure anything to get this baseline.</p>
 <h2 id="gpu-support">GPU support<a class="headerlink" href="#gpu-support" title="Permanent link">&para;</a></h2>
 <p>ForgePlayer uses whatever hardware decoder and renderer your system provides. The <code>hwdec=auto-safe</code> setting picks the right backend for each platform:</p>
 <table>
@@ -971,7 +1004,6 @@
 <th>GPU family</th>
 <th>Hardware decode</th>
 <th>HDR pass-through</th>
-<th>Upscaling quality</th>
 </tr>
 </thead>
 <tbody>
@@ -979,33 +1011,28 @@
 <td><strong>NVIDIA</strong> (GTX 10-series+, all RTX)</td>
 <td>NVDEC, every modern codec (H.264, HEVC, AV1, VP9)</td>
 <td>HDR10, HDR10+, Dolby Vision (HEVC Profile 5/8)</td>
-<td>Excellent — ewa_lanczossharp runs fast on CUDA</td>
 </tr>
 <tr>
 <td><strong>AMD</strong> (RX 400+, Radeon 5000+)</td>
 <td>AMF / VA-API</td>
 <td>HDR10</td>
-<td>Excellent</td>
 </tr>
 <tr>
 <td><strong>Intel</strong> (8th-gen iGPU+, all Arc)</td>
 <td>QSV / D3D11VA</td>
 <td>HDR10 on Arc + 11th-gen iGPU+</td>
-<td>Excellent</td>
 </tr>
 <tr>
 <td><strong>Apple Silicon</strong> (M1+, A18 Pro)</td>
 <td>VideoToolbox</td>
 <td>HDR10, Dolby Vision</td>
-<td>Excellent</td>
 </tr>
 </tbody>
 </table>
 <p>If your GPU doesn't support hardware decode for a specific codec, mpv falls back to CPU decode transparently. Playback continues; the only cost is CPU usage.</p>
 <h2 id="making-1080p-look-great-on-4k-monitors">Making 1080p look great on 4K monitors<a class="headerlink" href="#making-1080p-look-great-on-4k-monitors" title="Permanent link">&para;</a></h2>
-<p>Most community content is 1080p. Most good monitors are 4K. ForgePlayer fills the gap with <code>ewa_lanczossharp</code>, the canonical high-quality spatial upscaler in the mpv ecosystem.</p>
-<p>Technically, it's Elliptical Weighted Averaging Lanczos with a sharpening variant — edge-preserving, ring-free, and regarded in the videophile community as the best real-time spatial upscaler not requiring a neural network. Visually: 1080p content on your 4K monitor looks noticeably sharper than VLC's default, without the crispy over-sharpened look some TVs produce.</p>
-<p>You don't have to do anything to get this. Load a 1080p pack onto a 4K wall, and upscaling happens automatically.</p>
+<p>Most community content is 1080p. Most good monitors are 4K. ForgePlayer doesn't configure a dedicated high-quality upscaler (<code>ewa_lanczossharp</code> and friends) today — scaling on a 4K wall uses mpv's own built-in default, the same one you'd get from a stock libmpv build. It still looks better than a lot of Windows Media Foundation-based players thanks to the GPU decode/render pipeline above, but it isn't the videophile-grade <code>ewa_lanczossharp</code> treatment some players advertise.</p>
+<p>If you want that sharper upscaling, mpv supports it natively (<code>scale=ewa_lanczossharp</code>) — see <a href="#overriding-defaults">Overriding defaults</a> below for how (and how not) to apply it today.</p>
 <h2 id="hdr">HDR<a class="headerlink" href="#hdr" title="Permanent link">&para;</a></h2>
 <div class="admonition warning">
 <p class="admonition-title">HDR passthrough is disabled in v0.0.15</p>
@@ -1027,23 +1054,21 @@ upstream. The rest of this section describes the intended (future) behavior.</p>
 <p>If you're playing HDR content on an SDR display, mpv tone-maps it cleanly — darker shadows and brighter highlights than a naive clip, without the washed-out look of a bad SDR conversion.</p>
 <p>For guidance on <strong>producing</strong> HDR content that plays well in ForgePlayer (Topaz Video AI workflow, model choices, verification), see <a href="../hdr-content/">HDR content production</a>.</p>
 <h2 id="overriding-defaults">Overriding defaults<a class="headerlink" href="#overriding-defaults" title="Permanent link">&para;</a></h2>
-<p>If you want to experiment or match a specific workflow, ForgePlayer loads a second config file after the bundled defaults:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>~/.forgeplayer/mpv-user.conf
-</span></code></pre></div>
-<p>Anything you put here overrides the baseline. Common overrides:</p>
-<div class="language-ini highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Use the legacy gpu backend if gpu-next has issues on your system</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="na">vo</span><span class="o">=</span><span class="s">gpu</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Switch to a different upscaler (faster, slightly less sharp)</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="na">scale</span><span class="o">=</span><span class="s">spline36</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Disable hardware decode (diagnosing hwdec problems)</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="na">hwdec</span><span class="o">=</span><span class="s">no</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># Force a specific target peak brightness for HDR tone-mapping</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="na">target-peak</span><span class="o">=</span><span class="s">400</span>
-</span></code></pre></div>
-<p>Full reference: <a href="https://mpv.io/manual/stable/#video">mpv's video documentation</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">No user config file today</p>
+<p>There's currently no <code>~/.forgeplayer/mpv-user.conf</code> or equivalent —
+ForgePlayer doesn't load an external mpv config, and there's no CLI
+flag for passing extra mpv options either. The settings listed
+under <a href="#the-engine">The engine</a> above are the whole story; there's
+nothing to override them with yet.</p>
+</div>
+<p>If you want different mpv behavior (a sharper upscaler, disabling
+hardware decode to diagnose an <code>hwdec</code> problem, a different HDR target
+peak, …), the only way today is to run ForgePlayer from source and
+edit the <code>mpv.MPV(**kwargs)</code> call in <code>app/sync_engine.py</code> directly. A
+user-facing override file is a reasonable future addition — see
+<a href="https://mpv.io/manual/stable/#video">mpv's video documentation</a> for
+what's available to add.</p>
 <h2 id="a-note-on-why-this-matters">A note on why this matters<a class="headerlink" href="#a-note-on-why-this-matters" title="Permanent link">&para;</a></h2>
 <p>Several video + haptic players have shipped over the years wrapping Windows Media Foundation or a similarly conservative engine. They work, but they don't look great — and on flagship hardware (4K monitors, modern GPUs, HDR pipelines) that gap between "works" and "looks great" becomes glaring.</p>
 <p>ForgePlayer is built explicitly to close that gap. mpv has been the preferred engine in the videophile and cinema communities for over a decade. Configured properly, it's indistinguishable from a purpose-built media engine costing orders of magnitude more. That's what's under the hood here, tuned for your monitor and your content.</p>

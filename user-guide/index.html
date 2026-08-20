@@ -760,6 +760,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#checking-for-updates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checking for updates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#supported-e-stim-hardware" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -888,7 +899,9 @@
 <p>Feature-by-feature reference for v0.0.15. If you're brand new, start at
 <a href="../getting-started/">Getting Started</a> and come back here when you
 need detail.</p>
-<p>The guide follows the app's four tabs — each has its own page:</p>
+<p>The guide follows the app's tabs. Four have their own dedicated page;
+<strong>About</strong> is small enough to cover right here, in <strong>Window layout</strong>
+below:</p>
 <div class="grid cards">
 <ul>
 <li>
@@ -911,7 +924,7 @@ need detail.</p>
 </div>
 <hr />
 <h2 id="window-layout">Window layout<a class="headerlink" href="#window-layout" title="Permanent link">&para;</a></h2>
-<p>The main control window has four tabs across the top:</p>
+<p>The main control window has five tabs across the top:</p>
 <ul>
 <li><strong>Library</strong> — your scene browser. Click a tile to activate.</li>
 <li><strong>Live</strong> — what's currently loaded, what's routing to which device,
@@ -921,8 +934,21 @@ need detail.</p>
 <li>crop position).</li>
 <li><strong>Preferences</strong> — content preference (sound vs funscript), synthesis
   algorithm, haptic offset.</li>
+<li><strong>About</strong> — version, credits/attribution for the projects ForgePlayer
+  is built on, links to docs and source, and update status (see
+  <strong>Checking for updates</strong> below).</li>
 </ul>
 <p>Top bar (right side): <strong>⚑ Mark</strong>, <strong>Debug</strong> toggle, <strong>Export…</strong>, <strong>Clear</strong>.</p>
+<hr />
+<h2 id="checking-for-updates">Checking for updates<a class="headerlink" href="#checking-for-updates" title="Permanent link">&para;</a></h2>
+<p>A few seconds after launch, ForgePlayer quietly checks
+<code>forgeplayer.app</code> for a newer release. If one's available, an "Update
+available" dialog offers <strong>Download</strong> (opens forgeplayer.app in your
+browser) or <strong>Not Now</strong> (dismisses that version's nag — a later
+version still prompts).</p>
+<p>The <strong>About</strong> tab also has a manual <strong>Check for updates</strong> button with
+its own status line, for checking on demand — it always reports the
+live status regardless of any version you've dismissed.</p>
 <hr />
 <h2 id="supported-e-stim-hardware">Supported e-stim hardware<a class="headerlink" href="#supported-e-stim-hardware" title="Permanent link">&para;</a></h2>
 <p>ForgePlayer drives e-stim by sending an <strong>audio signal to a stim power box</strong>.

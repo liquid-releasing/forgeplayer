@@ -607,6 +607,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Transport">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#chapter-nav-on-the-video-window-too" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chapter nav on the video window too
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -903,6 +920,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Transport">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#chapter-nav-on-the-video-window-too" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chapter nav on the video window too
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1017,9 +1051,21 @@ sits above the volume slider.</p>
 <p>The two sliders are visually distinct so you don't grab one thinking
 it's the other. Volume is per-session (resets to 100 % every scene).</p>
 <h2 id="transport">Transport<a class="headerlink" href="#transport" title="Permanent link">&para;</a></h2>
-<p><code>−30 s · −10 s · −5 s · ▶ Play / ⏸ Pause · +5 s · +10 s · +30 s · ■ Stop</code></p>
+<p><code>⏮ Prev · −30 s · −10 s · −5 s · ▶ Play / ⏸ Pause · ■ Stop · +5 s · +10 s · +30 s · Next ⏭</code></p>
+<p><strong>Prev</strong> and <strong>Next</strong> jump to the previous/next chapter boundary — they
+frame the skip buttons on either end of the row. Both are disabled
+(greyed out) until a <code>&lt;stem&gt;.chapters.json</code> sidecar is found for the
+loaded scene; if the scene has no chapters, they stay off.</p>
 <p>Plus <strong>Calibrate H1</strong>, <strong>Calibrate H2</strong> (when devices set), and a
 <strong>5 s ramp</strong> checkbox that affects the calibration ramp-up.</p>
+<h3 id="chapter-nav-on-the-video-window-too">Chapter nav on the video window too<a class="headerlink" href="#chapter-nav-on-the-video-window-too" title="Permanent link">&para;</a></h3>
+<p>Each on-screen player window has its <strong>own</strong> Prev/Next chapter
+buttons, flanking Play/Pause directly on the video's own overlay bar
+— useful if you're driving playback from the video window and the
+console isn't in view. The overlay is hidden by default; <strong>click the
+video once</strong> to reveal it (click again to hide). Same
+chapters.json gate as the console buttons: both button sets stay in
+sync on whether the active scene has chapters.</p>
 <h2 id="seek-behavior">Seek behavior<a class="headerlink" href="#seek-behavior" title="Permanent link">&para;</a></h2>
 <p>Every seek runs through the same three-stage envelope to mask the
 funscript-driven carrier discontinuity that would otherwise click:</p>

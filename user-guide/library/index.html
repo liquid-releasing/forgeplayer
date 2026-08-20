@@ -1149,6 +1149,12 @@ scene. New picks overwrite the pin.</p>
 <h2 id="refresh">Refresh<a class="headerlink" href="#refresh" title="Permanent link">&para;</a></h2>
 <p>If you add or remove files in a scene folder while ForgePlayer is
 running, click <strong>Refresh</strong> to re-scan.</p>
+<p>Scanning runs on a background thread, so it never freezes the app —
+important for a root on a slow, removable, or network drive, which can
+take a while to even list. While a scan is in flight, the scene count
+shows <strong>"Scanning…"</strong> and the <strong>📁 Root…</strong> / <strong>⟳ Rescan</strong> buttons
+disable (so a second click can't queue a redundant scan on top of it);
+both re-enable and the grid updates once the scan completes.</p>
 <hr />
 <h2 id="opening-a-forge-bundle">Opening a <code>.forge</code> bundle<a class="headerlink" href="#opening-a-forge-bundle" title="Permanent link">&para;</a></h2>
 <p>A <code>.forge</code> is a self-describing scene bundle exported from FunscriptForge —
