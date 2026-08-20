@@ -107,6 +107,12 @@ class Preferences:
     # Last library root folder the user scanned. Persisted so the Library
     # tab reopens on the same folder next launch (empty = none chosen yet).
     library_root: str = ""
+    # Update-available tag the user already dismissed ("Not Now"), e.g.
+    # "v0.0.16". Suppresses the automatic startup nag for THAT version only
+    # — a newer tag still prompts. Empty = nothing dismissed yet. Does not
+    # affect a manual "Check for updates" click (About tab), which always
+    # reports the live status regardless of this field.
+    dismissed_update_tag: str = ""
 
     @classmethod
     def load(cls) -> "Preferences":

@@ -15,9 +15,9 @@ from PySide6.QtWidgets import (
     QRadioButton, QButtonGroup, QDoubleSpinBox,
 )
 from PySide6.QtCore import (
-    QObject, QRunnable, Qt, QThreadPool, QTimer, Signal, Slot,
+    QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal, Slot,
 )
-from PySide6.QtGui import QScreen, QAction, QPixmap
+from PySide6.QtGui import QDesktopServices, QScreen, QAction, QPixmap
 
 from app.chapters import (
     Chapter,
@@ -38,6 +38,7 @@ from app.library.catalog import (
 from app.library.channels import (
     STEREOSTIM_CHANNELS, FOC_STIM_CHANNELS, FOUR_PHASE_ELECTRODE_CHANNELS,
 )
+from app.update_check import UpdateCheckJob, UpdateCheckSignals
 
 # Channel cores restim actually plays as e-stim — position (alpha/beta/gamma),
 # the FOC-stim parameters (volume/frequency/pulse_*), and 4-phase electrodes.
@@ -157,6 +158,16 @@ class ControlWindow(QMainWindow):
         self._stim_scan_signals = _StimFolderScanSignals(self)
         self._stim_scan_signals.done.connect(self._on_stim_folder_scanned)
         self._stim_scan_target_entry = None
+        # Update check against forgeplayer.app (see app/update_check.py) —
+        # a network call, so off the GUI thread same as everything else
+        # this session. One instance flag distinguishes the silent startup
+        # check (which may pop the "Update available" dialog) from a manual
+        # About-tab click (which never nags, just reports current status).
+        self._update_pool = QThreadPool(self)
+        self._update_pool.setMaxThreadCount(1)
+        self._update_signals = UpdateCheckSignals(self)
+        self._update_signals.done.connect(self._on_update_checked)
+        self._update_check_is_manual = False
         self._player_windows: list[PlayerWindow | None] = [None] * _NUM_SLOTS
         self._seek_dragging = False
         self._session_path: str = ""
@@ -228,6 +239,11 @@ class ControlWindow(QMainWindow):
         # to the work area), then our move fires a frame later. Sync-
         # setting the geometry here avoids the warning entirely.
         self._apply_startup_screen_preference()
+
+        # Update check — deferred a few seconds so it never competes with
+        # startup (window paint, library restore) and a slow/offline
+        # network can't be mistaken for the app hanging on launch.
+        QTimer.singleShot(4000, self._check_for_update_startup)
 
     def _apply_startup_screen_preference(self) -> None:
         idx = self._prefs.control_panel_screen
@@ -1283,6 +1299,19 @@ class ControlWindow(QMainWindow):
         ver.setStyleSheet("color: #9aa0aa; font-size: 12px;")
         outer.addWidget(ver)
 
+        # Update status — set by the silent startup check and by this
+        # button; both funnel through _on_update_checked so the wording is
+        # never computed two different ways (see
+        # feedback_forgeplayer_reporting_must_match_actual).
+        update_row = QHBoxLayout()
+        self._update_status_label = QLabel("")
+        self._update_status_label.setStyleSheet("color: #9aa0aa; font-size: 12px;")
+        update_row.addWidget(self._update_status_label, 1)
+        check_update_btn = QPushButton("Check for updates")
+        check_update_btn.clicked.connect(self._check_for_update_manual)
+        update_row.addWidget(check_update_btn)
+        outer.addLayout(update_row)
+
         tagline = QLabel("Synchronized multi-screen playback with device routing.")
         tagline.setWordWrap(True)
         tagline.setStyleSheet("color: #c7ccd4;")
@@ -1641,6 +1670,72 @@ class ControlWindow(QMainWindow):
             self._current_choices, funscript_set=fset, audio=None,
         )
         self._reload_current_scene()
+
+    # ── Update check ──────────────────────────────────────────────────────────
+
+    def _check_for_update_startup(self) -> None:
+        """Silent startup check — may pop the "Update available" dialog."""
+        self._update_check_is_manual = False
+        self._start_update_check()
+
+    def _check_for_update_manual(self) -> None:
+        """About tab's "Check for updates" button — always reports the live
+        status inline, never pops the nag dialog (the user already asked)."""
+        self._update_check_is_manual = True
+        if hasattr(self, "_update_status_label"):
+            self._update_status_label.setText("Checking…")
+        self._start_update_check()
+
+    def _start_update_check(self) -> None:
+        from app.version import __version__  # noqa: PLC0415
+        self._update_pool.start(
+            UpdateCheckJob(__version__, self._update_signals)
+        )
+
+    @Slot(object)
+    def _on_update_checked(self, result) -> None:
+        from app.version import __version__  # noqa: PLC0415
+        is_manual = self._update_check_is_manual
+        if hasattr(self, "_update_status_label"):
+            if not result.ok:
+                self._update_status_label.setText(
+                    "Couldn't check for updates (offline?)"
+                )
+            elif result.is_newer:
+                self._update_status_label.setText(
+                    f"{result.latest_name} is available"
+                )
+            else:
+                self._update_status_label.setText(
+                    f"You're up to date ({__version__})"
+                )
+        # The automatic startup check nags at most once per version — a
+        # manual click always just reports status above, never nags (the
+        # user is already looking right at it).
+        if (
+            not is_manual and result.ok and result.is_newer
+            and result.latest_tag != self._prefs.dismissed_update_tag
+        ):
+            self._show_update_dialog(result, __version__)
+
+    def _show_update_dialog(self, result, current_version: str) -> None:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("Update available")
+        box.setText(
+            f"{result.latest_name} is available — you're running "
+            f"{current_version}."
+        )
+        download_btn = box.addButton(
+            "Download", QMessageBox.ButtonRole.AcceptRole
+        )
+        box.addButton("Not Now", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is download_btn:
+            QDesktopServices.openUrl(QUrl("https://forgeplayer.app/"))
+        else:
+            self._prefs.dismissed_update_tag = result.latest_tag
+            self._prefs.save()
 
     @staticmethod
     def _funscript_set_from_path(path: str) -> FunscriptSet | None:
