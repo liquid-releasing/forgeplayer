@@ -506,11 +506,14 @@ class TestLoadStimChannelsProstate:
 
 
 class TestDetectProstateSourcePerPortResolution:
-    """v0.0.4 (revised 2026-05-03 post-stim-mp3-dispatch): symmetric
-    per-port resolution. Each preference picks its prostate-specific
-    source if available; otherwise returns `kind="none"` so the caller
-    mirrors Haptic 1. Cross-form fallback lives at H1 (where silent
-    stim is unacceptable), never at H2.
+    """v0.0.4 (revised 2026-05-03 post-stim-mp3-dispatch): each preference
+    picks its prostate-specific source if available. Revised again
+    2026-08-20: H2 now falls back across forms (sound <-> funscript) the
+    same way H1 already did, so a `.forge` bundle's prostate funscript
+    channels still get used when the preferred sound file was never
+    extracted (bundle imports deliberately skip `audio/*.mp3`). Only when
+    NEITHER form exists does resolution return `kind="none"` so the caller
+    mirrors Haptic 1.
     """
 
     def _make_prostate_set(
@@ -550,27 +553,25 @@ class TestDetectProstateSourcePerPortResolution:
         fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=False)
         assert detect_prostate_source(fs, "sound").kind == "audio_file"
 
-    def test_audio_only_with_funscript_pref_returns_none(self, tmp_path: Path):
-        """Symmetric resolver: funscript pref does NOT fall back to
-        the sound file at H2. Caller mirrors H1 instead. Cross-form
-        fallback lives at H1 only.
-        """
+    def test_audio_only_with_funscript_pref_falls_back_to_audio(self, tmp_path: Path):
+        """funscript preference, but only a sound file exists: fall back to
+        it rather than going silent (2026-08-20 cross-form fallback)."""
         fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=False)
-        assert detect_prostate_source(fs, "funscript").kind == "none"
+        result = detect_prostate_source(fs, "funscript")
+        assert result.kind == "audio_file"
+        assert result.audio_path is not None
 
     def test_funscript_only_with_funscript_pref_plays_funscript(self, tmp_path: Path):
         fs = self._make_prostate_set(tmp_path, with_audio=False, with_funscript=True)
         assert detect_prostate_source(fs, "funscript").kind == "funscripts"
 
-    def test_funscript_only_with_sound_pref_returns_none(self, tmp_path: Path):
-        """Sound preference is authoritative: with funscripts available but
-        no `.prostate.wav`, do NOT fall back to funscript synth — return
-        kind="none" so the caller mirrors H1. Locks in the Euphoria fix
-        (2026-05-03 dogfood: user picked sound, got funscript synth, was
-        confused — that fallback was wrong).
-        """
+    def test_funscript_only_with_sound_pref_falls_back_to_funscript(self, tmp_path: Path):
+        """sound preference, but only prostate funscript channels exist
+        (the bundle-import case: `audio/*.mp3` is deliberately never
+        extracted): fall back to the funscript rather than going silent
+        (2026-08-20 cross-form fallback)."""
         fs = self._make_prostate_set(tmp_path, with_audio=False, with_funscript=True)
-        assert detect_prostate_source(fs, "sound").kind == "none"
+        assert detect_prostate_source(fs, "sound").kind == "funscripts"
 
     def test_both_available_sound_pref_picks_audio(self, tmp_path: Path):
         fs = self._make_prostate_set(tmp_path, with_audio=True, with_funscript=True)
