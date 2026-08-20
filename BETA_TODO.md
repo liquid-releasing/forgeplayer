@@ -22,9 +22,14 @@ routing on hybrid-graphics laptops).
       docs walk users through the SmartScreen "Keep / Run anyway" steps. Signing
       removes that friction; biggest single beta-polish win. (macOS notarization
       is the parallel item.)
-- [ ] **Verify no clicks across scene / chapter auto-advance boundaries.** The
-      audio-quality work covered *within-scene* playback only; boundary
-      transitions are untested and gate any playlist / auto-advance UI.
+- [x] **Verify no clicks across scene / chapter auto-advance boundaries.**
+      **Dogfooded 2026-08-20** (both H1 and H2, real hardware, many Prev/Next
+      chapter transitions): only minor, occasional clicks — same low
+      background rate as the residual click-rate item below, not a new
+      boundary-specific issue. Also surfaced and fixed a real crash: rapid
+      Prev/Next clicking (~1/s) raced the live-synth math into an access
+      violation; fixed via a debounce on the trigger (commit `5d0e897`),
+      not a patch to the vendored math itself.
 - [ ] **Hardware feel-test the actual v0.0.12 release artifact** on the
       workstation + haptic dongle (not just "sounds right" through headphones).
 - [ ] **Confirm the flagged "D29 audio-only ship-blocker"** from the setup/Live
