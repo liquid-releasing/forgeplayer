@@ -1,51 +1,61 @@
-# ForgePlayer — v0.0.1-alpha Specification
+# ForgePlayer — Specification
 
-**Last updated:** 2026-04-22
-**Status:** Design complete, pre-implementation
-**Supersedes:** existing eHaptic Studio Player v0.1 prototype
+**Last updated:** 2026-08-20
+**Status:** Shipping alpha, v0.0.15 (see `app/version.py`) — pre-beta. `BETA_TODO.md` tracks the remaining gate list.
+**Supersedes:** the 2026-04-22 "v0.0.1-alpha" pre-implementation draft of this file.
+
+> **Revision note:** this file previously described a pre-implementation
+> design — 3-tab UI, single-decoder/multi-render-context video wall,
+> scene playlists, an independent-slots toggle — dated before any of it was
+> built. None of that shipped in that shape. This rewrite describes the
+> **current, real behavior** of v0.0.15, cross-checked against
+> `app/control_window.py`, `app/sync_engine.py`, `app/preferences.py`, and
+> the other modules it names. Where the original design was cut or never
+> attempted, it's called out explicitly under §14 rather than left looking
+> like current behavior. For deep architectural rationale (why the crash
+> fixes exist, the real thread model, the in-process e-stim path), see
+> `ARCHITECTURE.md` — this file describes *what the app does*, not *why the
+> code is shaped the way it is*.
 
 ---
 
 ## 1. Overview
 
-ForgePlayer is a synchronized multi-monitor video player with operator-console UX. It plays **the same video, full-screen, across up to three output monitors** at frame-perfect sync, with a separate **touchscreen controller** for transport, library, and routing. Built for video-wall / playback-rig setups.
+ForgePlayer is a synchronized multi-monitor video player with an
+operator-console UX, built for e-stim/haptic playback: it plays a video on
+up to three monitors while synthesizing e-stim audio from the scene's
+funscripts in real time (in-process — see `ARCHITECTURE.md`), routed to up
+to two dedicated haptic audio devices. A `ControlWindow` operator console
+(five tabs — Library, Live, Setup, Preferences, About) drives library
+browsing, transport, and hardware wiring.
 
 Upstream siblings in the Liquid Releasing family:
 
 - **FunscriptForge** — edits and polishes funscript files
 - **ForgeAssembler** — concatenates many FunscriptForge clips into one long combined output
-- **ForgePlayer** — plays the combined output to a multi-monitor video wall with haptic routing
+- **ForgePlayer** — plays a scene (or a combined output) to one-to-three monitors with haptic routing
 
 ### Why it exists
 
-The current user workflow is "multiple VLC windows manually sync'd" — which doesn't really sync at all. Seeks to arbitrary points force a full manual resync. ForgePlayer replaces that with a single-decoder / N-render-surfaces architecture where seek is frame-perfect by construction, plus a touch-friendly operator console that handles transport, chapter navigation, audio routing, and library management from one place.
+VLC/WMP-style "multiple player windows manually synced" doesn't really
+sync — a seek to an arbitrary point forces a manual resync across windows,
+there's no shared device-role model for USB stim dongles, and there's no
+library that understands a FunscriptForge/ForgeAssembler scene folder. Once
+launched, four fixed slots (video / stim / mirror / mirror — see
+`ARCHITECTURE.md`'s Class Structure section) are kept in lockstep by fanning
+the same transport command out to every active mpv instance
+(`SyncEngine.seek_all`/`play_all`/`pause_all`, with `hr_seek=yes` so a seek
+lands on the exact target frame rather than the nearest keyframe), while the
+Setup tab's device-role model means USB dongles only need to be picked once,
+not per scene.
 
-### v0.0.1-alpha scope — one-line summary
+### Current one-line summary
 
-**Same video on one-to-three walls, frame-perfect sync, mouse-or-touch operator console, multi-destination audio (OS default + USB dongles), folder-auto-load with JSON presets.** Funscript-to-audio conversion, Bluetooth audio, fan-out routing, and haptic-device integration are all Phase 2+.
-
-### Reference configurations
-
-Two user setups shape the alpha design. Both must work well; both ship in the same binary.
-
-| Config | Setup | Role |
-|---|---|---|
-| **Baseline** (realistic user) | Laptop + 1 external monitor + 1-2 USB audio dongles. Mouse/trackpad controls the operator console; external monitor plays fullscreen. | Alpha's shipping criterion: works great here on day 1 |
-| **Flagship** (video-wall rig) | Desktop with high-end GPU (e.g. RTX 4070) driving 2-3 external walls, plus a Prechen 12.3" 1920×720 touchscreen as the operator console. Multiple USB audio dongles. | Scale-up demo / power-user configuration |
-
-The same code handles both. Wall count adapts from detected displays (QScreen enumeration); controller = whichever display is explicitly marked `controller` (or is smallest/touch-capable as a fallback). The "laptop + 1 wall" user should not feel like a second-class citizen.
-
-### v0.0.1-alpha shipping criteria
-
-ForgePlayer ships when a **baseline-config user** can:
-
-1. Load a FunscriptForge / ForgeAssembler pack folder
-2. Play it fullscreen on their external monitor
-3. Hear audio on their USB dongle
-4. Scrub the seek bar smoothly, jump chapters
-5. Have the result look and feel **noticeably better than their current VLC/WMP-wrapped workflow**
-
-Everything above that bar is the flagship config. Everything below the bar blocks shipping.
+**One video on one-to-three monitors, in-lockstep sync via fanned-out
+transport commands, in-process e-stim synthesis to one or two haptic audio
+devices, folder-scanning library with auto-remembered picks per scene.**
+Serial/USB haptic devices, `.tact` (bHaptics) integration, live audio→haptic
+capture, and network/LAN multi-machine sync are not built — see §14.
 
 ---
 
@@ -53,16 +63,36 @@ Everything above that bar is the flagship config. Everything below the bar block
 
 ### Display setup
 
-- Up to **three playback monitors** at a mix of resolutions. Typical target: two 4K (3840×2160) + one ultrawide (3840 × ~1120, or similar wide aspect).
-- **One controller touchscreen** — nominally a wired secondary monitor like the Prechen 12.3" (1920×720, HDMI + USB-C, touch-enabled). Not a tablet; everything runs on one PC.
-- All four displays connect to the same machine. No network sync, no remote control.
+- Up to **three playback monitors**, mixed resolutions supported (the
+  fixed slot model is video / stim / mirror / mirror — see
+  `ARCHITECTURE.md`; a "mirror" slot needs a playback screen assigned to it
+  in Setup to actually show anything).
+- Optionally, a separate touchscreen for the control console (Setup's
+  "Control panel screen" combo assigns it explicitly, or leaves it on
+  `— auto —`). Not a hardware requirement — most dogfooding runs the
+  control window on the same screen as a mouse/trackpad.
 
-### Audio setup — alpha
+### Audio setup
 
-- **OS default output** (whatever Windows / macOS / Linux reports as the current default)
-- **Two wired USB audio dongles** for haptic routing
+- **Scene Audio** — the video's own embedded track, routed to one primary
+  device and, optionally, one secondary "(also)" device that mirrors it
+  (`Preferences.scene_audio_device` / `scene_audio_secondary_device`).
+- **Haptic 1** and **Haptic 2** — up to two dedicated e-stim/haptic audio
+  devices (typically USB dongles), configured once in Setup
+  (`Preferences.haptic1_audio_device` / `haptic2_audio_device`).
+- HDMI/DisplayPort "display audio" phantom devices (a monitor's built-in
+  audio driver, usually speakerless) are filtered out of every device
+  picker automatically (`SyncEngine._is_display_audio`).
 
-Scope for later phases: Bluetooth audio, multi-card 7.1 channel arrays, fan-out to multiple outputs from one source.
+### Shipping criteria (still the bar)
+
+A user can: load a scene from the Library, play it fullscreen (or windowed)
+on their monitor(s), hear scene audio on their chosen device, hear e-stim on
+their dongle without touching a config file, scrub the seek bar smoothly,
+and jump chapters — noticeably better than a VLC/WMP-wrapped workflow. This
+bar has been cleared and the app is in dogfooding toward a beta label (see
+`BETA_TODO.md`); nothing in this document is aspirational unless explicitly
+marked "not yet built" in §14.
 
 ---
 
@@ -71,680 +101,482 @@ Scope for later phases: Bluetooth audio, multi-card 7.1 channel arrays, fan-out 
 ### Stack
 
 - **Python 3.11+**
-- **PySide6** (Qt 6) for UI, windowing, gestures, multi-monitor management
-- **libmpv** via `python-mpv` for video decode + audio output
-- **PyInstaller** for 3-platform bundles (Windows / macOS / Linux)
+- **PySide6** (Qt 6) for UI, windowing, multi-monitor management
+- **python-mpv** (`libmpv`) for video decode + audio output — one `mpv.MPV()`
+  instance per active slot, not a single shared decoder
+- **PyInstaller** for platform bundles (Windows shipping today; macOS/Linux
+  bundling is in the CI matrix — see §16)
+- **sounddevice** + the vendored `restim_stim_math` library for in-process
+  e-stim synthesis (no subprocess — see `ARCHITECTURE.md`)
 
-No web UI, no browser, no Streamlit. The family's standard stack diverges here intentionally — native Qt is the only way to get frame-perfect multi-monitor video + per-device audio routing + touch UI in one process.
+### Decode & sync model — independent per-slot mpv instances, kept in lockstep
 
-### Decode model — single source, multiple render surfaces
+The current architecture is **not** the single-decoder/multiple-render-context
+design this file originally specified (which was never built — no
+`QOpenGLWidget`, no `MpvRenderContext`, no shared `mpv_handle` anywhere in the
+codebase). What actually ships is closer to the *simpler* model:
 
-The v0.1 prototype uses **three independent libmpv instances** (one per monitor) with transport commands fanning out in a tight loop. That architecture is the root cause of the seek-desync problem: each instance seeks independently and lands on a slightly different frame.
+- `SyncEngine` owns up to `MAX_SLOTS = 4` independent `mpv.MPV()` instances
+  (one per fixed slot: video / stim / mirror / mirror), each embedded into
+  its own `PlayerWindow`'s native window handle.
+- Transport is fan-out, not shared-clock: `play_all()` / `pause_all()` /
+  `seek_all()` apply the same command to every instance in `_active` in one
+  tight loop.
+- The seek-desync problem the original design worried about is solved
+  differently: every `init_player()` instance sets `hr_seek="yes"`, so a
+  seek decodes forward from the keyframe and lands on the exact requested
+  frame instead of mpv's default nearest-prior-keyframe behavior (which was
+  landing 2-12 seconds short on HandBrake-encoded sources). `seek_all` also
+  briefly mutes/unmutes every instance around the seek to avoid an audible
+  click from the sample discontinuity.
+- Two additional **headless, audio-only** mpv instances exist outside the
+  4-slot grid: a Scene Audio mirror (second device gets the same video
+  sound) and a Stim Audio mirror (Haptic 2 plays H1's sound file when no
+  prostate-specific source exists). Both are included in `_active`, so they
+  stay locked to the same transport commands.
 
-v0.0.1-alpha architecture:
+Per-monitor crop is handled per mpv instance via `panscan` (crop-fill) and
+`video-align-y` (crop anchor) — not a GL fragment shader over a shared
+render context. See §12.
 
-```
-             ┌──────────────────────────┐
-             │   single libmpv decoder  │
-             │   (master clock, audio)  │
-             └──────────────────────────┘
-                        │
-          ┌─────────────┼─────────────┬─────────────┐
-          ▼             ▼             ▼             ▼
-     render ctx 1  render ctx 2  render ctx 3   audio mixer
-     Wall 1 (4K)   Wall 2 (4K)   Wall 3 (UW)      │
-                                  + crop filter   │
-                                                  ├─ OS default
-                                                  ├─ Dongle 1
-                                                  └─ Dongle 2
-```
+### mpv configuration — what's actually set (not a baked `mpv-defaults.conf`)
 
-One decoder owns the timeline. Three render contexts pull frames from it — frame-perfect sync by construction because there's only one clock. Audio goes through a mixer that splits into the configured destinations.
+There is no `mpv-defaults.conf` file and no user-override conf file today —
+options are set directly as `mpv.MPV()` kwargs in `SyncEngine.init_player`
+(`app/sync_engine.py`). Current defaults, and why:
 
-libmpv's render API (`mpv_render_context`) supports multiple render contexts against a single `mpv_handle`. `python-mpv` exposes `MpvRenderContext` with the full C API surface (verified 2026-04-22 via source inspection of `jaseg/python-mpv`).
+| Setting | Value | Purpose |
+|---|---|---|
+| `vo` | `gpu` | **Not** `gpu-next` — `gpu-next`'s (libplacebo) D3D11 teardown reliably access-violated on an embedded (`wid`) player. `gpu`'s teardown is stable. See `ARCHITECTURE.md`'s crash-fix section. |
+| `hwdec` | `auto-safe` | Hardware decode (NVDEC/D3D11VA/etc.), falls back to software only for codecs it can't offload — never makes a decodable file undecodable. Needed because software-decoding a high-bitrate 4K source pegs the CPU badly enough to stall both the poll loop and the haptic sync engine. |
+| `hr_seek` | `yes` | Frame-accurate seeking — see above. Costs 100-500 ms per seek on 1080p; imperceptible in normal use. |
+| `tone_mapping` | `bt.2390` | Perceptual HDR→SDR tone-map on `gpu` (not true HDR passthrough — that was `gpu-next`'s job and got reverted with it). |
+| `hdr_compute_peak` | `yes` | Paired with `tone_mapping`. |
+| `target-colorspace-hint` | `yes` (best-effort, set post-construction) | Hints the display colorspace so a Windows-HDR-ON desktop composites correctly instead of blowing out to white. |
+| `demuxer_max_bytes` / `demuxer_max_back_bytes` | `256MiB` / `64MiB` | Read-ahead buffer so a big 4K file doesn't stall the decode thread on disk I/O. |
+| `panscan` / `video_align_y` | set per-slot when "Crop" is on for that monitor | Crop-fill instead of letterbox; see §12. |
+| `gpu_context` / `d3d11_adapter` | `d3d11` / `NVIDIA`, only when a hybrid-GPU Windows machine is detected | Routes mpv's D3D11 context off a buggy AMD adapter. See `ARCHITECTURE.md`. |
 
-**Per-monitor crop is a GL-layer concern, not a libmpv concern.** The `vf` (video filter) property is decoder-scoped — setting it affects all render contexts uniformly. Our architecture:
-
-- Each playback window is a `QOpenGLWidget` with its own GL context
-- Each widget creates its own `MpvRenderContext` against the shared `mpv_handle`
-- Full-frame walls render libmpv's output directly to their framebuffer
-- **Ultrawide wall:** runs a small fragment shader that samples libmpv's output with UV coordinates computed from the active crop preset (top/middle/bottom/etc.) — producing the cropped band in-place at GPU cost negligible compared to decode
-
-This keeps the single-decoder guarantee intact (one clock, frame-perfect sync) while enabling per-monitor aspect treatments. The crop math runs once in a tiny fragment shader per affected wall, not in the libmpv pipeline.
+Not present, and not planned near-term: `scale=ewa_lanczossharp`,
+`cscale`/`dscale` upscaler tuning, `video-sync=display-resample`,
+`interpolation=yes`, `deband=yes`, or a general user-override conf file.
+`docs/quality.md` still documents some of this aspirational upscaling story
+and should be reconciled in a separate pass — it wasn't in scope for this
+rewrite.
 
 ### Robust per-monitor window placement
 
-Historical pain: VLC and similar players handle multi-monitor placement poorly — windows land on the wrong monitor, spill across displays, or get misplaced when the video aspect doesn't match the monitor. ForgePlayer explicitly targets better behavior:
-
-- Each playback window is a **borderless Qt widget** sized to exactly one `QScreen`'s geometry via `setGeometry(screen.geometry())` followed by `showFullScreen()`
-- Qt's screen enumeration is stable and includes DPI / aspect metadata, so wall-to-monitor assignment is by unambiguous screen ID (not index, not position)
-- Render contexts inside each window let libmpv fit the video to the window's pixels — never the other way around. Aspect mismatches result in letterbox (for narrower sources) or ultrawide-crop (for 16:9 source on wide monitors), never cross-monitor spill
-- No "pick a monitor by dragging the window" flow — slots are assigned once in Setup, persisted in preferences.json, honored on every launch
-
-### Quality defaults — mpv configuration
-
-ForgePlayer ships an `mpv-defaults.conf` baked into the bundle that configures libmpv for image-quality-over-speed. Every `mpv.MPV()` instance loads it at startup. Users can override via `~/.forgeplayer/mpv-user.conf` (loaded after defaults).
-
-Baseline defaults:
-
-```
-vo=gpu-next
-hwdec=auto-safe
-scale=ewa_lanczossharp
-cscale=ewa_lanczossharp
-dscale=mitchell
-video-sync=display-resample
-interpolation=yes
-deband=yes
-dither-depth=auto
-target-colorspace-hint=yes
-```
-
-**Why these:**
-
-| Setting | Purpose |
-|---|---|
-| `vo=gpu-next` | Newer mpv video output with modern color pipeline + HDR handling |
-| `hwdec=auto-safe` | Hardware decode (NVDEC on NVIDIA, QSV on Intel, AMF on AMD, VideoToolbox on Apple) — falls back to software when unsupported |
-| `scale=ewa_lanczossharp` | Best-in-class spatial upscaler for 1080p→4K, the canonical mpv recommendation |
-| `cscale` / `dscale` | Matched chroma upscaler and a clean downscaler for 4K→1080p on smaller monitors |
-| `video-sync=display-resample` | Frame pacing locked to display refresh → eliminates judder on non-60Hz content |
-| `interpolation=yes` | Motion smoothness on 24p / 30p content |
-| `deband=yes` | Kills gradient banding on HDR and 10-bit content |
-| `target-colorspace-hint=yes` | Passes HDR10 metadata through to the monitor when Windows/macOS HDR is enabled |
-
-The quality story is documented for end users in `docs/quality.md` (GPU support matrix, HDR behavior, upscaling explanation, how to override defaults).
-
-### Independent-slots mode (secondary, less-prominent)
-
-The v0.1 prototype's "three independent video slots" capability is retained as a secondary mode — exposed as a toggle in Setup → Preferences. Flagship mode is same-video-mirrored; independent-slots is there for users who want to run three different videos simultaneously (e.g. multi-angle playback, A/B comparison).
+Each `PlayerWindow` is a borderless `QWidget` placed via
+`place_on_screen(screen, fullscreen)` — `setGeometry()` to a windowed rect
+first (always, even when "Fullscreen players" is checked — see
+`ARCHITECTURE.md`'s reuse/launch-sequencing notes for why), then
+`showFullScreen()` if requested, deferred a beat so mpv's viewport
+recomputes against the already-embedded surface instead of the pre-fullscreen
+rect. Placement is by explicit Setup checkbox assignment (`playback_screen_indices`),
+not drag-to-monitor. `player.placement_target` / `player.placement_actual`
+debug-log events bracket the placement call so a target/actual mismatch
+(Qt/DWM snapping a window back to the primary monitor) is diagnosable from
+the debug log rather than guesswork.
 
 ---
 
-## 4. UI — panel model
+## 4. UI — tab model
 
-Three top-level panels, switchable via a tab bar at the top of the controller screen:
+Five tabs in a `QTabWidget`, in this order (`ControlWindow._build_ui`):
 
-- **Live** — operator transport, current state, chapter jumps
-- **Setup** — monitors, audio routing, library config, preferences
-- **Library** — grid of videos with thumbnails, search, filter
+**Library → Live → Setup → Preferences → About**
 
-### Navigation rules
+The order follows the user's actual journey: pick a scene, drive playback,
+wire hardware once, tune rare behavior, check version/credits. The app
+opens on **Library** by default (not Live) — a returning user with a
+scanned root lands on their scenes; a first-run user sees Library's
+"Scan a folder" empty state.
 
-- **Panel switching** is explicit: tap the tab bar only. No swipe cross-panel.
-- **Within-panel navigation** is gestural: edge chevrons (`◀` / `▶`) and horizontal swipe do the same panel-specific action.
-- Per-panel chevron behavior:
-  - **Live** → previous / next chapter
-  - **Setup** → previous / next setting section (Monitors → Audio → Library → Preferences)
-  - **Library** → previous / next page of video cards (10 per page)
-
-### Controller screen dimensions
-
-All UI is designed for 1920×720 (~2.67:1 aspect, the Prechen form factor). Any 16:9 controller screen will also work but with more vertical whitespace than needed.
+There is no cross-tab swipe gesture and no chevron-driven within-panel
+navigation model — tab switching is a plain `QTabWidget` click. (The
+original design's touchscreen-console gesture model — edge chevrons,
+swipe-to-page — was never implemented; see §14.)
 
 ---
 
-## 5. UI — Live panel
+## 5. UI — Live tab
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ 🔨 FORGEPLAYER  │  [ LIVE ◉ ]   [ SETUP ]   [ LIBRARY ]       📁 Load folder…    │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│ Prisoner.-38 76 71 8 175.mp4 · ch 3/12  "The hallway"                            │
-│ [1]●Dell 4K L   [2]●Dell 4K R   [3]●LG UW · crop: middle                         │
-├───┬──────────────────────────────────────────────────────────────────────────┬───┤
-│   │                                                                          │   │
-│   │    ⏮⏮    ⏮⏮     ⏮                 ▶                ⏭     ⏭⏭     ⏭⏭      │   │
-│ ◀ │    -30   -10    -5            PLAY ⁄ PAUSE          +5    +10    +30     │ ▶ │
-│chap│                                                                         │chap│
-│   │   00:12:34  ████████████████░░◆░░░░░░░░░░░░░░░░░░░░░░░░░░░  01:45:22     │   │
-│   │             chap 3  "The hallway"                                        │   │
-│   │                                                                          │   │
-├───┴──────────────────────────────────────────────────────────────────────────┴───┤
-│ Ultrawide crop:  ▣ middle     ▢ top-mid     ▢ top     ▢ bot-mid     ▢ bottom     │
-│                                                                                  │
-│ OS        ──────●────── 80%    Dongle 1 ──●──────────  30%    Dongle 2 ──○── 0%  │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
+`ControlWindow._build_live_tab`. Layout, top to bottom:
 
-### Elements
+1. **Now-playing header** — the active scene's name, plus the origin
+   `<stem>.forge` bundle name in brand orange when the scene came from a
+   FunscriptForge export (`_refresh_now_playing`).
+2. **Video panel** (left) / **Output panel** (right), side by side, each
+   read-only except for one picker at the top:
+   - **Video panel** — a "Video source" combo + Browse button (re-routes the
+     live scene, one video across all assigned monitors), the resolved
+     filename, the list of monitors video will play on (read from Setup's
+     `playback_screen_indices`, with crop/letterbox noted per monitor), and
+     the **Fullscreen players** toggle (applies live to any open
+     `PlayerWindow`, not just at next launch — `_on_fullscreen_toggled`).
+     Scene Audio's primary and optional secondary device + source line live
+     here too (the video's own embedded audio, not haptics).
+   - **Output panel** — a "Stim source" combo + Browse button (funscript set,
+     audio file, or None for silent stim), then one block per haptic
+     destination: **Haptic 1** (the full e-stim channel set — restim
+     channel names or filenames, scrollable if long) and **Haptic 2** (the
+     prostate side-chain, or a note that it mirrors Haptic 1 when no
+     prostate-specific source exists for the active `content_preference`).
+3. **Timeline row** — position/duration labels, a 42px-tall click-to-seek
+   slider with chapter/marker ticks, and a separate Scene-volume slider
+   (ephemeral, per-session, affects only the primary video's mpv volume —
+   not the haptic stream).
+4. **Transport row** — Prev-chapter, −30/−10/−5s, Play/Pause, Stop,
+   +5/+10/+30s, Next-chapter. Play is disabled until Launch has run.
+   Prev/Next-chapter are disabled until a `<stem>.chapters.json` sidecar (or
+   embedded chapter metadata) resolves for the active scene.
+5. **Calibrate row** — "Calibrate H1" / "Calibrate H2" tap-toggle buttons
+   loop the scene's peak-intensity haptic window through the matching
+   device before Play, with an optional 5-second fade-in ramp
+   (`_chk_calibrate_ramp`, on by default). Locked from first Play until
+   Close — once launched streams own the device handle exclusively.
+6. **Launch Players / Close Players** — Launch builds (or **reuses** — see
+   `ARCHITECTURE.md`) a `PlayerWindow`+mpv instance per slot with media and
+   dispatches the stim slot to `StimSynth`; Close tears every active player
+   down.
 
-| Element | Behavior |
-|---|---|
-| Tab bar | Tap to switch panels. Active tab shows filled dot. |
-| File line | Current filename + chapter index + chapter title |
-| Wall status dots | Filled = monitor active, empty = monitor disabled. Crop preset shown inline for the ultrawide wall only. |
-| Transport buttons | Skip ±5, ±10, ±30 seconds. Play/Pause in the centre (120×120 px target). |
-| Seek bar | Horizontal slider, fat (50 px tall). Filled portion = played, unfilled = remaining. Chapter markers as `◆` dots. Drag handle to scrub; all three walls seek in sync. |
-| Time labels | Current position (left) / total duration (right) |
-| Ultrawide crop row | Five preset chips. **Hidden if no ultrawide monitor is detected.** |
-| Audio-out sliders | One slider per registered audio destination (max 3 in alpha). Volume 0–100% per destination. |
-| Edge chevrons | Tap to jump to previous / next chapter |
-
-### Transport behavior
-
-- **Play/Pause** — toggles all render contexts via the single decoder
-- **Skip ±N seconds** — seek relative to current position
-- **Chapter jump** — seek to next/previous chapter marker from the source video's chapter metadata
-
-### Chapter markers
-
-Chapters come from the source video's embedded metadata (MKV / MP4 chapter atoms, as written by ForgeAssembler). Displayed as `◆` dots on the seek bar at each chapter timestamp. Current chapter name appears as a small label below the seek bar.
+There is no per-monitor crop-preset chip row on Live — crop is a Setup-tab,
+per-monitor concern (§12), not a Live-tab live control.
 
 ---
 
-## 6. UI — Setup panel
+## 6. UI — Setup tab
 
-Four sections, navigated via chevrons (same as panel navigation but scoped within Setup). Section indicator at the top: `Setup · section 1 of 4 · Monitors`.
+Two columns side by side (`ControlWindow._build_setup_tab`), inside a
+vertical scroll area so a short window scrolls rather than overlapping text:
 
-### Section 1 — Monitors
+### Audio device roles
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ 🔨 FORGEPLAYER  │  [ LIVE ]   [ SETUP ◉ ]   [ LIBRARY ]                          │
-│  Setup · section 1 of 4 · Monitors                                               │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│   [1] Dell 4K #1         3840 × 2160  16:9      ▾ wall slot 1                    │
-│   [2] Dell 4K #2         3840 × 2160  16:9      ▾ wall slot 2                    │
-│   [3] LG 38WN             3840 × 1120  3.43:1   ▾ wall slot 3  · crop ▾ middle   │
-│   [4] Prechen Touch       1920 × 720   2.67:1   ▾ controller                     │
-│                                                                                  │
-│   Auto-detected on launch. Re-scan: [⟳]                                          │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
+Four fixed role rows, each a device combo + a "Test" affordance:
 
-### Section 2 — Audio routing
+| Role | Preferences field | Purpose |
+|---|---|---|
+| Scene audio | `scene_audio_device` | Video's embedded sound |
+| Scene audio (also) | `scene_audio_secondary_device` | Optional second device that mirrors scene audio — e.g. driving a stim device from music when no funscript exists |
+| Haptic 1 (main stim) | `haptic1_audio_device` | Primary e-stim output |
+| Haptic 2 (alt stim) | `haptic2_audio_device` | Optional second stim output — prostate side-chain, or mirrors Haptic 1 |
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  Setup · section 2 of 4 · Audio routing                                          │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│   Source                    Output                       Label                   │
-│  ┌──────────────────────┐  ┌─────────────────────────┐  ┌────────────────┐       │
-│  │ Video audio          │▸ │ OS default              │  │ [Big speakers] │       │
-│  └──────────────────────┘  └─────────────────────────┘  └────────────────┘       │
-│  ┌──────────────────────┐  ┌─────────────────────────┐  ┌────────────────┐       │
-│  │ Main funscript       │▸ │ USB Audio CODEC (dev 3) │  │ [Left haptic]  │       │
-│  └──────────────────────┘  └─────────────────────────┘  └────────────────┘       │
-│  ┌──────────────────────┐  ┌─────────────────────────┐  ┌────────────────┐       │
-│  │ Prostate funscript   │▸ │ C-Media USB (dev 5)     │  │ [Right haptic] │       │
-│  └──────────────────────┘  └─────────────────────────┘  └────────────────┘       │
-│                                                                                  │
-│   + Add source/output pair                                                       │
-│                                                                                  │
-│   💾 Save as default        📁 Save as preset for current video                  │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
+A device already assigned to one role is greyed out of the others
+(`_apply_device_exclusions`) so the same exclusive audio handle can't be
+double-claimed. A picked device applies live to the currently loaded scene
+immediately (`_reload_current_scene`), not only on the next Library click. A
+"Refresh devices" button re-queries the OS device list for USB dongles
+plugged in after launch.
 
-Friendly labels persist in `preferences.json` keyed by the OS-level stable device identifier. OS default stays labeled "OS default" and resolves lazily at play time — so if the user unplugs headphones mid-session, the next play picks up the new OS default.
+This is a **fixed 4-role model**, not the flexible arbitrary
+source→destination table the original design sketched (add/remove
+source/output pairs, per-source friendly labels). Four roles cover the
+real hardware shapes seen in dogfooding; see `docs/architecture/audio-routing.md`
+for how a fifth role (e.g. a shaker) would slot in.
 
-### Section 3 — Library
+### Monitor roles
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  Setup · section 3 of 4 · Library                                                │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│   Root folders:                                                                  │
-│     📂 D:\forge\sessions                        [⟳ rescan]  [✕]                  │
-│     📂 E:\edger-packs                           [⟳ rescan]  [✕]                  │
-│     + Add folder                                                                 │
-│                                                                                  │
-│   Folder-load convention:                                                        │
-│     ○ Auto-match by stem       (FunscriptForge layout)                           │
-│     ○ Single-file mode         (pick video, everything else manual)              │
-│     ● Flexible                 (auto where possible, prompt on mismatch)         │
-│                                                                                  │
-│   Thumbnail cache: ~/.forgeplayer/thumbs/  (234 MB)    [Clear]                   │
-│   Rescan frequency: ● On launch    ○ Weekly    ○ Manual only                     │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Section 4 — Preferences
-
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  Setup · section 4 of 4 · Preferences                                            │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│   Preferences file: ~/.forgeplayer/preferences.json  [Open]  [Reveal in folder]  │
-│                                                                                  │
-│   Default chapter jump behavior:  ● Jump & play   ○ Jump & pause                 │
-│                                                                                  │
-│   🔧 Debug mode  [ ]  — emit event log to help with bug reports                  │
-│                                                                                  │
-│   About:  ForgePlayer v0.0.1-alpha · © 2026 Liquid Releasing · MIT License       │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
+- **Control panel screen** — which monitor hosts `ControlWindow` itself
+  (`— auto —` or an explicit screen).
+- **Playback screens** — one checkbox per detected screen
+  (`playback_screen_indices`); leaving all unchecked means "any screen is
+  fair game." Each row also has a **Crop** checkbox (`fill_screen_indices`)
+  — crop-fill (mpv `panscan`) vs. the default letterbox/pillarbox.
+- **Crop position** — one global 3-way radio (Top / Center / Bottom,
+  `CropAlign`), applied only to screens with Crop on. Top/Bottom back the
+  kept region off the near edge by ~1/8 rather than slicing a subject at
+  the very edge.
 
 ---
 
-## 7. UI — Library panel
+## 7. UI — Preferences tab
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ 🔨 FORGEPLAYER  │  [ LIVE ]   [ SETUP ]   [ LIBRARY ◉ ]      📁 Add folder…      │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│ 📂 D:\forge\sessions  ·  12 videos  ·  ⟳ rescan  ·  [search ________________]    │
-├───┬──────────────────────────────────────────────────────────────────────────┬───┤
-│   │                                                                          │   │
-│   │ ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐               │   │
-│   │ │[thumb] │  │[thumb] │  │[thumb] │  │[thumb] │  │[thumb] │               │   │
-│   │ │        │  │        │  │        │  │        │  │        │               │   │
-│ ◀ │ └────────┘  └────────┘  └────────┘  └────────┘  └────────┘               │ ▶ │
-│-10│ Prisoner    VicOats 1   Bridge      Alpha Run   Opening                  │+10│
-│   │ 1:45:22     34:12       28:45       52:11       03:44                    │   │
-│   │ m• mx•p•    m• mx•      m•          m• mx•p•✎   m•✎                      │   │
-│   │                                                                          │   │
-├───┴──────────────────────────────────────────────────────────────────────────┴───┤
-│ Page 3 / 40 · showing 21-30 of 395                                               │
-│ [All] [Recent] [Favorites ★] [With preset ✎] [Playlists ▶]  Sort: ▾ name · date  │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
+Two columns (`ControlWindow._build_preferences_tab`):
 
-### Card badges
+- **Audio synthesis** — the algorithm picker (`AudioAlgorithm`: continuous
+  vs. pulse-based, default **pulse** — ForgePlayer's content pipeline
+  targets modern stereostim hardware) and the haptic latency offset
+  (`haptic_offset_ms`, ±500ms, compensates dongle/driver/electrode-placement
+  latency).
+- **Content preference** — the sound-vs-funscript tie-breaker
+  (`ContentPreference`, default **funscript**) used when a scene ships both
+  a pre-rendered `.wav`/`.mp3` and a funscript for the same haptic
+  destination. Applies only when both forms exist for a given destination —
+  if only one exists, that one plays regardless of preference.
 
-| Badge | Meaning |
-|---|---|
-| `m•` | Main funscript detected |
-| `mx•` | Multi-axis funscript detected |
-| `p•` | Prostate funscript detected |
-| `✎` | Per-video preset JSON exists (tap = launch with bakedin settings) |
-| `★` | User-marked favorite |
-
-### Interactions
-
-- **Tap card** → load video + all detected assets + preset → auto-switch to Live panel, paused at 00:00
-- **Long-press** → enters multi-select mode: card gets a checkmark, bottom action bar appears with `Play now · Queue next · Add to playlist…`
-- **Vertical scroll** → smooth scroll through rows
-- **Chevron `◀` / `▶` or swipe** → jump one page forward/back (10 videos)
-- **Search** → live filter as you type
-- **Filter chips** — All / Recent / Favorites / With preset / Playlists
-- **Sort** — name / date added / duration
-
-### Scene playlists (alpha)
-
-Ordered lists of whole scenes. Built from Library multi-select. When one finishes, the next begins automatically.
-
-- **Create** — long-press a card → `Add to playlist…` → pick existing or type a new name
-- **Browse** — tap the `Playlists ▶` filter chip; grid switches to playlist cards, each showing name + count + runtime
-- **Play** — tap a playlist card → starts the first scene in Live; transport "Next chapter" crosses into the next scene when the current one ends
-- **Edit** — long-press a playlist card → reorder / remove / rename / delete
-- **Storage** — one file per playlist at `~/.forgeplayer/playlists/<name>.json`: `{ "name": "...", "schema_version": 1, "entries": [{ "scene": "absolute/path/to/victoriaoats.mp4" }, ...] }`
-
-**Moments playlists** (timestamp ranges across scenes) are **Phase 2** — they need the favorites data model first.
-
-### Scaling to hundreds of videos
-
-- **Lazy thumbnail generation** — first time a card becomes visible, generate thumbnail (first keyframe); cache to `~/.forgeplayer/thumbs/`
-- **Virtualized grid** — Qt `QAbstractItemModel` + `QListView` tile renderer; only on-screen rows have live widgets
-- **Folder sections** — multiple registered roots appear as collapsible sections (`▾ D:\forge\sessions (120)`, `▾ D:\edger-packs (47)`)
-- **Incremental rescan** — on launch (or manual trigger), diff current folder contents against library index; add/remove only the delta
-
-### Library rescan triggers
-
-- **v0.0.1-alpha:** manual `⟳ rescan` button + automatic rescan on app launch. Simple, predictable.
-- **Later phase:** hot-plug detection for new drives via Windows `WM_DEVICECHANGE`, macOS `DiskArbitration`, Linux `inotify` on `/media`. Path-aware scan (if a registered folder's drive letter becomes available) can get most of the benefit without OS-level events.
+Both settings are captured **at Launch** — changing them while players are
+already running does not re-route the live scene (unlike the Setup-tab
+device/monitor pickers). See §14.
 
 ---
 
-## 8. Config model — JSON presets
+## 8. UI — Library tab
 
-Two levels, same pattern as FunscriptForge / ForgeAssembler project JSON files.
+`LibraryPanel` (`app/library_panel.py`): a root-folder picker, a search box,
+three filter chips (**All** / **Videos with Funscripts** — the default
+view / **Videos**), and a virtualized `QListView` grid of scene cards
+(`LibraryCardDelegate`). The scan runs off the GUI thread (§ Architecture
+above); Scan/Rescan buttons disable while a scan is in flight.
+
+Each card shows: a lazily-grabbed video-frame thumbnail, the scene name,
+duration, device-generation badges (mechanical/2B/stereostim/FOC-stim,
+`GENERATION_BADGES`) plus a `p•` badge when a prostate side-chain is
+present, content-type pills (VIDEO/AUDIO/FUNSCRIPT/FORGE), a corner
+"reveal in Explorer" button, and — when a saved pin exists for that scene —
+a 📌 button that reopens the picker to change picks (a plain tile tap
+replays the pin).
+
+**Single-click activates.** Tapping a card either replays the scene's saved
+pin (video/audio/funscript-set/subtitle choice remembered from the last
+successful play, `app/library/pins.py`) or opens `SelectPicker` when the
+scene is ambiguous or the pin has gone stale (a referenced file no longer
+exists).
+
+There is no multi-select, no "Add to playlist," and no separate Playlists
+filter chip — see §14.
+
+---
+
+## 9. UI — About tab
+
+Version string (`app/version.py`), upstream credits (mpv, python-mpv,
+PySide6, restim, funscript-tools — matching `ARCHITECTURE.md`'s credits
+section), and a manual "Check for updates" button. The update check itself
+(`app/update_check.py`) hits `https://forgeplayer.app/latest-version.json`;
+see `ARCHITECTURE.md`'s update-check-flow section for the full mechanism.
+A manual check always reports live status inline and never pops the
+"Update available" dialog — that dialog is reserved for the automatic
+startup check, and even then at most once per version
+(`Preferences.dismissed_update_tag`).
+
+---
+
+## 10. Config model
 
 ### Global preferences — `~/.forgeplayer/preferences.json`
 
-User's default setup. Changes rarely.
+The `Preferences` dataclass (`app/preferences.py`), persisted as flat JSON.
+Real fields (not the nested `walls`/`routing`/`library` JSON the original
+design sketched):
 
 ```json
 {
-  "schema_version": 1,
-  "walls": {
-    "1": { "display_id": "Dell U2725Q-1", "friendly": "Dell 4K L" },
-    "2": { "display_id": "Dell U2725Q-2", "friendly": "Dell 4K R" },
-    "3": { "display_id": "LG 38WN95C-W",  "friendly": "LG ultrawide" },
-    "controller": { "display_id": "Prechen 12.3", "friendly": "Controller" }
-  },
-  "default_crop": "middle",
-  "audio_devices": {
-    "Realtek(R) Audio": "OS default speakers",
-    "USB Audio CODEC": "Left haptic",
-    "C-Media USB": "Right haptic"
-  },
-  "routing": {
-    "video_audio":       [{ "device": "OS default",      "delay_ms": 0 }],
-    "main_funscript":    [{ "device": "USB Audio CODEC", "delay_ms": 0 }],
-    "prostate":          [{ "device": "C-Media USB",     "delay_ms": 0 }],
-    "multi_axis":        [],
-    "three_phase_estim": [],
-    "audio_estim":       []
-  },
-  "library": {
-    "root_folders": ["D:\\forge\\sessions", "E:\\edger-packs"],
-    "load_convention": "flexible",
-    "rescan_frequency": "on_launch",
-    "thumbnail_cache": "~/.forgeplayer/thumbs"
-  },
-  "chapter_jump_mode": "jump_and_play",
-  "debug_mode": false
+  "scene_audio_device": "",
+  "scene_audio_secondary_device": "",
+  "haptic1_audio_device": "",
+  "haptic2_audio_device": "",
+  "audio_algorithm": "pulse",
+  "haptic_offset_ms": 0,
+  "control_panel_screen": -1,
+  "playback_screen_indices": [],
+  "fill_screen_indices": [],
+  "crop_align": "center",
+  "content_preference": "funscript",
+  "library_root": "",
+  "dismissed_update_tag": ""
 }
 ```
 
-### Per-video preset — `<videostem>.forgeplayer.json`
+Unknown keys are silently dropped on load (`Preferences.load` filters
+against the dataclass's own field set); enum fields with stale/hand-edited
+values fall back to their default rather than crashing the app at launch.
+Save is best-effort — a write failure never breaks the running session.
 
-Lives alongside the video. Contains only overrides; everything else inherits from global.
+### Per-scene state — pins, not hand-editable presets
 
-```json
-{
-  "schema_version": 1,
-  "crop": "top-mid",
-  "routing": {
-    "main_funscript": ["USB Audio CODEC #2"]
-  },
-  "start_position_s": 0.0,
-  "notes": "Narrator's scenes are in the upper third — use top-mid crop."
-}
-```
-
-### Load order at play time
-
-1. Start with baked-in defaults
-2. Merge in `~/.forgeplayer/preferences.json`
-3. Merge in `<stem>.forgeplayer.json` if present
-4. Apply to session
-
-Later writes (e.g. "Save as preset for current video") serialize the session's effective state minus the global defaults, producing a minimal per-video override.
-
-### Fan-out (schema-only for alpha)
-
-`routing` values are **lists**, allowing fan-out from one source to multiple destinations. v0.0.1-alpha's implementation honors only the first entry per source (libmpv plays each instance to one device). Schema is list-shaped from day one so config files don't need to change when true fan-out lands in Phase 2.
-
-If alpha encounters multi-destination config, log a warning (`multi-destination routing is Phase 2; using first entry only`) and proceed.
+There is no user-facing `<stem>.forgeplayer.json` preset file with crop/
+routing/notes fields. What exists at that same filename is a **pin**
+(`app/library/pins.py`'s `Pin` dataclass) — an auto-saved record of which
+video/audio/funscript-set/subtitle the user picked for that scene folder
+last time, written after every successful play and replayed automatically
+on the next one (skipping `SelectPicker` entirely unless a referenced file
+has since gone missing). A global index at `~/.forgeplayer/catalog.json`
+maps scene folders to their pins for fast Library badge rendering. Users
+never hand-edit this file; the picker (or the 📌 "change picks" button on a
+Library card) is the only way to change it.
 
 ---
 
-## 9. Folder-load conventions — the "pack" model
+## 11. Folder-load conventions — the "pack" model
 
-ForgePlayer ingests the same `{stem}.{suffix}.{ext}` pack that **FunscriptForge**, **ForgeAssembler**, and **ForgeGen** already emit. No renaming required.
+ForgePlayer ingests the same `{stem}.{suffix}.{ext}` pack that
+**FunscriptForge**, **ForgeAssembler**, and **ForgeGen** already emit, or a
+FunscriptForge `.forge`/`.forgeplay` export bundle (`app/bundle_importer.py`
+— see `ARCHITECTURE.md` for the selective-extraction detail). No renaming
+required either way, and a bundle's haptics always take priority over any
+loose funscripts scanned in the same folder.
 
 ### Canonical pack layout
 
-**Required:**
-
 | File | Role |
 |---|---|
-| `{stem}.mp4` / `.mkv` / `.webm` | Main video |
-| `{stem}.funscript` | Main stroke funscript |
+| `{stem}.mp4` / `.mkv` / `.mov` / `.avi` / `.webm` / `.m4v` | Video (highest-resolution non-upscaled variant defaults; upscaled and aspect-remapped variants never default — see `app/library/catalog.py`'s `preference_tier`) |
+| `{stem}.funscript` | Main stroke funscript (mechanical / legacy 2B intensity) |
+| `{stem}.alpha.funscript` / `.beta.funscript` | Stereostim position channels |
+| `{stem}.pulse_frequency.funscript` / `.pulse_width.funscript` / `.pulse_rise_time.funscript` / `.volume.funscript` / `.frequency.funscript` | FOC-stim parameter channels |
+| `{stem}.alpha-prostate.funscript` / `.beta-prostate.funscript` / `.volume-prostate.funscript` | Prostate side-chain (Haptic 2) |
+| `{stem}.roll.funscript` / `.pitch.funscript` / `.twist.funscript` / `.surge.funscript` / `.sway.funscript` | Multi-axis (SR6-style / VR alignment) — not consumed by e-stim synthesis |
+| `{stem}.estim.mp3` / pre-rendered `.wav` | Pre-rendered stim audio; the sound-vs-funscript tie-breaker (`content_preference`) decides which plays when both exist |
+| `{stem}.chapters.json` | Chapters + markers sidecar (§13) |
+| `{stem}.forgeplayer.json` | Auto-saved pin (§10) — not a hand-authored preset |
+| `<stem>.output/` or `<stem>.forge` / `<stem>.forgeplay` | FunscriptForge export bundle — imported via `bundle_importer`, not the raw folder scanner (see `_is_export_bundle_dir`) |
 
-**Optional multi-resolution** — player picks the highest-resolution video in the pack; one funscript set serves all resolutions (funscripts are time-based, not pixel-based):
+See `docs/architecture/restim-channels.md` for the authoritative, canonical
+list of restim-recognized funscript filenames.
 
-| File | Role |
-|---|---|
-| `{stem}.1080p30.mp4` / `{stem}.4k60.mp4` / etc. | Alt resolutions of same scene |
+### Ambiguity and the picker
 
-**Optional channel funscripts** (FunscriptForge / ForgeAssembler):
-
-| File | Channel |
-|---|---|
-| `{stem}.{roll\|pitch\|twist\|surge\|sway}.funscript` | Multi-axis (5-DoF) |
-| `{stem}.alpha.funscript` / `.beta.funscript` / `.pulse_frequency.funscript` | 3-phase estim |
-| `{stem}.alpha-prostate.funscript` / `.beta-prostate.funscript` | Prostate estim |
-
-**Optional pre-rendered audio** (FunscriptForge):
-
-| File | Role |
-|---|---|
-| `{stem}.estim.mp3` | Pre-rendered estim audio; overrides live synthesis |
-| `{stem}.{device}.wav` | Named device pre-render (e.g. `.legacy.wav`, `.stereostim.wav`) |
-
-**Optional player state:**
-
-| File | Role |
-|---|---|
-| `{stem}.forgeplayer.json` | Per-video preset (crop, routing, notes) |
-| `{stem}.favorites.json` | Timestamp favorites (Phase 2) |
-
-**Ignored:** `{stem}.heatmap.png`, `{stem}.forgetmpl`, editor scratch files.
-
-### Example pack
-
-```text
-victoriaoats/
-  victoriaoats.mp4                              ← 4K — picked by player
-  victoriaoats.1080p30.mp4                      ← alt resolution
-  victoriaoats.funscript                        ← main stroke
-  victoriaoats.alpha.funscript                  ← 3-phase estim
-  victoriaoats.beta.funscript
-  victoriaoats.pulse_frequency.funscript
-  victoriaoats.alpha-prostate.funscript         ← prostate
-  victoriaoats.beta-prostate.funscript
-  victoriaoats.roll.funscript                   ← multi-axis
-  victoriaoats.pitch.funscript
-  victoriaoats.estim.mp3                        ← pre-rendered estim
-  victoriaoats.legacy.wav                       ← device pre-render
-  victoriaoats.forgeplayer.json                 ← per-video preset
-  victoriaoats.heatmap.png                      ← ignored
-```
-
-### Three load modes
-
-- **Auto-match by stem** — strict; unassociated files ignored.
-- **Single-file mode** — minimal; only the video, user assigns everything else manually.
-- **Flexible (default)** — auto-associate by stem; on mismatch (e.g. Edger-style `bg_music_track3.mp3` alongside `scene.mp4`), prompt with channel dropdowns.
-
-### Upstream compatibility
-
-| Tool | Output | Fit |
-|---|---|---|
-| FunscriptForge | Full pack (funscripts + channel variants + pre-rendered audio) | ✅ direct |
-| ForgeAssembler | `{stem}.mp4` + `{stem}.funscript` + multi-axis + alpha/beta + prostate | ✅ direct |
-| ForgeGen | `{stem}.funscript` only (stroke from audio beats) | ✅ as main stroke |
+A scene is **ambiguous** — `SelectPicker` appears instead of auto-loading —
+when multiple video variants share the same `preference_tier`, multiple
+funscript sets exist (edit-variants), or multiple audio tracks exist with
+no single stem-matched default. First play always shows the picker for an
+ambiguous scene; every play after that replays the saved pin.
 
 ---
 
-## 10. Ultrawide crop
+## 12. Crop / fill
 
-When a video's aspect ratio is narrower than a target monitor's aspect (typically playing a 16:9 source on an ultrawide), vertical bands of the source get clipped to make the kept band match the monitor's aspect. The app computes the crop amount from aspect math; the user picks the **vertical anchor** position from five presets:
+There is no 5-preset (Middle / Top-mid / Top / Bottom-mid / Bottom) crop
+system with per-monitor visibility gating. The real model is **per-screen
+binary Crop + one global 3-way anchor**:
 
-| Preset | Top crop (4K source) | Bottom crop (4K source) | Anchor |
-|---|---|---|---|
-| Middle band | 520 | 520 | centered |
-| Top middle | 320 | 720 | upper-centered |
-| Top | 120 | 920 | near top |
-| Bottom middle | 720 | 320 | lower-centered |
-| Bottom | 920 | 120 | near bottom |
-
-All five presets yield the same kept-band height (1120 px from a 4K source, producing ~3.43:1 aspect). The user shifts the anchor to keep the important action in frame.
-
-For source aspects other than 16:9, the crop numbers scale proportionally but the named anchors remain.
-
-**"Fill the screen" priority:** when the aspect doesn't divide cleanly, tolerate small side bands rather than shrinking the image to fit.
-
-The crop only applies per-monitor — a 16:9 source plays full-frame on 4K monitors and cropped on the ultrawide, all from the same source file and the same decoder.
-
-**UI:** the crop preset row in the Live panel is only visible when an ultrawide monitor is registered as a wall slot. If all walls are 16:9, the row is hidden entirely.
+- Each playback screen has an independent **Crop** checkbox in Setup
+  (`fill_screen_indices`) — off (default) letterboxes/pillarboxes to
+  preserve the source aspect; on crop-fills via mpv `panscan=1.0`.
+- **Crop position** is one global radio — Top / Center (default) / Bottom
+  (`CropAlign`) — applied to every screen with Crop on. Top/Bottom offset
+  the kept region by mpv `video-align-y = ∓0.75` (not a full edge flush) so
+  a subject anchored high or low in frame isn't sliced at the very edge.
+- Crop and crop-position changes apply live to already-open players
+  (`SyncEngine.set_fill` / `set_crop_align`), not just at next launch.
 
 ---
 
-## 11. Auto-adapt on launch
+## 13. Chapters & markers
 
-On first launch (and every subsequent launch, in case the user's monitor setup changed):
+`<video_stem>.chapters.json` (`app/chapters.py`) carries two independent
+arrays:
 
-1. Enumerate all connected displays via Qt's `QScreen`
-2. Match each display against the saved wall/controller assignments in `preferences.json` by display-id
-3. For any display not previously assigned, prompt once: "Wall slot 1 / 2 / 3 / controller / ignored?"
-4. Apply per-monitor rendering mode:
-   - 4K → native 4K render
-   - 1080p → native 1080p render
-   - Ultrawide → 4K source with ultrawide crop filter applied
-5. Route audio per the saved routing config
+- `chapters: [{at_ms, name}, ...]` — structural, one per section. Drives
+  Prev/Next-chapter (both on the `ControlWindow` transport row and on each
+  `PlayerWindow`'s overlay control bar — both routed through the same
+  `_on_prev_chapter`/`_on_next_chapter` logic so they never disagree).
+  "Previous" restarts the current chapter if more than 2 seconds
+  (`_PREV_GRACE_MS`) into it, matching standard music-player convention.
+- `markers: [{id, at_ms, name}, ...]` — hand-placed FunscriptForge
+  navigation points, rendered as tick marks on the seek bar (not
+  chapter-driven, no Prev/Next button).
 
-No wizard, no setup flow — once the user has configured their setup once, first-run on a fresh boot should "just work."
-
----
-
-## 12. Touch UI principles
-
-The controller runs on a wired touchscreen in a dimly-lit video-wall environment. These rules come from that context and are baked into every UI decision:
-
-### Dark-only theme
-
-- No light-mode toggle; ship dark only
-- Background `#0e1117`, surface `#1a1d27`, borders `#2d3148`
-- Text `#fafafa`, muted `#9ba3c4`
-- Accent `#ff6b30` — deep orange, distinguishes from FunscriptForge's `#ff4b4b`
-
-### No reliance on scrollbars
-
-OS scrollbars are thin, dark, auto-hiding, and hostile to touch in low light. Never required for primary navigation.
-
-- Vertical scroll via touch drag is fine
-- Long lists pair vertical-scroll with chevron / swipe page-jumps
-
-### Explicit panel switching, gestural within-panel nav
-
-- Panel tab bar at top: tap only. No swipe cross-panel.
-- Within-panel: chevron + swipe do the same context-sensitive action.
-
-### Target sizes
-
-| Control | Minimum |
-|---|---|
-| Primary action (Play/Pause) | 120 × 120 px |
-| Secondary action (skip, chapter, tab) | 80 × 80 px |
-| Tertiary (chip, toggle) | 60 × 60 px |
-| Edge chevron column | 100 px wide |
-| Seek bar handle | 50 px tall drag target |
-
-On the Prechen (~155 PPI), an 80 px target = ~13 mm, comfortably above the 9 mm touch minimum.
+When no sidecar exists, chapter navigation falls back to whatever chapter
+metadata mpv parsed directly from the file's own container atoms
+(`SyncEngine.get_chapter_list`).
 
 ---
 
-## 13. Shipping pipeline
+## 14. Not yet built
 
-Mirrors the ForgeAssembler pattern. Only the app bundle differs in specifics due to the Qt / libmpv stack.
+Features this file (or its predecessor) described that do not exist in the
+current codebase — verified absent by grep, not just "not seen in the UI":
 
-### Repo
+- **Scene playlists.** No `~/.forgeplayer/playlists/<name>.json` storage,
+  no multi-select in Library, no "Add to playlist" action, no auto-advance
+  between scenes. Zero code hits beyond a stray planning comment in
+  `_on_launch` ("the playlist case") describing the scenario the crash fix
+  protects against, not a feature. Listed as deferred in `BETA_TODO.md`
+  ("Research / deferred (v1+)").
+- **Independent-slots toggle.** No Preferences field, no Setup UI, no code
+  path for running three unrelated videos simultaneously. The shipped
+  4-slot model (video / stim / mirror / mirror) always mirrors the same
+  media across the mirror slots.
+- **Serial/USB haptic devices** (T-Code over a serial port) and **7.1
+  audio-channel haptics** (shaker arrays via individual sound-card
+  channels) — both listed as deferred research in `BETA_TODO.md`. Shaker
+  support (a beat-driven track as another haptic channel) is the nearest
+  near-term step.
+- **`.tact` (bHaptics vest) integration**, **TCode mechanical source**,
+  **live-capture source** (WASAPI loopback / BlackHole → real-time
+  haptics), and a general pluggable-source registry.
+- **Network / LAN multi-machine sync**, and any phone/mobile client — no
+  WebSocket server, no mDNS discovery, no mobile companion app anywhere in
+  the codebase.
+- **Loop mode**, **keyboard shortcuts beyond Space/F11/Escape** (Left/Right
+  skip, chapter-key nav, Library arrow-key nav are open), **remembering
+  control-window size/position**, **applying an algorithm/offset change to
+  an already-launched scene without relaunching**, and a **Library
+  active-picks summary strip** above the grid.
+- **Timeline editor / loop regions**, **playback speed control**, **live
+  audio→haptics mode**.
 
-`liquid-releasing/forgeplayer` (already created on GitHub).
-
-**Open decision:** rename the local `ehaptics-studio-player/` folder to `forgeplayer/` and push as the initial commit, or keep the current folder name and rebrand the app-facing strings only. Recommended: full rename — consistency across app, repo, domain, and wordmark.
-
-### Release artifacts
-
-`liquid-releasing/forgeplayer-releases` (to be created). 3-platform bundles via the ForgeAssembler-pattern CI.
-
-### PyInstaller
-
-`ForgePlayer.spec` — modelled on `ForgeAssembler.spec` but with:
-
-- **PySide6 + Qt plugins** collection hooks (replaces streamlit data)
-- **libmpv** DLL / dylib / so bundling per platform (Windows `mpv-2.dll` next to exe; macOS `libmpv.dylib` in app bundle Resources; Linux `libmpv.so` in dist folder)
-- **No streamlit, no imageio-ffmpeg** — Qt handles everything
-
-### CI — `.github/workflows/release.yml`
-
-Three-platform matrix (`windows-latest`, `macos-latest`, `ubuntu-latest`), same `softprops/action-gh-release` pattern, classic PAT via `RELEASES_PAT` secret on the repo. Each platform also needs to fetch libmpv:
-
-- Windows: download mpv-2.dll from mpv.io release archive
-- macOS: `brew install mpv` then pack `libmpv.dylib`
-- Linux: `apt-get install libmpv-dev`
-
-### Landing site
-
-`liquid-releasing/forgeplayer-web` at **forgeplayer.app** (domain registered 2026-04-21 on Cloudflare). Copy the `forgeassembler-web` template:
-
-- Cloudflare Workers Assets deploy (`wrangler.toml` + `.assetsignore`)
-- Single `index.html` with hero, features, download buttons, cross-link panels to FunscriptForge / ForgeAssembler / ForgeYT
-- `latest-version.json` for version-badge auto-update via `repository_dispatch` from the release workflow
-
-### Docs
-
-MkDocs Material under `docs/`, same as ForgeAssembler. Pages:
-
-- Getting Started (download, launch, auto-detect flow, first play)
-- Live operator console walkthrough
-- Setup panel (monitors, audio, library, preferences)
-- Library panel
-- Presets & folder conventions
-- Ultrawide crop explained
-- Troubleshooting
-
-Deploys to `liquid-releasing.github.io/forgeplayer/` via the same `docs.yml` workflow pattern.
+See `BETA_TODO.md` for the fuller, actively-maintained punch list (quality
+gates, alpha-polish bugs, missing features, deferred research) — this
+section only covers the items the original SPEC specifically claimed as
+in-scope that turned out not to be built.
 
 ---
 
-## 14. Alpha phasing — v0.0.1 and v0.0.2 scope gates
+## 15. Status — what's shipped vs. what's gating beta
 
-Alpha ships in two stages. Each stage has its own shipping criterion. Everything in 0.0.2 is validated against a 0.0.1 user who has upgraded their rig.
+Reconciled against v0.0.15 (`BETA_TODO.md`, 2026-08-20). Already shipped
+since the last time this spec was accurate: Haptic 2 dispatch, Prev/Next
+chapter buttons (console + per-player overlay), seek-bar markers,
+Calibrate, mkdocs docs, PyInstaller packaging, in-app auto-update check,
+third-monitor support, async library/folder scanning (no more UI freeze on
+a slow/attached drive), and the crash-hardening work in `_on_launch`
+(player/mpv reuse across a scene switch + NVIDIA GPU routing on
+hybrid-graphics laptops — see `ARCHITECTURE.md`).
 
-### v0.0.1-alpha — "baseline works great"
+Nothing currently blocks shipping v0.0.15 itself (it's published). Beta
+quality gates, in priority order, per `BETA_TODO.md`:
 
-**Shipping criterion:** a user with a laptop + 1 external monitor + 1 USB audio dongle can load a FunscriptForge / ForgeAssembler pack folder, play it fullscreen on their external, hear audio on their dongle, scrub the seek bar smoothly, jump chapters, and find the result **noticeably better** than their current VLC / WMP-wrapped workflow.
-
-**Explicitly IN for 0.0.1:**
-
-- ✅ Single-decoder architecture with one render context (laptop = controller, 1 external = wall)
-- ✅ `QOpenGLWidget` + `MpvRenderContext` against a shared `mpv_handle` (foundation for 0.0.2 multi-render)
-- ✅ **Quality defaults** — `mpv-defaults.conf` with gpu-next, ewa_lanczossharp, HDR pass-through, display-resample (see Section 3)
-- ✅ Auto-detect monitors; "laptop internal = controller, smallest / touch-capable / explicit assignment" resolution
-- ✅ Mouse-or-touch operator console — same code path, degrades from Prechen touch to laptop trackpad
-- ✅ Three-panel architecture (Live / Setup / Library)
-- ✅ JSON presets (global + per-video override)
-- ✅ Folder-load conventions (Auto / Single-file / Flexible, default Flexible) — canonical `{stem}.{suffix}.funscript` pack
-- ✅ Multi-destination audio: OS default + 1 USB dongle validated (schema supports more)
-- ✅ Friendly audio-device labels, keyed by stable OS device ID
-- ✅ Per-destination audio delay (ms) for latency compensation (Bluetooth, HDMI pipeline) — exposed as an "Advanced" subsection in Setup → Audio routing, default 0 ms, mapped to libmpv's `audio-delay` property
-- ✅ Library with search, filters, thumbnails, virtualized grid
-- ✅ **Scene playlists** — ordered lists of whole scenes, built via Library multi-select, stored as JSON per playlist
-- ✅ Chapter markers on seek bar + chevron jump
-- ✅ Rebrand from "eHaptic Studio Player" to "ForgePlayer"
-- ✅ PyInstaller bundles for Windows / macOS / Linux (Ubuntu 24.04 LTS reference)
-- ✅ 3-platform CI + release automation to `forgeplayer-releases`
-- ✅ Landing site at forgeplayer.app
-- ✅ MkDocs docs — includes `docs/quality.md` and `docs/hdr-content.md`
-
-### v0.0.2-alpha — "ultrawide + scale-up"
-
-**Shipping criterion:** a 0.0.1 user who plugs in an ultrawide monitor (or a user with the full 3-wall rig) gets proper per-monitor crop, multi-wall same-video-mirrored playback with frame-perfect sync, and can plug in the Prechen touchscreen as the controller.
-
-**Explicitly IN for 0.0.2:**
-
-- ✅ Ultrawide monitor support (second external display)
-- ✅ Per-monitor crop via GL UV fragment shader — 5 vertical-anchor presets
-- ✅ 2-3 wall same-video-mirrored architecture (N=2 and N=3 render contexts on the shared `mpv_handle`)
-- ✅ Independent-slots mode (secondary toggle, carries forward from v0.1 prototype)
-- ✅ Prechen 12.3" 1920×720 touchscreen as dedicated controller (touch event plumbing)
-- ✅ Multi-destination audio validated up to 3 dongles
-- ✅ Any 0.0.1 gaps surfaced during user testing
-- ✅ Any features cut from 0.0.1 that turned out to be essential
-
-### Explicitly OUT (Phase 2+)
-
-- ❌ **Funscript → audio conversion (restim-style playback)** — Phase 2
-- ❌ **Moments playlists** (timestamp ranges across scenes) — Phase 2; needs favorites data model first
-- ❌ **Timestamp favorites** (⚑ Mark during playback, `{stem}.favorites.json`) — Phase 2; foundational for moments playlists
-- ❌ **Transport state machine** (which buttons are active during load / buffering / seeking / ended states) — Phase 2; alpha uses naive "always enabled" behavior
-- ❌ **bhaptics `.tact` integration** — Phase 3
-- ❌ **Theme system** (Forge industrial, Neon, light modes — see `ui_design/` for prior visual language work) — Phase 3; alpha is dark-only
-- ❌ **Real-time audio → haptics (live mode / bREadbeats-style)** — Phase 5
-- ❌ **Bluetooth audio** — Phase 2 (latency + presence flakiness)
-- ❌ **Fan-out routing** (one source → many devices) — Phase 2; schema supports it from alpha, impl doesn't
-- ❌ **Drive hot-plug detection** — Phase 2; alpha ships manual rescan button
-- ❌ **Playback speed control** — Phase 2; needs design work on funscript time-scaling
-- ❌ **7.1 channel audio routing** — Phase 3
-- ❌ **Network / LAN multi-machine sync** — no ETA
-- ❌ **Timeline editor / loop regions** — no ETA
+1. Code-sign the Windows installer (currently unsigned — SmartScreen friction).
+2. Verify no audible clicks across scene/chapter auto-advance boundaries.
+3. Hardware feel-test the actual release artifact on real haptic dongles.
+4. Confirm the "D29 audio-only ship-blocker" is resolved against the current build.
+5. Residual ~7% audible click rate (device-level analog transient, hold-on-fail).
+6. Intermittent white-screen-after-double-click (not reproduced recently).
 
 ---
 
-## 15. Open questions
+## 16. Shipping pipeline
 
-1. **Chapter jump wrap** — at the first or last chapter, wrap around or hit a wall? (Suggestion: wall, with button dimmed.)
-2. **Preferences file location on macOS / Linux** — `~/.forgeplayer/preferences.json` on all three, or follow XDG Base Directory on Linux (`$XDG_CONFIG_HOME/forgeplayer/`)? Suggestion: simple dot-folder on all three for consistency with FunscriptForge / ForgeAssembler.
-3. **Scene playlist crossover** — when a scene in a playlist ends, should transport auto-advance to the next scene, or pause and require an explicit `▶` tap? (Suggestion: auto-advance, with a Preferences toggle to override.)
+Mirrors the ForgeAssembler pattern; PyInstaller for the app bundle.
+
+- **Repo:** `liquid-releasing/forgeplayer`.
+- **Release artifacts:** `liquid-releasing/forgeplayer-releases`, via a
+  cross-platform CI matrix (`.github/workflows/release.yml`).
+- **PyInstaller spec:** `ForgePlayer.spec` — PySide6/Qt plugin collection
+  hooks, `libmpv` bundled per platform (Windows `mpv-2.dll` next to the
+  exe; macOS `libmpv.dylib`; Linux `libmpv.so`).
+- **Landing site:** `forgeplayer.app` (`liquid-releasing/forgeplayer-web`) —
+  publishes `latest-version.json` at its root, which is exactly what
+  `app/update_check.py` polls; the site's own CI keeps that file in sync
+  with GitHub Releases so the in-app "update available" notice can never
+  claim a version the site itself doesn't.
+- **Docs:** MkDocs Material under `docs/` (`mkdocs.yml`), deployed via
+  `.github/workflows/docs.yml`. `docs/architecture/` is dev-facing and
+  excluded from the published site; `docs/getting-started.md` and
+  `docs/user-guide/` are the user-facing docs.
+
+---
+
+## 17. Open questions
+
+1. **Chapter jump wrap** — at the first or last chapter, wrap around or hit
+   a wall? Currently a wall (buttons stay enabled but a boundary chapter
+   simply doesn't move further); no explicit design decision recorded.
+2. **Preferences/pin file location on macOS/Linux** — currently
+   `~/.forgeplayer/` on all platforms (no XDG Base Directory handling on
+   Linux). Not yet tested on a real macOS/Linux box.
+3. **Algorithm/offset hot-apply** — Setup's device/monitor pickers already
+   re-route a live scene immediately; Preferences' synth algorithm and
+   haptic offset don't. Worth unifying once the Setup/Preferences split
+   settles further (see §14, "applying an algorithm/offset change to an
+   already-launched scene without relaunching").
+4. **Scene-boundary click verification** — BETA_TODO's #2 gate. The
+   within-scene audio-quality work is done; multi-scene/auto-advance
+   boundary behavior doesn't exist yet to test against (see §14, scene
+   playlists) — this gate is really "when playlists land, verify this,"
+   not an open item against today's single-scene playback.
 
 ---
 

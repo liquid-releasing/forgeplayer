@@ -6,12 +6,18 @@ timing offset.
 
 ## Content preference
 
-- **Sound files (.wav / .mp3)** — default. Pre-rendered stim audio
-  wins when available. No synth pops, no algorithm choice. Most
-  stereo-stim scenes ship a sound file.
-- **Funscripts (live synth)** — synthesizes from the funscript in
-  real time. Lets you pick the synthesis algorithm (continuous /
-  pulse-based) and adjust haptic offset live.
+- **Funscripts (live synth)** — default. Synthesizes from the
+  funscript in real time. Lets you pick the synthesis algorithm
+  (continuous / pulse-based) and adjust haptic offset live. The
+  funscript is the authored intent, and live synthesis now plays
+  just as cleanly as a pre-rendered file — the DirectSound-default
+  fix (v0.0.6) ended the USB-DAC pops/clicks that used to make
+  pre-rendered sound the safer pick.
+- **Sound files (.wav / .mp3)** — pre-rendered stim audio, used
+  instead of synthesizing live. No algorithm choice — whatever the
+  file was rendered with. Pick this if you have older 312/2B-era
+  hardware, or a scene that only ships a stim audio file and no
+  funscript.
 
 Either preference falls back across forms at Haptic 1 (silent stim
 is worse than wrong-form). Haptic 2 only ever plays prostate-specific

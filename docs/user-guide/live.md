@@ -33,10 +33,25 @@ it's the other. Volume is per-session (resets to 100 % every scene).
 
 ## Transport
 
-`−30 s · −10 s · −5 s · ▶ Play / ⏸ Pause · +5 s · +10 s · +30 s · ■ Stop`
+`⏮ Prev · −30 s · −10 s · −5 s · ▶ Play / ⏸ Pause · ■ Stop · +5 s · +10 s · +30 s · Next ⏭`
+
+**Prev** and **Next** jump to the previous/next chapter boundary — they
+frame the skip buttons on either end of the row. Both are disabled
+(greyed out) until a `<stem>.chapters.json` sidecar is found for the
+loaded scene; if the scene has no chapters, they stay off.
 
 Plus **Calibrate H1**, **Calibrate H2** (when devices set), and a
 **5 s ramp** checkbox that affects the calibration ramp-up.
+
+### Chapter nav on the video window too
+
+Each on-screen player window has its **own** Prev/Next chapter
+buttons, flanking Play/Pause directly on the video's own overlay bar
+— useful if you're driving playback from the video window and the
+console isn't in view. The overlay is hidden by default; **click the
+video once** to reveal it (click again to hide). Same
+chapters.json gate as the console buttons: both button sets stay in
+sync on whether the active scene has chapters.
 
 ## Seek behavior
 

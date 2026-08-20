@@ -150,37 +150,41 @@ clean. That fingerprint matches shared-mode mixer contention. Stim
 exclusive mode takes the engine out of the loop for the dongle
 paths.
 
-### Why "sound" is the default preference
+### Why "funscript" is the default preference
 
-Pre-rendered `.wav` files produce cleaner output than the live synth
-under the conditions our users actually hit:
+Through v0.0.5, pre-rendered `.wav` files really were the cleaner
+choice: stim streams opened over WASAPI, and WASAPI doesn't release
+some USB DACs cleanly on close — every reopen raised sounddevice
+`-9996`/`-9999` for the life of the process, and the botched
+release/reopen cycle produced the audible pops we chased for days.
+The live synth path recomputes modulation per-buffer, so it re-hit
+that failure mode on every seek; a flat PCM file happened to touch
+the device less often and got away with it more. That was the
+original case for defaulting to Sound.
 
-- **Seek behavior.** mpv / PortAudio's decoder-side resync logic is
-  decades old and well-tuned for seek-without-clicks. The synth path
-  recomputes modulation per-buffer; when a seek lands inside a fade
-  window, the alpha/beta values that drive the carrier flip
-  discontinuously. v0.0.2 dogfood measured a residual ~7% audible click
-  rate on synth playback ([`BACKLOG.md`](../../BACKLOG.md) v0.0.3
-  polish item). Files don't have that math at runtime — they're already
-  flat PCM samples.
-- **Pre-render quality.** A `<stem>.prostate.wav` only exists because
-  someone deliberately rendered it. They could tune the algorithm,
-  smooth the edges, and audition the result before shipping. A
-  funscript played live gives us no opportunity to do that.
-- **Tunability tradeoff.** The synth path lets users switch algorithm
-  (continuous ↔ pulse) and adjust offset live. Files freeze those
-  decisions at render time. We accept the tradeoff because the rare
-  scene that ships both forms presumably had its WAV rendered with the
-  right algorithm choice for the content.
+**v0.0.6 fixed the actual bug** instead of routing around it: on
+Windows, stim streams (primary + aux) now default to the device's
+**DirectSound** host API rather than WASAPI (see
+[`app/stim_audio_output.py`](../../app/stim_audio_output.py)).
+DirectSound releases the device cleanly on close — the 2026-06-17
+dogfood gauntlet (launch/play/close/relaunch/calibrate/ramp/seek,
+repeatedly) couldn't reproduce the pops or the `-9996`/`-9999` errors
+afterward. That removed the reason pre-rendered sound used to be the
+safer pick.
 
-The practical impact of this priority is small: pre-rendered prostate
-WAVs are uncommon in the wild, and most scenes end up at tier 2
-(funscript synth) regardless. But for the subset of scenes that do
-ship a WAV, the user gets the cleaner playback path automatically.
+With the pop source gone, **funscript (live synth) is the default**:
+the funscript is the authored intent — it's what the scene was
+actually built from — and it now plays exactly as cleanly as a
+pre-rendered file, while also giving the user the algorithm choice
+(continuous ↔ pulse) and live haptic-offset adjustment a flat WAV
+can't offer.
 
-The bigger leverage is **fixing the synth's pop behavior itself** —
-that's the BACKLOG v0.0.3 item, and it benefits every alpha-only scene
-(the common case) plus the mirror-H1 tier.
+Sound isn't going away, though — a `<stem>.prostate.wav` still lets
+someone tune the render and audition the result before shipping, and
+it's the only option for scenes that ship a stim `.mp3` with no
+funscript, or for users on older 312/2B-era hardware who'd rather
+keep that workflow. It's just no longer the safer default for
+pop-avoidance, which was the entire reason it used to lead.
 
 ### Extending to new destinations
 

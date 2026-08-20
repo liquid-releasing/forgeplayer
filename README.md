@@ -4,7 +4,9 @@
 
 One seek bar. Every screen. Every device. All in sync.
 
-Play a video on your 4K monitor, companion view on your phone, estim audio to your device, haptics to whatever you have — all from the same timeline. Mark a favorite moment with one tap. Loop it. Share it. No mouse required once you're watching.
+Play a video across your monitors and drive e-stim from the **same
+timeline and seek bar** — video and haptics stay in sync through every
+play, pause, seek, and skip. No mouse required once you're watching.
 
 ### ▶ Download & try it at [forgeplayer.app](https://forgeplayer.app) · [Discord](https://discord.gg/MHucAwwRc) · [Docs](https://liquid-releasing.github.io/forgeplayer/)
 
@@ -12,8 +14,8 @@ Play a video on your 4K monitor, companion view on your phone, estim audio to yo
 
 ## Links
 
-- **Download / try it:** [forgeplayer.app](https://forgeplayer.app) — Windows
-  installer + portable builds.
+- **Download / try it:** [forgeplayer.app](https://forgeplayer.app) —
+  Windows / macOS / Linux builds.
 - **User docs:** [getting started](https://liquid-releasing.github.io/forgeplayer/getting-started/)
   · [user guide](https://liquid-releasing.github.io/forgeplayer/user-guide/)
   · [docs home](https://liquid-releasing.github.io/forgeplayer/)
@@ -24,22 +26,22 @@ Play a video on your 4K monitor, companion view on your phone, estim audio to yo
 
 ## Status
 
-**v0.0.5 released — 2026-06-17 (beta).** Download the
-[Windows installer or portable builds](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest)
-from `forgeplayer-releases` (or via [forgeplayer.app](https://forgeplayer.app)).
-Windows is the tested platform; macOS / Linux builds are unproven, and Bluetooth
-devices are not yet tested.
+**v0.0.15 — alpha.** Windows is the most-tested platform; macOS and
+Linux builds ship from the same CI pipeline but are less battle-tested,
+and Bluetooth audio devices are untested on any platform (use wired /
+USB). Not code-signed yet, so Windows SmartScreen and macOS Gatekeeper
+both need a one-time "trust this anyway" click — see
+[docs/getting-started.md](./docs/getting-started.md).
 
-Working: synchronized multi-screen video, dual-port stim with
-frame-perfect mirror or per-port prostate routing, content preference
-(sound files vs live funscript synth), seek-aware pop mitigation, scene
-library with pinned variant picks, debug instrumentation streamed to
-JSONL. WASAPI exclusive mode used for stim streams on Windows to
-sidestep shared-mixer contention. See [SPEC.md](./SPEC.md) for the
-full v0.0.1-alpha design,
-[docs/getting-started.md](./docs/getting-started.md) for first-time
-setup, and [docs/user-guide/](./docs/user-guide/index.md) for the full
-feature reference.
+Working today: synchronized multi-monitor video, dual-port stim
+(Haptic 1 / Haptic 2) with either pre-rendered stim audio or live
+funscript synthesis, `.forge` bundle import (double-click and play),
+scene-folder library scanning with a variant picker, chapter
+navigation with seek-bar markers, hardware calibration, and an in-app
+update check against forgeplayer.app. See [SPEC.md](./SPEC.md) for the
+full alpha design spec, [BETA_TODO.md](./BETA_TODO.md) for what's left
+before a beta label, and [docs/getting-started.md](./docs/getting-started.md)
+for first-time setup.
 
 ---
 
@@ -85,84 +87,90 @@ ForgePlayer.app is the hub. It plays everything. It routes everything. It stays 
 ## What It Does
 
 ```
-Video           → any monitor, AI upscaled to match display resolution
-Estim audio     → dedicated audio port (restim embedded, two instances)
-Haptics         → serial / USB / audio-channel routing
-Phone           → companion view + touch remote (seek, skip, favorite, loop)
+Video     → any monitor, up to two synced mirror outputs, GPU decode
+Estim     → dedicated USB audio port(s), Haptic 1 + Haptic 2, live synth or pre-rendered audio
+Chapters  → Prev/Next transport + seek-bar markers, on the console and each player window
 ```
 
 All driven by the same pack. All synced to the same timestamp.
+
+Video plays through **one mpv instance per output** (primary + up to two
+mirrors), each locked to the same media clock so seeks land in
+sub-frame sync across every monitor. Chapter navigation and markers
+come from an optional `<video_stem>.chapters.json` sidecar — the kind
+FunscriptForge produces — and appear both as tick marks on the seek
+bar and as Prev/Next buttons on the control window and on every player
+window's own overlay.
 
 ---
 
 ## The Pack
 
-Everything for one scene lives in one folder:
+A **pack** is one scene's playable content: the video plus the haptic
+tracks that drive your devices. It comes in two shapes.
+
+**A `.forge` bundle** — a single file exported from FunscriptForge.
+Double-click it (after installing) and it plays — no Library scan
+needed.
+
+**A scene folder** — loose files that share the video's name:
 
 ```
 my-scene/
-  my-scene.mp4
-  my-scene.funscript
-  my-scene.alpha.funscript
-  my-scene.beta.funscript
-  my-scene.pulse_frequency.funscript
-  my-scene.alpha-prostate.funscript
-  my-scene.beta-prostate.funscript
-  my-scene.estim.mp3                  <- pre-rendered estim audio (optional)
-  my-scene.favorites.json             <- your marked moments
-  my-scene.forgeplayer.json           <- per-video preset (crop, routing overrides)
+  my-scene.mp4                                    <- main video
+  my-scene[E-Stim _Popper Edit].mp3               <- pre-rendered stim audio (optional)
+  my-scene.funscript                              <- main funscript (1D position track)
+  my-scene.alpha-prostate.funscript               <- prostate channel for Haptic 2 (optional)
+  my-scene.prostate.wav                           <- pre-rendered prostate audio (optional)
+  my-scene.chapters.json                          <- chapter sidecar (optional)
 ```
 
-Drop the folder. Everything loads. Press play.
-
----
-
-## Timestamps — A First-Class Feature
-
-While playing, tap once to mark a favorite. Start and end. No stopping. No menus.
-
-```json
-{
-  "favorites": [
-    { "label": "opening", "start": 42.1, "end": 67.4 },
-    { "label": "peak",    "start": 183.0, "end": 210.5 }
-  ]
-}
-```
-
-- **Loop a favorite** — tap it. All devices loop that section.
-- **Build a playlist** — chain favorites across multiple scenes.
-- **Share timestamps** — `.favorites.json` travels with the pack.
-- **Feed back to Forge** — favorites become phrase suggestions in FunscriptForge.
-
----
-
-## Multi-Screen Setup
-
-Each output is optimized for its display:
-
-```
-4K monitor      - main view, upscaled
-Ultrawide       - panoramic / immersive (auto-crop from 4K source)
-Phone           - 1080p companion + touch remote
-Touchscreen     - 1920×720 wired operator console (alpha)
-VR headset      - stereoscopic 3D (ForgePlayer VR — separate future product)
-```
+Drop the folder anywhere readable. ForgePlayer scans it on the next
+Library refresh, shows one tile per scene, and offers a picker when a
+scene has more than one funscript set, video variant, or stim-audio
+file to choose from. Picks are remembered per scene.
 
 ---
 
 ## Estim Routing
 
-Two restim instances. Same timeline. Different audio ports.
+Two independent stim paths, one per haptic role, both driven from the
+same media clock:
 
-- **Instance 1**: alpha / beta / pulse_frequency pack → audio port A
-- **Instance 2**: prostate pack → audio port B
+- **Haptic 1** — main stim.
+- **Haptic 2** — optional prostate channel; mirrors Haptic 1 when a
+  scene doesn't ship a dedicated prostate source.
 
-User maps which pack goes to which port. restim handles the audio generation including 17 built-in movement patterns, dual vibration oscillators, A/B test mode, map-to-edge transform, and much more.
+Each scene can drive stim two ways, and you choose which one ForgePlayer
+prefers in **Preferences**:
+
+- **Live funscript synthesis** — real-time audio synthesis from the
+  funscript using ForgePlayer's vendored copy of restim's `stim_math`
+  waveform engine (continuous mode for classic 312/2B-era boxes,
+  pulse-based mode for modern stereostim / FOC-stim content).
+- **Pre-rendered stim audio** (`.wav` / `.mp3`) — plays the file
+  directly through mpv when a scene ships one, avoiding any synth
+  artifacts.
+
+When the preferred form isn't available for a scene, ForgePlayer falls
+back to the other one rather than going silent. WASAPI exclusive mode
+is used for stim streams on Windows to sidestep shared-mixer
+contention, falling back to shared mode if exclusive open fails.
 
 Powered by diglet48/restim: https://github.com/diglet48/restim
 
-Alpha ships wired USB dongles + OS default for audio; full restim integration lands in Phase 2.
+---
+
+## HDR video
+
+HDR10 files play, but HDR **passthrough** is disabled in v0.0.15 —
+mpv's HDR renderer (`gpu-next`) crashed on teardown, so this build uses
+the stable `gpu` renderer, which tone-maps HDR down to SDR instead of
+passing it through. On a display with Windows/macOS HDR turned **on**
+this can look over-bright; turn HDR off for the playback monitor until
+passthrough returns. See [docs/hdr-content.md](./docs/hdr-content.md)
+and [docs/quality.md](./docs/quality.md) for the full story and how to
+produce HDR10 content that's ready once passthrough is back.
 
 ---
 
@@ -187,11 +195,14 @@ Sibling repositories:
 - **mpv** (https://mpv.io) — frame-accurate, cross-platform media engine
 - **python-mpv** (https://github.com/jaseg/python-mpv) — Python bindings to libmpv
 - **PySide6** (https://wiki.qt.io/Qt_for_Python) — Qt6 UI framework (native, touch-capable)
-- **diglet48/restim** (https://github.com/diglet48/restim) — estim audio generation engine (Phase 2 integration)
+- **diglet48/restim's `stim_math`** (https://github.com/diglet48/restim) — vendored estim
+  waveform synthesis engine, driving the live funscript-synth path
 
 ---
 
 ## Development requirements
+
+Requires Python 3.11+ (3.12 / 3.13 fine) and libmpv.
 
 ```bash
 pip install -r requirements.txt
@@ -217,71 +228,32 @@ equivalent for your distro.
 python main.py
 ```
 
-The v0.1 prototype UI (three slots, per-monitor assignment) launches.
-The v0.0.1-alpha rewrite will land incrementally on feature branches —
-see [BACKLOG.md](./BACKLOG.md) and [SPEC.md](./SPEC.md) for the plan.
+Opens the control window with five tabs — **Library**, **Live**,
+**Setup**, **Preferences**, **About** — the same build that ships in
+the packaged releases. See [SPEC.md](./SPEC.md) for the design spec
+and [BACKLOG.md](./BACKLOG.md) for the feature backlog across phases.
 
 ---
 
 ## Repository layout
 
-- [`SPEC.md`](./SPEC.md) — v0.0.1-alpha design specification
+- [`SPEC.md`](./SPEC.md) — alpha design specification
 - [`BACKLOG.md`](./BACKLOG.md) — feature backlog across phases
+- [`BETA_TODO.md`](./BETA_TODO.md) — the near-term punch list to a beta label
 - `main.py` — entry point
-- `app/` — UI, sync engine, session management (v0.1 prototype)
+- `app/` — UI, sync engine, stim synthesis, library scanning, chapters
+- `docs/` — mkdocs user + architecture documentation
 - `branding/` — logo candidates, cropped assets
 - `requirements.txt` — runtime Python dependencies
 
 ---
 
-## Current State (v0.0.4 — preparing alpha)
+## What's next
 
-Working today:
-- **Library** — scene browser with thumbnail tiles, pinned variant picks
-  (per-scene radio-button picker for funscript set, video variant, stim
-  audio file, subtitles), single-click to activate.
-- **Synchronized multi-screen playback** — primary video + up to two
-  mirror outputs on separate monitors via three independent libmpv
-  instances. Unified seek bar drives all in sub-frame sync.
-- **Dual-port stim with frame-perfect mirror** — Haptic 1 (main stim
-  port) + Haptic 2 (prostate port) on independent USB DACs, both
-  driven from the same media clock. H2 plays a prostate-specific
-  source (`.prostate.wav` or `alpha-prostate` funscript) when present,
-  else mirrors H1.
-- **Content preference** — Setup → "Sound files" or "Funscripts"
-  routes the H1 dispatch and the H2 prostate detection. Stim mp3
-  files (`<stem>[edit].mp3`) play through mpv on the H1 device when
-  sound is preferred; funscripts drive a vendored restim threephase
-  synth otherwise. See
-  [`docs/architecture/audio-routing.md`](./docs/architecture/audio-routing.md).
-- **Seek-aware pop mitigation** — pre-seek 500 ms ramp-down → mpv seek
-  → 200 ms settle hold → 500 ms ramp-up. Smoother frozen on stop to
-  prevent close-pop. Multi-block envelope ramp tracking.
-- **WASAPI exclusive mode** for stim streams — bypasses Windows
-  shared-mode mixer; falls back to shared mode if exclusive open
-  fails.
-- **Calibrate H1 / H2** — pre-flight hardware check with optional 5 s
-  ramp-up.
-- **Transport** — play/pause, ±5 s / ±10 s / ±30 s skip, scrubbable
-  timeline with time / duration labels above.
-- **Scene volume slider** — per-session volume for the scene audio
-  track (separate from stim).
-- **Debug instrumentation** — toggle in top bar streams every event
-  to `~/.forgeplayer/debug-stream-<timestamp>.jsonl`. ⚑ Mark button
-  records a timestamped flag for "I heard / felt / saw something
-  weird here" during dogfood.
-- **Session save/restore** scaffolding.
-
-Coming next:
-- About page in-app
-- Library setup-summary strip + arrow-key navigation
-- Prev/Next chapter transport buttons
-- Empty-state hint on Live tab
-- Single-decoder / multi-render-surface for true same-video walls
-  (currently three independent decoders synced via mpv time-pos)
-- Phone companion view + touch remote
-- Timestamps / favorites
-- bhaptics `.tact` integration
+Not a roadmap baked into this file — it changes too often. See
+[BETA_TODO.md](./BETA_TODO.md) for the live punch list toward a beta
+label (code-signing, boundary-transition testing, hardware feel-tests)
+and [BACKLOG.md](./BACKLOG.md) for the longer-horizon phase roadmap.
 
 ---
 
@@ -297,9 +269,9 @@ people below already did the hard part:
   device sync" became table stakes, CHPlayer shipped it. Anyone building
   a player today is, knowingly or not, completing patterns puste1 set.
 - **diglet48** (https://github.com/diglet48) — restim (https://github.com/diglet48/restim):
-  years of estim signal processing, electrode math, pulse algorithms,
-  17 movement patterns, sensor integration. An extraordinary body of
-  work and the math layer ForgePlayer renders through.
+  years of estim signal processing, electrode math, and pulse algorithms.
+  An extraordinary body of work — ForgePlayer's live-synth path is built
+  on a vendored copy of its `stim_math` engine.
 - **edger477** (https://github.com/edger477) — funscript-tools: the
   1D→2D funscript conversion pipeline and the channel taxonomy that
   modern packs are authored against.

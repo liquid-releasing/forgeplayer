@@ -1,14 +1,18 @@
 # ForgePlayer — Beta Punch List
 
-Reconciled against **v0.0.12** (2026-07-11). The curated, prioritized road to a
+Reconciled against **v0.0.15** (2026-08-20). The curated, prioritized road to a
 confident **beta** label. `BACKLOG.md` is the long-horizon idea pool (phase
 roadmap); this file is what's actually left near-term, folding in the still-open
 backlog items.
 
-Nothing below blocks shipping v0.0.12 (it's published). The gates are what a
+Nothing below blocks shipping v0.0.15 (it's published). The gates are what a
 first-time beta tester actually feels. Already shipped since the old backlog:
-Haptic 2 dispatch, Prev/Next chapter buttons, seek-bar markers, Calibrate,
-mkdocs docs, PyInstaller packaging.
+Haptic 2 dispatch, Prev/Next chapter buttons (console + per-player overlay),
+seek-bar markers, Calibrate, mkdocs docs, PyInstaller packaging, in-app
+auto-update check, third-monitor support, async library/folder scanning
+(no more UI freeze on a slow/attached drive), and the crash-hardening work
+in `_on_launch` (player/mpv reuse across a scene switch + NVIDIA GPU
+routing on hybrid-graphics laptops).
 
 ---
 
@@ -53,13 +57,18 @@ mkdocs docs, PyInstaller packaging.
       device routing. First step toward body-shaker / 7.1 audio-channel haptics.
 - [x] **In-app About page** — version, credits, and upstream attribution
       (mpv, restim, funscript-tools), links to docs. **Shipped: About tab.**
-- [ ] **Auto-update check** — point at forgeplayer-releases / a release feed.
+- [x] **Auto-update check** — point at forgeplayer-releases / a release feed.
+      **Shipped: checks forgeplayer.app/latest-version.json on startup +
+      manual "Check for updates" on the About tab (2026-08-20).**
 - [ ] **Apply algorithm / haptic-offset change without relaunch** — both are
       captured at launch today. (Natural fit with the Settings/Preferences tab
       split.)
 - [ ] **Loop mode** — loop a single file or all slots.
 - [ ] **Keyboard shortcuts** — Space = play/pause, Left/Right = skip ±5 s,
-      arrow-key Prev/Next chapter, and arrow-key navigation across Library tiles.
+      arrow-key Prev/Next chapter, and arrow-key navigation across Library
+      tiles. **Partially shipped**: Space (play/pause), F11 (fullscreen), and
+      Escape (close) already work on the player window. Left/Right skip,
+      chapter-key nav, and Library arrow-key nav are still open.
 - [ ] **Remember control-window size / position** between sessions.
 - [ ] **Per-player window title bar showing filename** — the control window has
       a now-playing header (v0.0.11); the individual player windows still don't
@@ -68,8 +77,9 @@ mkdocs docs, PyInstaller packaging.
       video variant / stim audio) — only visible inside the picker today.
 - [ ] **Script libraries** — load scripts that aren't sitting next to the video
       file.
-- [ ] **Third monitor** — the v0.0.1 spec calls for up to three synced outputs;
-      today's build supports two.
+- [x] **Third monitor** — the v0.0.1 spec calls for up to three synced outputs.
+      **Shipped**: a third mirror slot ("Video 3") is available once a third
+      playback screen is configured.
 - [ ] **Main-funscript heatmap** (range + heat visualization).
 - [ ] **Full `event.yml` integration** in playback — only the bundle importer
       reads events now; nothing surfaces them in the player.

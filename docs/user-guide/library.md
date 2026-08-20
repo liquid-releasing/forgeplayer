@@ -115,6 +115,13 @@ scene. New picks overwrite the pin.
 If you add or remove files in a scene folder while ForgePlayer is
 running, click **Refresh** to re-scan.
 
+Scanning runs on a background thread, so it never freezes the app —
+important for a root on a slow, removable, or network drive, which can
+take a while to even list. While a scan is in flight, the scene count
+shows **"Scanning…"** and the **📁 Root…** / **⟳ Rescan** buttons
+disable (so a second click can't queue a redundant scan on top of it);
+both re-enable and the grid updates once the scan completes.
+
 ---
 
 ## Opening a `.forge` bundle

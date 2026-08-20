@@ -118,16 +118,16 @@ USB** outputs; Bluetooth audio is untested.
 
 ### 2. Choose a content preference (Preferences tab)
 
-- **Sound files (.wav / .mp3)** — default, recommended. ForgePlayer
-  plays pre-rendered stim audio when a scene ships one. No live
-  synthesis. This is the cleanest path.
-- **Funscripts (live synth)** — synthesizes stim from the funscript in
-  real time (vendored restim threephase). Pick this only if your
-  scenes ship funscripts but no stim audio file, or if you want the
-  algorithm-tunable path.
+- **Funscripts (live synth)** — default. Synthesizes stim from the
+  funscript in real time (vendored restim threephase). This is the
+  live path most scenes are built for.
+- **Sound files (.wav / .mp3)** — plays pre-rendered stim audio when a
+  scene ships one instead of synthesizing live. No live synthesis.
+  Pick this if you have older 312/2B-era hardware, or a scene that
+  only ships a stim audio file and no funscript.
 
-When the preferred form isn't available for a scene, Haptic 1 falls
-back to the other form so you don't get silent stim.
+When the preferred form isn't available for a scene, both Haptic 1 and
+Haptic 2 fall back to the other form so you don't get silent stim.
 
 ### 3. Open a scene (Library tab)
 

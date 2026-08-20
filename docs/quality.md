@@ -4,44 +4,75 @@ ForgePlayer is built on [libmpv](https://mpv.io/) — the engine behind mpv — 
 
 ## The engine
 
-libmpv is the reference media engine for modern desktop playback. It consistently outperforms VLC on scaling (EWA Lanczos family upscalers), has a proper GPU color pipeline, and handles HDR as a first-class citizen. ForgePlayer exposes it through a single-decoder architecture: one libmpv instance drives every output, so seeks are frame-perfect by construction and the CPU/GPU only does the expensive work (decode, upscale, tone-map) once.
+libmpv is the reference media engine for modern desktop playback. It has a proper GPU color pipeline and handles HDR as a first-class citizen. ForgePlayer runs one independent libmpv instance per output (primary + up to two mirrors), all driven from the same `SyncEngine` — play/pause/seek commands are issued to every active instance together, and each one decodes and renders its own copy against the same media clock. That's what keeps seeks in sub-frame sync across monitors; it's coordinated playback across N decoders, not a single shared decoder feeding multiple screens.
 
-Out of the box, ForgePlayer ships with a baked-in `mpv-defaults.conf` tuned for flagship image quality:
+Out of the box, ForgePlayer configures libmpv directly in code
+(`app/sync_engine.py`) rather than through a separate config file —
+every player instance gets the same settings with no setup step:
 
 ```ini
-vo=gpu
+hr_seek=yes
 hwdec=auto-safe
-scale=ewa_lanczossharp
-cscale=ewa_lanczossharp
-dscale=mitchell
-video-sync=display-resample
-interpolation=yes
-deband=yes
-dither-depth=auto
+demuxer_max_bytes=256MiB
+demuxer_max_back_bytes=64MiB
+vo=gpu
+tone_mapping=bt.2390
+hdr_compute_peak=yes
+target-colorspace-hint=yes
 ```
 
-You don't need to configure anything. It Just Works.
+- **`hr_seek=yes`** — frame-accurate seeking. mpv's default lands on
+  the nearest prior keyframe (often several seconds short on typical
+  encodes); this decodes forward from the keyframe to land exactly on
+  the target, which the seek bar and chapter-nav both depend on.
+- **`hwdec=auto-safe`** — GPU-decodes the video whenever a known-good
+  hardware decoder is available (NVDEC, D3D11VA, …), falling back to
+  software decode automatically for anything it can't offload. This
+  is what keeps a high-bitrate 4K source from pegging the CPU and
+  stalling haptic sync.
+- **`demuxer_max_bytes` / `demuxer_max_back_bytes`** — a roomier
+  read-ahead buffer so a big 4K file streams off disk without
+  stalling the decode thread.
+- **`vo=gpu`** — mpv's standard GPU video output. ForgePlayer
+  previously used `gpu-next` (libplacebo) for its HDR compositing,
+  but reverted after its Windows teardown reliably crashed the
+  process when a player closed; see [HDR](#hdr) below.
+- **`tone_mapping=bt.2390` / `hdr_compute_peak=yes`** — perceptual
+  HDR→SDR tone-mapping so HDR content still looks reasonable while
+  passthrough is disabled.
+- **`target-colorspace-hint=yes`** — tells Windows to composite the
+  mpv surface in the right colorspace when the desktop itself is in
+  HDR mode (best-effort — skipped silently on older libmpv builds
+  that don't support the option).
+
+On machines with more than one GPU, ForgePlayer also pins mpv to the
+NVIDIA adapter (`gpu_context=d3d11`, `d3d11_adapter=NVIDIA`) when one
+is present — a confirmed AMD D3D11 driver bug otherwise let mpv land
+on the wrong adapter on some hybrid-GPU laptops.
+
+There's no separate "quality profile" to turn on, and no
+`scale=`/`cscale=`/`deband=`/`interpolation=` tuning beyond mpv's own
+built-in defaults — the list above is the complete, current set of
+overrides. You don't need to configure anything to get this baseline.
 
 ## GPU support
 
 ForgePlayer uses whatever hardware decoder and renderer your system provides. The `hwdec=auto-safe` setting picks the right backend for each platform:
 
-| GPU family | Hardware decode | HDR pass-through | Upscaling quality |
-|---|---|---|---|
-| **NVIDIA** (GTX 10-series+, all RTX) | NVDEC, every modern codec (H.264, HEVC, AV1, VP9) | HDR10, HDR10+, Dolby Vision (HEVC Profile 5/8) | Excellent — ewa_lanczossharp runs fast on CUDA |
-| **AMD** (RX 400+, Radeon 5000+) | AMF / VA-API | HDR10 | Excellent |
-| **Intel** (8th-gen iGPU+, all Arc) | QSV / D3D11VA | HDR10 on Arc + 11th-gen iGPU+ | Excellent |
-| **Apple Silicon** (M1+, A18 Pro) | VideoToolbox | HDR10, Dolby Vision | Excellent |
+| GPU family | Hardware decode | HDR pass-through |
+|---|---|---|
+| **NVIDIA** (GTX 10-series+, all RTX) | NVDEC, every modern codec (H.264, HEVC, AV1, VP9) | HDR10, HDR10+, Dolby Vision (HEVC Profile 5/8) |
+| **AMD** (RX 400+, Radeon 5000+) | AMF / VA-API | HDR10 |
+| **Intel** (8th-gen iGPU+, all Arc) | QSV / D3D11VA | HDR10 on Arc + 11th-gen iGPU+ |
+| **Apple Silicon** (M1+, A18 Pro) | VideoToolbox | HDR10, Dolby Vision |
 
 If your GPU doesn't support hardware decode for a specific codec, mpv falls back to CPU decode transparently. Playback continues; the only cost is CPU usage.
 
 ## Making 1080p look great on 4K monitors
 
-Most community content is 1080p. Most good monitors are 4K. ForgePlayer fills the gap with `ewa_lanczossharp`, the canonical high-quality spatial upscaler in the mpv ecosystem.
+Most community content is 1080p. Most good monitors are 4K. ForgePlayer doesn't configure a dedicated high-quality upscaler (`ewa_lanczossharp` and friends) today — scaling on a 4K wall uses mpv's own built-in default, the same one you'd get from a stock libmpv build. It still looks better than a lot of Windows Media Foundation-based players thanks to the GPU decode/render pipeline above, but it isn't the videophile-grade `ewa_lanczossharp` treatment some players advertise.
 
-Technically, it's Elliptical Weighted Averaging Lanczos with a sharpening variant — edge-preserving, ring-free, and regarded in the videophile community as the best real-time spatial upscaler not requiring a neural network. Visually: 1080p content on your 4K monitor looks noticeably sharper than VLC's default, without the crispy over-sharpened look some TVs produce.
-
-You don't have to do anything to get this. Load a 1080p pack onto a 4K wall, and upscaling happens automatically.
+If you want that sharper upscaling, mpv supports it natively (`scale=ewa_lanczossharp`) — see [Overriding defaults](#overriding-defaults) below for how (and how not) to apply it today.
 
 ## HDR
 
@@ -68,29 +99,20 @@ For guidance on **producing** HDR content that plays well in ForgePlayer (Topaz 
 
 ## Overriding defaults
 
-If you want to experiment or match a specific workflow, ForgePlayer loads a second config file after the bundled defaults:
+!!! note "No user config file today"
+    There's currently no `~/.forgeplayer/mpv-user.conf` or equivalent —
+    ForgePlayer doesn't load an external mpv config, and there's no CLI
+    flag for passing extra mpv options either. The settings listed
+    under [The engine](#the-engine) above are the whole story; there's
+    nothing to override them with yet.
 
-```
-~/.forgeplayer/mpv-user.conf
-```
-
-Anything you put here overrides the baseline. Common overrides:
-
-```ini
-# Use the legacy gpu backend if gpu-next has issues on your system
-vo=gpu
-
-# Switch to a different upscaler (faster, slightly less sharp)
-scale=spline36
-
-# Disable hardware decode (diagnosing hwdec problems)
-hwdec=no
-
-# Force a specific target peak brightness for HDR tone-mapping
-target-peak=400
-```
-
-Full reference: [mpv's video documentation](https://mpv.io/manual/stable/#video).
+If you want different mpv behavior (a sharper upscaler, disabling
+hardware decode to diagnose an `hwdec` problem, a different HDR target
+peak, …), the only way today is to run ForgePlayer from source and
+edit the `mpv.MPV(**kwargs)` call in `app/sync_engine.py` directly. A
+user-facing override file is a reasonable future addition — see
+[mpv's video documentation](https://mpv.io/manual/stable/#video) for
+what's available to add.
 
 ## A note on why this matters
 

@@ -4,7 +4,9 @@ Feature-by-feature reference for v0.0.15. If you're brand new, start at
 [Getting Started](../getting-started.md) and come back here when you
 need detail.
 
-The guide follows the app's four tabs — each has its own page:
+The guide follows the app's tabs. Four have their own dedicated page;
+**About** is small enough to cover right here, in **Window layout**
+below:
 
 <div class="grid cards" markdown>
 
@@ -26,7 +28,7 @@ The guide follows the app's four tabs — each has its own page:
 
 ## Window layout
 
-The main control window has four tabs across the top:
+The main control window has five tabs across the top:
 
 - **Library** — your scene browser. Click a tile to activate.
 - **Live** — what's currently loaded, what's routing to which device,
@@ -36,8 +38,25 @@ The main control window has four tabs across the top:
   + crop position).
 - **Preferences** — content preference (sound vs funscript), synthesis
   algorithm, haptic offset.
+- **About** — version, credits/attribution for the projects ForgePlayer
+  is built on, links to docs and source, and update status (see
+  **Checking for updates** below).
 
 Top bar (right side): **⚑ Mark**, **Debug** toggle, **Export…**, **Clear**.
+
+---
+
+## Checking for updates
+
+A few seconds after launch, ForgePlayer quietly checks
+`forgeplayer.app` for a newer release. If one's available, an "Update
+available" dialog offers **Download** (opens forgeplayer.app in your
+browser) or **Not Now** (dismisses that version's nag — a later
+version still prompts).
+
+The **About** tab also has a manual **Check for updates** button with
+its own status line, for checking on demand — it always reports the
+live status regardless of any version you've dismissed.
 
 ---
 
