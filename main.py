@@ -36,6 +36,62 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+
+def _prefer_high_performance_gpu() -> None:
+    """Register this executable for Windows' "High performance" GPU on
+    hybrid-graphics laptops (an integrated GPU alongside a discrete one),
+    so mpv's D3D11 context lands on the discrete GPU instead of whichever
+    one Windows would otherwise default to.
+
+    Why this matters: mpv's `vo=gpu` D3D11 teardown (context release on
+    Close Players / scene switch) hits a confirmed, currently-unfixed AMD
+    driver bug — an access violation inside the driver's own destroy path
+    (mpv-player/mpv#14601; also mpv-player/mpv#11882 for the matching
+    "dispose then create a new instance" pattern). It's a driver defect,
+    not something fixable from mpv or from here — but on a machine with a
+    second (often less-used, better-tested for this kind of churn) GPU
+    available, routing around the buggy adapter entirely sidesteps it.
+    Confirmed via mpv's own D3D11 log line ("Device Name: ...") that this
+    dev machine's AMD Radeon 890M iGPU is the one being hit (2026-08-20).
+
+    This does NOT help single-GPU machines (nothing to route around to) —
+    see the reuse-instead-of-recreate change in SyncEngine/ControlWindow
+    for the fix that protects those too, by minimizing how often the
+    crash-prone teardown path runs at all.
+
+    Windows reads this per-exe preference from the registry at PROCESS
+    CREATION — writing it here has no effect on the already-running
+    process, only on the *next* launch of this same executable. That's
+    fine: it only needs to be set once. Best-effort and silent — a
+    restricted account without registry write access just keeps running
+    on the default-assigned GPU, exactly as today.
+    """
+    try:
+        import winreg
+
+        exe = sys.executable
+        key_path = r"Software\Microsoft\DirectX\UserGpuPreferences"
+        with winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, key_path, access=winreg.KEY_ALL_ACCESS,
+        ) as key:
+            try:
+                existing, _ = winreg.QueryValueEx(key, exe)
+            except FileNotFoundError:
+                existing = None
+            # GpuPreference=2 is Windows' "High performance" tier (the
+            # discrete GPU on a hybrid system). Skip the write if it's
+            # already set — no need to touch the registry every launch.
+            if existing != "GpuPreference=2;":
+                winreg.SetValueEx(
+                    key, exe, 0, winreg.REG_SZ, "GpuPreference=2;",
+                )
+    except Exception:
+        pass
+
+
+if sys.platform == "win32":
+    _prefer_high_performance_gpu()
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon, QPalette, QColor
 from PySide6.QtCore import QTimer

@@ -183,13 +183,30 @@ class PlayerWindow(QWidget):
 
     # ── Keyboard ──────────────────────────────────────────────────────────────
 
+    def _request_close_all(self) -> None:
+        """Ask ControlWindow to tear down all players together, deferred to
+        the next event-loop turn.
+
+        The teardown (_close_players) drops the last Python reference to
+        every PlayerWindow, including this one — and when *this* window is
+        the one whose event handler (closeEvent/keyPressEvent/
+        mouseDoubleClickEvent) triggered the teardown, an immediate emit()
+        lets that drop (and the underlying C++ QWidget destruction it
+        triggers) happen while Qt's C++ virtual dispatch for that very
+        handler is still unwinding on the call stack — a use-after-free of
+        `self`, seen as an intermittent native crash on close. Deferring via
+        singleShot(0, …) lets the originating call fully return to the event
+        loop first, so the teardown runs on a clean stack.
+        """
+        QTimer.singleShot(0, self.close_all_requested.emit)
+
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
             DebugLog.record("key.escape", slot=self.slot_index)
             # Signal ControlWindow to tear down all players together. Closing
             # just this window leaves the engine polling a dead mpv handle,
             # which freezes the remaining player windows.
-            self.close_all_requested.emit()
+            self._request_close_all()
         elif event.key() == Qt.Key.Key_F11:
             DebugLog.record("key.f11", slot=self.slot_index)
             self._toggle_fullscreen()
@@ -227,7 +244,7 @@ class PlayerWindow(QWidget):
         SyncEngine.init_player); this Qt handler covers double-clicks on the
         non-mpv chrome (control bar, window frame, letterbox edges)."""
         DebugLog.record("mouse.double_click", slot=self.slot_index)
-        self.close_all_requested.emit()
+        self._request_close_all()
         event.accept()
 
     def closeEvent(self, event) -> None:  # noqa: N802
@@ -236,7 +253,7 @@ class PlayerWindow(QWidget):
         if not self._teardown_in_progress:
             DebugLog.record("player.user_close", slot=self.slot_index)
             event.ignore()
-            self.close_all_requested.emit()
+            self._request_close_all()
             return
         DebugLog.record("player.teardown_close", slot=self.slot_index)
         super().closeEvent(event)

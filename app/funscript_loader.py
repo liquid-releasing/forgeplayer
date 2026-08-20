@@ -59,22 +59,30 @@ class ProstateSource:
         volume-prostate are optional). Use the synth path
         (`load_stim_channels(prostate=True)`); when beta-prostate is
         absent, beta is synthesized as zeros (single-pair signal).
-      - `"none"` — no prostate source; caller's per-port resolution
-        falls through to mirroring Haptic 1.
+      - `"none"` — no prostate source in EITHER form; caller's per-port
+        resolution falls through to mirroring Haptic 1.
 
     Both preferences resolve **symmetrically** (2026-05-03 dogfood,
-    revised post-stim-mp3 dispatch):
+    revised post-stim-mp3 dispatch; cross-form fallback added 2026-08-20
+    after `.forge` bundle imports exposed the gap):
 
       - Each preference picks its prostate-specific source if
-        available; otherwise returns `kind="none"` so the caller
-        mirrors Haptic 1 (which itself dispatches per the same
-        preference, so mirror-H1 ends up being the right form
-        regardless).
-      - We never fall back to the *other* form at the H2 level — H2
-        only ever does "play the prostate-specific source" or "mirror
-        whatever H1 ended up with." Cross-form fallback at H1 already
-        covers the "preferred form not available, play *something*"
-        case for the main stim port.
+        available; otherwise falls back to the OTHER form (mirroring
+        H1's own "silent stim is worse than wrong-form" rule) before
+        giving up and returning `kind="none"`.
+      - This matters most for `.forge`/`.forgeplay` bundle imports:
+        `bundle_importer._is_wanted_member` deliberately never extracts
+        the bundle's pre-rendered `audio/*.mp3` (including
+        `stim-prostate.mp3`) — unzipping it on every scene open would
+        freeze the UI on a multi-GB bundle. So `audio_path` is *never*
+        resolvable for a bundle-backed scene, even when a
+        `stim-prostate.mp3` genuinely exists inside the `.forge`. The
+        `alpha-prostate` funscript channels DO get extracted (funscripts
+        are small). Without the fallback below, every bundle-backed
+        scene with `content_preference == "sound"` silently discarded
+        real prostate content and mirrored H1 instead — the resolver
+        wasn't reporting "no prostate source", it was reporting "no
+        prostate source *we bothered to extract*".
 
     See `docs/architecture/audio-routing.md` for the full rationale.
     """
@@ -88,23 +96,22 @@ def detect_prostate_source(
 ) -> ProstateSource:
     """Decide what to feed the Haptic 2 dongle for this scene.
 
-    Per-port resolution rule (symmetric per 2026-05-03 dogfood):
+    Per-port resolution rule (symmetric per 2026-05-03 dogfood, cross-form
+    fallback added 2026-08-20 — see `ProstateSource` docstring):
 
       Detect what's available for the prostate destination:
          - audio_available     = sibling `<stem>.prostate.wav` exists
          - funscript_available = `alpha-prostate` channel present
 
       content_preference == "sound":
-         - audio_available    → audio_file
-         - else               → none (caller mirrors H1)
+         - audio_available     → audio_file
+         - funscript_available → funscripts   (fallback)
+         - else                → none (caller mirrors H1)
 
       content_preference == "funscript":
          - funscript_available → funscripts
+         - audio_available     → audio_file   (fallback)
          - else                → none (caller mirrors H1)
-
-    No cross-form fallback — H2 only ever plays its prostate-specific
-    source or mirrors H1. The cross-form fallback lives at the H1
-    dispatch layer where silent stim is unacceptable.
 
     Real prostate funscripts in the wild ship `alpha-prostate` alone
     (Euphoria, Zer0 Game) or with optional `volume-prostate`. The pair
@@ -138,11 +145,15 @@ def detect_prostate_source(
     if content_preference == "sound":
         if audio_path is not None:
             return ProstateSource(kind="audio_file", audio_path=audio_path)
+        if funscript_available:
+            return ProstateSource(kind="funscripts")
         return ProstateSource(kind="none")
 
     # content_preference == "funscript"
     if funscript_available:
         return ProstateSource(kind="funscripts")
+    if audio_path is not None:
+        return ProstateSource(kind="audio_file", audio_path=audio_path)
     return ProstateSource(kind="none")
 
 

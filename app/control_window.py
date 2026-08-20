@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import html
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
@@ -110,6 +111,16 @@ class ControlWindow(QMainWindow):
         self.resize(1280, 632)
 
         self._engine = SyncEngine()
+        # Runs each slot's mpv stop/vo=null/terminate dance off the GUI
+        # thread on Close (see _close_players) — sized to _NUM_SLOTS so a
+        # full mirror-mode teardown runs every slot in parallel rather than
+        # queuing behind a smaller pool. Never explicitly shut down: the
+        # app's only exit path is closeEvent's hard os._exit(0), which skips
+        # Python-level cleanup entirely (daemon-adjacent by construction —
+        # the process death reclaims the pool's threads).
+        self._teardown_pool = ThreadPoolExecutor(
+            max_workers=_NUM_SLOTS, thread_name_prefix="mpv-teardown",
+        )
         self._player_windows: list[PlayerWindow | None] = [None] * _NUM_SLOTS
         self._seek_dragging = False
         self._session_path: str = ""
@@ -948,16 +959,6 @@ class ControlWindow(QMainWindow):
             return f"audio player · {os.path.basename(ap)}"
         return "(no source loaded)"
 
-    @staticmethod
-    def _set_has_estim(fs) -> bool:
-        """True when a funscript set carries e-stim POSITION channels (alpha or
-        beta) — the signal that it's a playable stim set, not a motion-only
-        stroke track. Prostate variants count too."""
-        chans = getattr(fs, "channels", {}) or {}
-        def _core(k: str) -> str:
-            return k[: -len("-prostate")] if k.endswith("-prostate") else k
-        return any(_core(k) in STEREOSTIM_CHANNELS for k in chans)
-
     def _is_packaged_bundle(self) -> bool:
         """True when the active scene came from a PACKAGED `.forge`/`.forgeplay`
         ZIP — its funscripts live in an extracted cache the user can't reach, so
@@ -1029,19 +1030,41 @@ class ControlWindow(QMainWindow):
         resolved = slot1_data.get("aux_resolved_source")
         if resolved:
             return resolved.get("label", "(resolved)")
-        # Pre-launch: list the prostate e-stim files Haptic 2 will play, if the
-        # scene ships a `-prostate` side-chain (alpha-prostate, …). H2 is e-stim
-        # prostate — it only ever plays the prostate-specific channels (or
-        # mirrors H1), never the motion track.
+        # Pre-launch: preview what Haptic 2 will play, using the SAME
+        # detect_prostate_source() gate _maybe_launch_haptic2_aux uses at
+        # Launch — not just "does a -prostate channel key exist". A scene
+        # can ship alpha-prostate/beta-prostate channels that still resolve
+        # to "mirror H1" at launch (e.g. content_preference="sound" with no
+        # sibling .prostate.wav — detect_prostate_source never falls back
+        # across forms at the H2 level). Listing the prostate channels here
+        # unconditionally used to promise content that Launch then didn't
+        # use — this mirrors the real gate so the preview never disagrees
+        # with what actually plays.
         fs = slot1_data.get("funscript_set")
+        has_prostate_channels = False
         if fs is not None:
-            prostate = self._estim_channel_names(
-                fs, prostate=True, as_types=self._is_packaged_bundle())
-            if prostate:
-                return self._bulleted_sources("restim prostate:", prostate)
-        # Scene has an H1 source but no prostate side-chain → Haptic 2 will
-        # mirror whatever Haptic 1 plays. Say so up front (matches the
-        # `(mirror H1)` label the resolver sets once playing).
+            from app.funscript_loader import detect_prostate_source  # noqa: PLC0415
+            src = detect_prostate_source(fs, self._prefs.content_preference)
+            if src.kind == "audio_file" and src.audio_path is not None:
+                return f"audio player · {src.audio_path.name}"
+            if src.kind == "funscripts":
+                prostate = self._estim_channel_names(
+                    fs, prostate=True, as_types=self._is_packaged_bundle())
+                if prostate:
+                    return self._bulleted_sources("restim prostate:", prostate)
+            has_prostate_channels = bool(self._estim_channel_names(
+                fs, prostate=True, as_types=self._is_packaged_bundle()))
+        # Scene has an H1 source but no usable prostate source under the
+        # active content preference → Haptic 2 will mirror whatever Haptic 1
+        # plays. Say so up front (matches the `(mirror H1)` label the
+        # resolver sets once playing) — and flag it specifically when
+        # prostate channels exist but the content preference is why they're
+        # not being used, rather than reading as "this scene has none".
+        if has_prostate_channels:
+            return (
+                "↳ mirrors Haptic 1 (prostate funscript present, but "
+                f'content preference is "{self._prefs.content_preference}")'
+            )
         if slot1_data.get("funscript_set") or slot1_data.get("audio_path"):
             return "↳ mirrors Haptic 1 (no prostate side-chain)"
         return "(no source loaded)"
@@ -1606,8 +1629,16 @@ class ControlWindow(QMainWindow):
         else:
             sc.setEnabled(True)
             sc.addItem("None (silent stim)", ("none", None))
+            # Label bundle-backed channel sets "(forge)", not "(funscript)" —
+            # their alpha/beta/prostate channels came from an imported
+            # .forge/.output bundle (_resolve_bundle_backed), not a plain
+            # scanned funscript file. The distinction matters: a bundle's
+            # channels can include prostate side-chains a loose scan never
+            # would, and the label should say what's actually driving
+            # playback, not just "some funscript".
+            source_tag = "(forge)" if entry.bundle_path else "(funscript)"
             for fset in entry.funscript_sets:
-                sc.addItem(f"{fset.base_stem}  (funscript)", ("fs", fset.base_stem))
+                sc.addItem(f"{fset.base_stem}  {source_tag}", ("fs", fset.base_stem))
             for a in entry.audio_tracks:
                 sc.addItem(f"{a.filename}  (audio)", ("audio", a.path))
             # Reflect the current dispatch: a picked audio file wins, else the
@@ -2508,36 +2539,27 @@ class ControlWindow(QMainWindow):
         self._on_scene_activated(entry)
 
     def _resolve_bundle_backed(self, entry: SceneCatalogEntry) -> SceneCatalogEntry:
-        """Turn a video-only library card that's actually backed by a
-        FunscriptForge export bundle into a fully playable scene WITH its
-        e-stim channels.
+        """Turn a library card that has a FunscriptForge export bundle into a
+        fully playable scene using the BUNDLE's haptics — a `.forge`/`.output`
+        export is treated as the authoritative, more-complete source over any
+        stray loose funscripts scanned in the same folder (2026-08-20 dogfood
+        decision — forge always wins when one exists). We import the bundle
+        via the SAME `load_bundle` path the double-click uses, then graft the
+        user's own loose video variants (their real 4K/1080p files) onto the
+        bundle's haptics so they still pick the video they want and get stim.
 
-        The scanner skips a bundle's packaged contents, so a folder whose
-        haptics live only inside `<stem>.forge` / `<stem>.output/` scans as
-        video-only (no funscripts → Haptic 1 'no source' → Calibrate refuses).
-        When such a card is activated we import the bundle via the SAME
-        `load_bundle` path the double-click uses, then graft the user's own
-        loose video variants (their real 4K/1080p files) onto the bundle's
-        haptics so they still pick the video they want and get stim.
-
-        Fires when the card has a bundle AND the scene's own loose funscripts
-        DON'T already provide e-stim (alpha/beta). Two cases it covers:
-          - no loose funscripts at all (haptics live only in the bundle), and
-          - a loose MOTION-only funscript sitting next to a `.forge`/`.output`
-            that carries the real e-stim channels (the common FunscriptForge
-            working-folder shape — the loose `<stem>.funscript` is the stroke
-            track, the bundle has alpha/beta/…). Without this the motion track
-            wins and Haptic 1 shows "no e-stim channels (motion only)".
-        A scene whose OWN loose funscripts already include e-stim takes
-        precedence (no import). Any failure falls back to the original entry.
+        Always fires when the card has a bundle, regardless of what the
+        scanner found loose next to it — including the common FunscriptForge
+        working-folder shape where a loose MOTION-only `<stem>.funscript`
+        (the stroke track) sits beside a `.forge`/`.output` that carries the
+        real e-stim channels (alpha/beta/…, prostate side-chains). Loose
+        funscripts are never silently preferred, even when they already carry
+        e-stim — a bundle export supersedes them. Any failure (unreadable
+        bundle, or one with no haptics at all) falls back to the original
+        scanned entry rather than breaking activation.
         """
         bundle_path = getattr(entry, "bundle_path", None)
         if not bundle_path:
-            return entry
-        # The scene's own loose funscripts already have e-stim → they win.
-        if entry.funscript_sets and any(
-            self._set_has_estim(s) for s in entry.funscript_sets
-        ):
             return entry
 
         from app.bundle_importer import load_bundle  # noqa: PLC0415
@@ -2547,13 +2569,7 @@ class ControlWindow(QMainWindow):
             DebugLog.record("library.activate.bundle_failed", scene=entry.name, error=str(exc))
             return entry
         if bundled is None or not bundled.funscript_sets:
-            return entry  # unreadable / no haptics — keep the video-only card
-        # If the scene has loose (motion-only) funscripts, only override them
-        # when the bundle actually ADDS e-stim — otherwise keep the loose track.
-        if entry.funscript_sets and not any(
-            self._set_has_estim(s) for s in bundled.funscript_sets
-        ):
-            return entry
+            return entry  # unreadable / no haptics — keep the loose-scanned card
 
         # Keep the user's own loose media (better variants, real on-disk paths);
         # take only the haptics from the bundle. Preserve folder identity so
@@ -2726,6 +2742,18 @@ class ControlWindow(QMainWindow):
         slot2 = self._slot_data(1)
         slot3 = self._slot_data(2)
         slot4 = self._slot_data(3)
+
+        # Haptic 2's resolved-source label is only recomputed at Launch
+        # (_maybe_launch_haptic2_aux). If players from a PRIOR scene are
+        # still running when the user picks a new Library card, slot2 still
+        # carries that prior scene's aux_resolved_source/aux_silent_reason —
+        # the Output panel would keep showing the old scene's Haptic 2
+        # source/reason until the user hits Launch again. Clear it here so
+        # the panel falls back to the pre-launch summary (prostate list /
+        # mirrors H1 / no source) for the newly-picked scene instead of
+        # misreporting the stale one.
+        slot2.pop("aux_resolved_source", None)
+        slot2.pop("aux_silent_reason", None)
 
         # Mirror mode: 2+ checked playback screens + a video → same video
         # shows on Slot 1's monitor PLUS each additional playback screen
@@ -3305,10 +3333,24 @@ class ControlWindow(QMainWindow):
 
     # ── Launch / close ─────────────────────────────────────────────────────────
 
-    def _close_players(self) -> None:
+    def _close_players(self, *, keep_slots: frozenset[int] = frozenset()) -> None:
+        """Tear down every active player.
+
+        `keep_slots` — used only by `_on_launch`'s reuse path — leaves
+        those slots' PlayerWindow + mpv instance untouched, entirely
+        skipping the crash-prone GPU-context teardown for them (see
+        _on_launch for why). `keep_slots` is keyword-only so it can never
+        collide with the `bool` argument Qt passes when this is connected
+        directly as a `clicked`/signal slot (btn_close_players.clicked,
+        PlayerWindow.close_all_requested) — those call sites always want
+        a full close, and a positional collision here would silently skip
+        tearing down whatever slot the checked-state int happened to
+        match.
+        """
         DebugLog.record(
             "players.close_all",
             active=sum(1 for w in self._player_windows if w),
+            keep_slots=sorted(keep_slots),
         )
         self._timer.stop()
         self._engine.stop_all()
@@ -3323,8 +3365,6 @@ class ControlWindow(QMainWindow):
         # MP4 fan-outs), serial stops would compound into noticeable lag
         # on close. Threadpool-parallel stops keep the overall close at
         # ~40 ms regardless of stream count.
-        from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
-
         all_streams: list[tuple[int, str, object]] = []
         for i in range(_NUM_SLOTS):
             data = self._slot_data(i)
@@ -3369,13 +3409,52 @@ class ControlWindow(QMainWindow):
             data.pop("aux_silent_reason", None)
         # Terminate every engine slot — including audio-only slots that
         # don't have a PlayerWindow — so no mpv instances leak.
+        #
+        # The actual stop/vo=null/terminate dance runs on a background
+        # thread per slot (terminate_player_async), not the GUI thread.
+        # mpv's own render thread does the real GPU-context teardown
+        # asynchronously no matter which thread we call from — running our
+        # side of the dance on the GUI thread meant it was interleaved with
+        # Qt's own window-management calls for the SAME native window on
+        # the SAME thread, which was the dominant pattern behind the
+        # teardown access-violations captured in faulthandler.log
+        # (2026-08-20 dogfood). Off-thread teardown also runs all slots in
+        # PARALLEL instead of serially blocking through 3-4 GPU contexts
+        # one at a time (mirror / 3-monitor rigs).
+        #
+        # We still WAIT for every future before touching any PlayerWindow —
+        # closing/destroying the embedded native window before mpv confirms
+        # it has detached would yank that window out from under an
+        # in-flight GPU-context release, the exact race this exists to
+        # avoid. The slot itself (self._engine's player array) is freed
+        # immediately inside terminate_player_async, so a subsequent Launch
+        # can start a new player in this slot right away without waiting.
         for i in range(_NUM_SLOTS):
+            if i in keep_slots:
+                continue
             w = self._player_windows[i]
             if w:
                 # Mark the window so its closeEvent doesn't re-enter our
                 # close-all signal path — this close is the teardown itself.
                 w._teardown_in_progress = True
-            self._engine.terminate_player(i)
+        teardown_futures = [
+            None if i in keep_slots else
+            self._engine.terminate_player_async(i, self._teardown_pool)
+            for i in range(_NUM_SLOTS)
+        ]
+        for i, fut in enumerate(teardown_futures):
+            if fut is None:
+                continue
+            try:
+                fut.result()
+            except Exception as exc:
+                DebugLog.record(
+                    "players.teardown_error", slot=i, error=repr(exc),
+                )
+        for i in range(_NUM_SLOTS):
+            if i in keep_slots:
+                continue
+            w = self._player_windows[i]
             if w:
                 w.close()
                 self._player_windows[i] = None
@@ -4057,7 +4136,13 @@ class ControlWindow(QMainWindow):
                 )
                 return
             aux_kind = "audio_file"
-            resolved_label = src.audio_path.name if src.audio_path else ""
+            # Same "audio player · <name>" wording _h2_source_label's
+            # pre-launch preview uses for this exact kind (and that
+            # _h1_source_label uses too) — so the Output panel reads
+            # identically whether the scene has been launched yet or not.
+            resolved_label = (
+                f"audio player · {src.audio_path.name}" if src.audio_path else ""
+            )
 
         elif src.kind == "funscripts":
             try:
@@ -4127,9 +4212,22 @@ class ControlWindow(QMainWindow):
                 sample_rate=h2_rate,
             )
             aux_kind = "prostate_synth"
-            # Funscript label uses the base stem with the prostate suffix
-            # so the Live Output panel reads `magik-prostate.funscript`.
-            resolved_label = f"{funscript_set.base_stem}-prostate.funscript"
+            # Same bulleted "restim prostate: • alpha • beta …" wording
+            # _h2_source_label's pre-launch preview builds for this exact
+            # kind (_estim_channel_names + _bulleted_sources) — reusing it
+            # here means the Output panel reads identically before and
+            # after Launch instead of switching from a channel list to an
+            # unrelated-looking single filename. Falls back to the bare
+            # "<stem>-prostate.funscript" only if channel-name resolution
+            # somehow comes back empty (shouldn't happen — detect_prostate_
+            # source already confirmed alpha-prostate exists).
+            prostate_names = self._estim_channel_names(
+                funscript_set, prostate=True, as_types=self._is_packaged_bundle())
+            resolved_label = (
+                self._bulleted_sources("restim prostate:", prostate_names)
+                if prostate_names
+                else f"{funscript_set.base_stem}-prostate.funscript"
+            )
 
         else:
             # No prostate-specific content → mirror Haptic 1. The form
@@ -4428,7 +4526,73 @@ class ControlWindow(QMainWindow):
             screen_count=len(self._screens),
             screens=screens_snapshot,
         )
-        self._close_players()
+
+        # Decide, PER VIDEO/MIRROR SLOT, whether the already-open
+        # PlayerWindow can be REUSED (just load the new file into it)
+        # instead of torn down and rebuilt from scratch.
+        #
+        # Why this matters: mpv's vo=gpu D3D11 context teardown+recreate is
+        # a confirmed, currently-unfixed GPU-driver access violation
+        # (mpv-player/mpv#14601, #11882 — an AMD driver bug that mpv
+        # upstream says they can't fix; not specific to this app). Every
+        # Close+relaunch cycle exercises that exact path. A user who
+        # switches scenes/library items frequently (the playlist case) was
+        # hitting it constantly. The fix that actually protects every user
+        # — not just ones with a second GPU to route around it via
+        # _prefer_high_performance_gpu in main.py — is to simply not tear
+        # the context down at all when we don't have to: reusing the same
+        # window+player and calling load_file() with the new path never
+        # touches vo=null/terminate(), so there's nothing for the driver
+        # bug to trip on.
+        #
+        # A slot is reusable when a PlayerWindow already exists there AND
+        # nothing about its on-screen placement needs to change — same
+        # target monitor, same fullscreen state. Anything else (Setup
+        # screen/fill changed, fullscreen toggled, slot count changed,
+        # role flips video<->audio-only) falls through to the existing
+        # tear-down-and-rebuild path below, unchanged.
+        fullscreen_wanted = self._fullscreen_toggle.isChecked()
+        reusable_slots: set[int] = set()
+        for i in range(_NUM_SLOTS):
+            if _SLOT_ROLES[i] not in ("video", "mirror"):
+                continue
+            if not self._slot_data(i)["video_path"]:
+                continue  # this slot isn't getting a video this launch
+            pw = self._player_windows[i]
+            if pw is None:
+                continue  # nothing open here to reuse
+            screen_idx = self._screen_index_for_slot(i)
+            if screen_idx is None or screen_idx >= len(self._screens):
+                screen_idx = 0
+            target_screen = self._screens[screen_idx]
+            handle = pw.windowHandle()
+            current_screen = handle.screen() if handle is not None else None
+            if current_screen is not target_screen:
+                continue  # monitor assignment changed — needs a real rebuild
+            if pw.isFullScreen() != fullscreen_wanted:
+                continue  # fullscreen state changed — needs a real rebuild
+            reusable_slots.add(i)
+        reusable_slots = frozenset(reusable_slots)
+        if reusable_slots:
+            DebugLog.record("players.reusing_slots", slots=sorted(reusable_slots))
+
+        self._close_players(keep_slots=reusable_slots)
+        # Re-fetch AGAIN after _close_players — this is the exact
+        # "monitor reconfigured" case the refresh above exists for. Tearing
+        # down real PlayerWindows invalidates Qt's C++ QScreen objects (same
+        # mechanism as sleep/wake or a topology change), so the snapshot
+        # taken before Close is already stale by the time the placement
+        # loop below reads screen.geometry(). On a fresh app launch (no
+        # prior players to close) this is a cheap no-op; on every launch
+        # AFTER the first, skipping it meant Close silently invalidated the
+        # list Launch was about to use — screen.geometry() raised
+        # "libshiboken: Internal C++ object (PySide6.QtGui.QScreen) already
+        # deleted", the exception aborted the rest of _on_launch, and
+        # whatever ran after the aborted slot (e.g. the deferred fullscreen
+        # apply below) silently never happened. Reproduced 2026-08-20:
+        # Launch worked fullscreen the first time, ignored fullscreen the
+        # second time — exactly this failure.
+        self._screens = list(QGuiApplication.screens())
 
         # Per-slot pre-launch snapshot — diagnose "only one video
         # showed up" by surfacing exactly which slots had media at
@@ -4541,6 +4705,29 @@ class ControlWindow(QMainWindow):
                 },
                 source="setup_prefs",
             )
+
+            if i in reusable_slots:
+                # Reuse: same window, same mpv instance, same monitor —
+                # just point it at the new file instead of tearing down
+                # and rebuilding the D3D11 context (see the reusable_slots
+                # computation above for why that matters).
+                fill = self._fill_for_screen_index(screen_idx)
+                self._engine.set_fill(i, fill, self._prefs.crop_align)
+                self._engine.set_crop_align(i, self._prefs.crop_align)
+                media_path = video_path or audio_path
+                self._engine.load_file(i, media_path)
+                if video_path and audio_path:
+                    try:
+                        self._engine._players[i].audio_files = [audio_path]  # type: ignore[index]
+                    except Exception:
+                        pass
+                if _SLOT_ROLES[i] == "mirror":
+                    self._engine.set_volume(i, 0)
+                elif _SLOT_ROLES[i] == "video":
+                    self._engine.set_volume(i, int(self._scene_volume_slider.value()))
+                DebugLog.record("players.launch_slot_reused", slot=i)
+                launched = True
+                continue
 
             pw = PlayerWindow(i, self._engine)
             pw.close_all_requested.connect(self._close_players)

@@ -90,6 +90,7 @@ def play_tone_on_device(audio_device: str) -> None:
             p = mpv.MPV(
                 audio_device=audio_device,
                 force_window="no",
+                vo="null",  # audio-only tone; no GPU context to release on terminate()
                 keep_open=False,
                 input_default_bindings=False,
                 input_vo_keyboard=False,

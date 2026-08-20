@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from typing import Callable, Optional
 
 import mpv
+
+from app.debug_log import DebugLog
 
 
 # Crop position → mpv video-align-y. -1 = flush top, +1 = flush bottom.
@@ -16,6 +19,64 @@ import mpv
 # i.e. keeps the top (or bottom) of the frame with a ~1/8 margin. Mirrors the
 # margins the user asked for; center (0.0) is mpv's own default.
 _CROP_ALIGN_Y = {"top": -0.75, "center": 0.0, "bottom": 0.75}
+
+
+def _detect_nvidia_adapter() -> bool:
+    """Best-effort, once-per-process: True if an NVIDIA GPU is present.
+
+    Used to steer mpv's D3D11 context onto the NVIDIA adapter on a hybrid-
+    graphics laptop (integrated + discrete) — mpv's `vo=gpu` teardown hits a
+    confirmed, currently-unfixed access violation in AMD's D3D11 driver
+    (mpv-player/mpv#14601 — "a driver bug, which we unfortunately are
+    unable to fix" per mpv upstream; also #11882 for the matching Windows
+    "dispose then create a new instance" crash). Routing around the AMD
+    adapter when a better-tested NVIDIA one is available sidesteps it
+    entirely for machines built this way — verified on this dev machine
+    (AMD Radeon 890M iGPU + NVIDIA RTX 5070 Ti dGPU) via mpv's own D3D11
+    log line ("Device Name: ...").
+
+    This does NOT cover AMD-only or Intel-only machines — there's no
+    second adapter to route to. See `_teardown_mpv_instance` /
+    `terminate_player_async` for the fix that protects those too, by
+    minimizing how often the crash-prone teardown path runs at all.
+
+    Uses EnumDisplayDevicesW (no extra dependency — plain ctypes) rather
+    than WMI, which is slow enough to notice at startup. Cached at module
+    scope since the adapters present don't change mid-session.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _DisplayDeviceW(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("DeviceName", wintypes.WCHAR * 32),
+                ("DeviceString", wintypes.WCHAR * 128),
+                ("StateFlags", wintypes.DWORD),
+                ("DeviceID", wintypes.WCHAR * 128),
+                ("DeviceKey", wintypes.WCHAR * 128),
+            ]
+
+        i = 0
+        while i < 16:  # bounded — a real machine never has this many adapters
+            dd = _DisplayDeviceW()
+            dd.cb = ctypes.sizeof(_DisplayDeviceW)
+            if not ctypes.windll.user32.EnumDisplayDevicesW(
+                None, i, ctypes.byref(dd), 0,
+            ):
+                break
+            if "NVIDIA" in dd.DeviceString.upper():
+                return True
+            i += 1
+    except Exception:
+        pass
+    return False
+
+
+_HAS_NVIDIA_ADAPTER = _detect_nvidia_adapter()
 
 
 class SyncEngine:
@@ -83,7 +144,13 @@ class SyncEngine:
         """
         with self._lock:
             if self._players[slot]:
-                self._players[slot].terminate()  # type: ignore[union-attr]
+                # Not on the hot path today — every real caller (_on_launch)
+                # already runs _close_players first, so this slot is always
+                # empty by the time init_player runs. Defensive net for any
+                # future caller that skips that: route through the same
+                # protected dance rather than a bare terminate() on a live
+                # GPU-embedded player.
+                self._teardown_mpv_instance(self._players[slot])  # type: ignore[union-attr]
             kwargs: dict = {
                 "wid": str(wid),
                 "keep_open": True,
@@ -133,6 +200,18 @@ class SyncEngine:
                 "tone_mapping": "bt.2390",
                 "hdr_compute_peak": "yes",
             }
+            if _HAS_NVIDIA_ADAPTER:
+                # Explicit GPU-context + adapter pick: mpv's own D3D11
+                # adapter selection ignores Windows' per-app GPU-preference
+                # registry setting (that mechanism is opt-in per graphics
+                # API, and mpv's d3d11 backend doesn't query it — confirmed
+                # by testing, not assumption). This is the one lever that
+                # actually moves mpv onto the NVIDIA adapter and away from
+                # the AMD one hitting the driver bug in _detect_nvidia_
+                # adapter's docstring. Substring-matched against the
+                # adapter's DXGI description ("NVIDIA GeForce ...").
+                kwargs["gpu_context"] = "d3d11"
+                kwargs["d3d11_adapter"] = "NVIDIA"
             if audio_device:
                 kwargs["audio_device"] = audio_device
             if fill:
@@ -149,6 +228,19 @@ class SyncEngine:
                 align_y = _CROP_ALIGN_Y.get(crop_align, 0.0)
                 if align_y:
                     kwargs["video_align_y"] = str(align_y)
+            # Capture which physical GPU this player actually landed on.
+            # d3d11_adapter="NVIDIA" above is a substring match against
+            # whatever DXGI reports — worth confirming it actually took
+            # (rather than silently falling back to the default adapter)
+            # so a future crash report can say which adapter was in play
+            # instead of us re-deriving it from a standalone script.
+            def _gpu_log_handler(_level, prefix, text, _slot=slot):
+                if "Device Name" in text:
+                    DebugLog.record(
+                        "player.gpu_adapter", slot=_slot, device=text.strip(),
+                    )
+            kwargs["log_handler"] = _gpu_log_handler
+            kwargs["msg_level"] = "vo=v"
             p = mpv.MPV(**kwargs)
             # Hint the display colorspace so a Windows-HDR-ON desktop composits
             # the mpv surface correctly (HDR passthrough) instead of blowing it
@@ -203,6 +295,26 @@ class SyncEngine:
             # Headless/audio-only players have no video output; ignore.
             pass
 
+    def set_fill(self, slot: int, fill: bool, crop_align: str = "center") -> None:
+        """Re-apply Fill mode (panscan) on an already-running player — the
+        counterpart to set_crop_align, for _on_launch's reuse path where an
+        existing PlayerWindow/mpv instance is kept across a scene switch
+        instead of torn down and rebuilt. Setup's Fill toggle can change
+        between launches even when the target screen doesn't, so this needs
+        reapplying every reuse rather than only being set once at
+        construction time (see init_player's ``panscan``/``video_align_y``
+        kwargs, which only apply at creation)."""
+        p = self._players[slot]
+        if p is None:
+            return
+        try:
+            p.panscan = 1.0 if fill else 0.0
+            if fill:
+                align_y = _CROP_ALIGN_Y.get(crop_align, 0.0)
+                p.video_align_y = align_y
+        except Exception:
+            pass
+
     def init_player_audio_only(self, slot: int, audio_device: str = "") -> mpv.MPV:
         """Create a headless mpv instance with no window.
 
@@ -213,7 +325,10 @@ class SyncEngine:
         """
         with self._lock:
             if self._players[slot]:
-                self._players[slot].terminate()  # type: ignore[union-attr]
+                # See init_player's identical guard — not on the hot path
+                # today, defensive net for a future caller that skips
+                # _close_players first.
+                self._teardown_mpv_instance(self._players[slot])  # type: ignore[union-attr]
             kwargs: dict = {
                 "force_window": "no",
                 "keep_open": True,
@@ -235,46 +350,109 @@ class SyncEngine:
             p.pause = True
             p.play(path)
 
+    @staticmethod
+    def _teardown_mpv_instance(p) -> None:
+        """The stop → vo=null → wait → terminate dance for ONE mpv instance.
+
+        Release the GPU render context BEFORE mpv_terminate_destroy.
+        libmpv's gpu-next (libplacebo/D3D11) teardown access-violates when
+        its render context — bound to the embedded Qt window (wid) — is
+        destroyed inside the full mpv shutdown. Switching `vo` to `null`
+        uninits that context as a normal vo change while the core is still
+        alive (the safe path), so the subsequent terminate destroys a
+        context-free handle. We stop playback first, then wait (bounded)
+        for the vo to actually detach before destroying.
+
+        Deliberately free of any Qt/widget access — safe to run on a worker
+        thread. Native crashes can't be caught in Python, so this whole
+        dance is preventative, not a rescue: mpv's own render thread does
+        the ACTUAL GPU teardown asynchronously regardless of which thread we
+        call from, so this reduces the race window rather than closing it.
+        Call it off the GUI thread (see `terminate_player_async`) so it
+        doesn't also serialize behind — and contend with — Qt's own
+        window/paint dispatch for the same native window while it's mid-
+        teardown; that reentrant same-thread interaction was the dominant
+        crash pattern in dogfood faulthandler.log captures (2026-08-20).
+        """
+        try:
+            p.command("stop")
+        except Exception:
+            pass
+        # Give the "stop" command a beat to actually land before we touch
+        # vo — flipping the render target while a frame is still mid-flight
+        # to the GPU was a contributing factor in observed teardown access-
+        # violations (faulthandler.log).
+        time.sleep(0.03)
+        try:
+            p["vo"] = "null"
+            # 1.0s, not 0.5s — under multi-slot teardown (mirror / 3-monitor
+            # rigs closing 3-4 GPU contexts back to back) the driver can
+            # take longer than 0.5s to actually detach a context under
+            # contention; a timed-out wait here means terminate() below
+            # tears down a context that hasn't finished releasing, which is
+            # exactly the access violation this dance exists to avoid.
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                try:
+                    cur = p["current-vo"]
+                except Exception:
+                    break
+                if not cur or cur == "null":
+                    break
+                time.sleep(0.01)
+            # Extra settle time after current-vo reports detached — the
+            # property flips before the GPU driver has actually finished
+            # reclaiming the swapchain/context.
+            time.sleep(0.05)
+        except Exception:
+            pass
+        try:
+            p.terminate()
+        except Exception:
+            pass
+
     def terminate_player(self, slot: int) -> None:
+        """Synchronous teardown — blocks the calling thread for the full
+        stop/vo=null/terminate dance. Used by terminate_all() and any other
+        caller that doesn't need to stay off the GUI thread. Prefer
+        `terminate_player_async` from ControlWindow so the native crash risk
+        in `_teardown_mpv_instance` doesn't run interleaved with Qt's own
+        window-management calls on the GUI thread."""
         with self._lock:
             p = self._players[slot]
-            if p:
-                # Release the GPU render context BEFORE mpv_terminate_destroy.
-                # libmpv's gpu-next (libplacebo/D3D11) teardown access-violates
-                # when its render context — bound to the embedded Qt window
-                # (wid) — is destroyed inside the full mpv shutdown. Switching
-                # `vo` to `null` uninits that context as a normal vo change
-                # while the core is still alive (the safe path), so the
-                # subsequent terminate destroys a context-free handle. We stop
-                # playback first, then wait (bounded) for the vo to actually
-                # detach before destroying. Native crashes can't be caught in
-                # Python, so this is preventative, not a rescue.
-                try:
-                    p.command("stop")
-                except Exception:
-                    pass
-                try:
-                    p["vo"] = "null"
-                    deadline = time.monotonic() + 0.5
-                    while time.monotonic() < deadline:
-                        try:
-                            cur = p["current-vo"]
-                        except Exception:
-                            break
-                        if not cur or cur == "null":
-                            break
-                        time.sleep(0.01)
-                except Exception:
-                    pass
-                try:
-                    p.terminate()
-                except Exception:
-                    pass
-                self._players[slot] = None
+            self._players[slot] = None
+        if p is not None:
+            self._teardown_mpv_instance(p)
         # Drop cached position so the next scene starts fresh — last
         # scene's final time_pos is meaningless to a new file.
         if not any(self._players):
             self._last_position = 0.0
+
+    def terminate_player_async(self, slot: int, executor) -> object | None:
+        """Hand this slot's mpv instance off to `executor` for teardown.
+
+        Clears `self._players[slot]` IMMEDIATELY (before the background
+        dance runs) so a caller can start a new player in this slot right
+        away without waiting — the slot is logically free the instant this
+        returns, only the OLD instance's native resources are still being
+        released in the background. Returns the submitted Future (or None
+        if the slot was already empty) so the caller can wait for genuine
+        completion — via `future.result()` — before touching anything the
+        teardown depends on, in particular the embedded native window: the
+        caller must not close/destroy that PlayerWindow until this future
+        resolves, or it risks yanking the native window out from under
+        mpv's still-in-flight GPU-context release.
+        """
+        with self._lock:
+            p = self._players[slot]
+            self._players[slot] = None
+        # The slot array reflects "free" immediately regardless of whether
+        # the background teardown below has physically finished yet.
+        if not any(self._players):
+            self._last_position = 0.0
+        if p is None:
+            return None
+        return executor.submit(self._teardown_mpv_instance, p)
 
     def terminate_all(self) -> None:
         for i in range(self.MAX_SLOTS):
@@ -309,6 +487,13 @@ class SyncEngine:
             kwargs: dict = {
                 "force_window": "no",
                 "vid": "no",
+                # Explicit, not just implied by force_window/vid=no — same
+                # "never let this instance touch a GPU context" reasoning as
+                # list_audio_devices(). This mirror is headless and only
+                # ever plays audio, but its terminate() call below has no
+                # vo=null-dance protection, so it must never have a real
+                # video context to begin with.
+                "vo": "null",
                 "keep_open": True,
                 "pause": True,
                 "input_default_bindings": False,
@@ -366,6 +551,13 @@ class SyncEngine:
             kwargs: dict = {
                 "force_window": "no",
                 "vid": "no",
+                # Explicit, not just implied by force_window/vid=no — same
+                # "never let this instance touch a GPU context" reasoning as
+                # list_audio_devices(). This mirror is headless and only
+                # ever plays audio, but its terminate() call below has no
+                # vo=null-dance protection, so it must never have a real
+                # video context to begin with.
+                "vo": "null",
                 "keep_open": True,
                 "pause": True,
                 "input_default_bindings": False,
@@ -558,7 +750,17 @@ class SyncEngine:
         full raw list.
         """
         try:
-            tmp = mpv.MPV()
+            # vo="null" — this instance never loads or renders anything, it
+            # only queries the audio device list, but a bare mpv.MPV() with
+            # no vo still defaults to a GPU-backed video output. terminate()
+            # on THAT is the exact same mpv_terminate_destroy access-
+            # violation class documented on the player-teardown path (see
+            # SyncEngine._teardown_mpv_instance) — except this instance is
+            # created fresh and torn down on every Launch and at app
+            # startup, unprotected by any of that dance. Forcing vo="null"
+            # up front means there's never a GPU context to release, so
+            # terminate() here has nothing unsafe to tear down.
+            tmp = mpv.MPV(vo="null")
             devices = list(tmp.audio_device_list)
             tmp.terminate()
         except Exception:
