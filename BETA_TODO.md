@@ -37,6 +37,27 @@ routing on hybrid-graphics laptops).
 - [ ] **Residual ~7% audible click rate / hardware-side pop** — narrowed to
       device-level analog transients. Hold-on-fail; investigate only if users
       report.
+- [ ] **Native crash while a big new library root thumbnails during playback**
+      — dogfood 2026-08-29, **not reproduced since, no root cause**. Sequence
+      from `debug-stream-20260829-152833.jsonl`: root changed to `E:i`
+      (177 videos) → activated a video-only scene → Play (2 video slots, one
+      filling an ultrawide) → the grid kept generating thumbnails for ~13 s →
+      process died. `faulthandler.log` ends in an `access violation` that is
+      **truncated mid-write** (severe enough to kill the process before the
+      dump finished), so there is no usable crashing frame. Ruled out: the
+      thumbnail grabber on its own — 40 grabs, 2 concurrent, same folder,
+      headless, zero crashes; and the stim path — that scene had no stim of
+      any kind (slot 1 skipped, "no media"). Remaining suspicion is the known
+      mpv/D3D11 crash class, newly exercised by two live players plus a
+      thumbnail flood. **Next step is a repro on the current build with Debug
+      ON**, not a speculative fix. A candidate mitigation if it recurs: hold
+      thumbnail generation while players are active.
+- [ ] **Prev/Next chapter enabled on a scene that reported 0 chapters** —
+      dogfood 2026-08-29, user rates it harmless. Probably correct behavior
+      rather than a bug: the sidecar pass logged `chapter_count: 0`, but
+      `_maybe_populate_chapters_from_mpv` re-checks after launch and a
+      compilation almost certainly carries embedded chapter atoms. Confirm
+      which it was before touching the enable logic.
 - [ ] **White-screen-after-double-click (intermittent)** — reproduced ~3× in
       early dogfood, not seen since; capture stderr if it recurs
       (`python main.py 2> mpv-err.txt`). Close after a clean dogfood pass.
