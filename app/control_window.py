@@ -3678,6 +3678,14 @@ class ControlWindow(QMainWindow):
         # doesn't survive Close (would hold the secondary device handle
         # and play residual audio on the next Library click).
         self._engine.terminate_scene_audio_mirror()
+        # Same for the stim-audio mirror — the headless mpv that plays the
+        # stim SOUND FILE on the Haptic 2 device when a scene has no
+        # prostate-specific source. Missing this was a SAFETY bug, not just
+        # a leak: the mirror counts as an active player, so after Close the
+        # Play button stayed live and pressing it resumed e-stim on the
+        # dongle with every player window gone and nothing on screen saying
+        # anything was running (dogfood 2026-08-29, sound-file scenes).
+        self._engine.terminate_stim_audio_mirror()
         self._btn_play.setText("▶  Play")
         self._seek_bar.setValue(0)
         self._time_label.setText("0:00")
@@ -3693,6 +3701,21 @@ class ControlWindow(QMainWindow):
         self._update_calibrate_buttons_enabled()
 
     # ── Calibrate ──────────────────────────────────────────────────────────────
+
+    def _raise_console(self) -> None:
+        """Bring the console to the front without touching playback.
+
+        Driven by the Console button on every player overlay and by Escape in
+        a windowed player. Players are usually fullscreen on other monitors
+        and the console sits behind them; before this, the only way back to it
+        was closing the players, which threw away the position you were at
+        (dogfood 2026-08-29). Nothing here starts, stops or seeks anything.
+        """
+        DebugLog.record("console.raise_requested")
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     def _on_calibrate_h1(self) -> None:
         self._toggle_calibrate(port="h1")
@@ -4949,6 +4972,7 @@ class ControlWindow(QMainWindow):
             pw.close_all_requested.connect(self._close_players)
             pw.prev_chapter_requested.connect(self._on_prev_chapter)
             pw.next_chapter_requested.connect(self._on_next_chapter)
+            pw.console_requested.connect(self._raise_console)
             pw.set_chapter_nav_enabled(bool(self._chapters))
             # Always place WINDOWED at launch — even when "Fullscreen players"
             # is on. Going fullscreen here embeds mpv at the windowed size

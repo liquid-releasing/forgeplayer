@@ -79,6 +79,29 @@ have to relaunch. New launches read the toggle's current state.
 
 `F11` inside any player window also toggles fullscreen for that slot.
 
+## Getting back to the console
+
+Players usually cover the monitors they're on, and the console sits behind
+them. Two ways back, neither of which touches playback:
+
+- **Console** button on the player's own control bar (click the video once to
+  show the bar if it's hidden).
+- **Escape** — from a fullscreen player it drops that window back to windowed;
+  from a windowed player it raises the console.
+
+Escape never closes anything. Closing is the **X** on a player window, a
+**double-click** on a player, or **Close players** on the console — and all
+three tear down every player together, because closing one on its own would
+leave the others frozen against a dead mpv handle.
+
+## Keyboard shortcuts
+
+| Key | In a player window |
+|---|---|
+| `Space` | Play / pause |
+| `F11` | Toggle fullscreen for that slot |
+| `Esc` | Leave fullscreen, or raise the console |
+
 ## Video playback & 4K
 
 ForgePlayer uses GPU hardware decoding when it's available (`hwdec=auto-safe`),

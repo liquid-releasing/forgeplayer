@@ -735,7 +735,15 @@ class SyncEngine:
                 pass
 
     def has_active_players(self) -> bool:
-        return bool(self._active)
+        """True when a real SLOT player is up — video, or headless audio-only.
+
+        Deliberately not `bool(self._active)`: that includes the scene-audio
+        and stim-audio mirrors, which are followers, not players. Nothing
+        drives them but a slot player, so a surviving mirror must never make
+        the app look playable — that read is what let Play stay enabled after
+        Close and resume e-stim with no window open (dogfood 2026-08-29).
+        """
+        return any(p is not None for p in self._players)
 
     # ── Device discovery ──────────────────────────────────────────────────────
 

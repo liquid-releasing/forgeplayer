@@ -23,6 +23,14 @@ stim sound isn't a haptic scene, so it doesn't get a tile in the default view
     project in FunscriptForge (export a `.forge` bundle or an `.output/` folder)
     and *that* is what ForgePlayer picks up.
 
+!!! note "Audio-only scenes don't get a tile"
+    Every tile is anchored to a **video**. A folder holding only a stim sound
+    (an e-stim `.mp3` / `.wav` with no video beside it) is not listed, because
+    the scanner returns scenes that have a video to play. That's deliberate —
+    the Library is a launcher for scenes you *watch*. To play a stim sound on
+    its own, use the **Live** tab's **Browse** buttons to point a slot straight
+    at the audio file.
+
 ## How the Library matches files to a video
 
 The **haptic asset leads**: the scanner finds the funscripts / bundles / stim

@@ -1,7 +1,7 @@
 # ForgePlayer — release-candidate user testing
 
 **Build under test:** `dist\ForgePlayer\ForgePlayer.exe` — a **frozen PyInstaller
-build**, made 2026-08-29 from `main` @ `72f9187`, stamped **0.0.16-dev**.
+build**, made 2026-08-29 from `main`, stamped **0.0.16-dev**.
 This is deliberately *not* `python main.py`: every fix since v0.0.15 has only ever
 been tested through the dev venv, and BETA_TODO gate #3 is "feel-test the actual
 built artifact."
@@ -22,8 +22,7 @@ close it and relaunch from `dist\ForgePlayer\ForgePlayer.exe`.
 - In `faulthandler.log`, `Windows fatal exception: code 0xe24c4a02` is **benign
   noise**. A real crash reads `access violation` followed by `Current thread`.
 
-Automated state going in: **420/420 tests pass**; working tree clean apart from
-the local version stamp.
+Automated state going in: **436/436 tests pass**.
 
 ---
 
@@ -62,12 +61,20 @@ thoroughly." Three shapes:
 - [ ] For each: H1 plays the mp3, video stays in sync, **seek keeps them locked**,
       pause/resume doesn't drift.
 
-**B. Scene with no video at all**
+**B. Audio with no video at all**
 
-- [ ] Play `test_media\Salon DeSade's JOY` and `test_media\Twisted Tales 1`
-      (audio-only folders — no mp4).
-- [ ] No player window opens; transport (play / pause / ±10 s / seek bar) still
-      works; Close tears down cleanly with no window to close.
+Corrected 2026-08-29: `Salon DeSade's JOY` and `Twisted Tales 1` are *not*
+audio-only — both hold `.m4v` videos. And audio-only folders never appear in
+the Library at all: the scanner returns scenes that have a video, so a
+stim-sound-only folder has no tile. That's now a **documented limitation**
+(user decision — the Library stays video-first), so this shape is exercised
+through the Live tab instead.
+
+- [ ] **Live → Browse** a stim slot straight at an audio file —
+      `test_media\Audio Only Fixture\Audio Only Fixture.mp3` exists for this
+      (a hardlink, no extra disk).
+- [ ] No player window opens for that slot; transport (play / pause / ±10 s /
+      seek bar) still works; Close tears down cleanly.
 
 **C. The safety refusal**
 
@@ -99,8 +106,9 @@ Seen ~3× in early dogfood, never since. This gate closes on a clean pass.
 
 **1. Close / relaunch (the AMD-driver crash class)**
 
-- [ ] Close players via **X**, via **Escape**, via **double-click**, and via the
-      **Close** button — all players close together every time.
+- [ ] Close players via **X**, via **double-click**, and via the **Close**
+      button — all players close together every time. (Escape no longer closes;
+      see item 10.)
 - [ ] Relaunch after each. Do ~10 launch/close cycles.
 - [ ] Task Manager: no orphaned `ForgePlayer.exe` processes left behind.
 - [ ] Fullscreen sticks on the **2nd and later** launches, not just the first.
@@ -177,6 +185,35 @@ and the GUI thread keeps pumping while a dialog is open.
       **Scan folder**, **Session → Open**, **Session → Save As**.
 - [ ] Save As pre-fills the session name and appends `.forgeplayer-session`.
 
+**9. Close really closes** *(fixed 2026-08-29)*
+
+Found in your gate-2 pass: after closing the players, **Play stayed enabled and
+pressing it resumed e-stim** — with every window gone and nothing on screen
+saying anything was running. `_close_players` tore down every slot and the
+scene-audio mirror but never the **stim-audio mirror** (the headless mpv that
+feeds Haptic 2 a sound file), and that mirror counts as an active player.
+
+- [ ] Play a **sound-file** scene where Haptic 2 mirrors Haptic 1, then
+      **Close**. Play must go grey and dead, and **nothing** may come out of
+      either dongle.
+- [ ] Click a different scene afterwards — no residual audio from the old one.
+- [ ] Repeat with a funscript-driven scene: Close, then confirm Play is dead.
+
+**10. Escape and the Console button** *(changed 2026-08-29)*
+
+Escape used to tear down every player, which was also the only way back to a
+buried console — and it cost you your position. Escape now means "get me out of
+this view".
+
+- [ ] **Esc in a fullscreen player** → that window drops to windowed. Nothing
+      closes, playback continues.
+- [ ] **Esc in a windowed player** → the console comes to the front. Playback
+      continues.
+- [ ] **Console** button on the player's control bar does the same (click the
+      video once to reveal the bar).
+- [ ] Closing still works exactly as before: **X**, **double-click**, and the
+      console's **Close players** all tear down every player together.
+
 ## Known — do **not** file these
 
 - **Unsigned build / SmartScreen warning** — code-signing deliberately deferred.
@@ -187,6 +224,13 @@ and the GUI thread keeps pumping while a dialog is open.
 - **+10 s while stopped** jumps to 0.
 - Empty Live tab has no "pick a scene" hint.
 - HDR **thumbnail** renders white (player HDR itself is fine).
+- **Pop on seek with sound-file stim** — reported 2026-08-29, root cause known:
+  `_seek_with_envelope` ramps the live synth down and back up around a seek, but
+  a stim **sound file** plays through mpv, which has no stim stream to ramp, so
+  the waveform splices at an arbitrary phase. Explains why funscripts don't pop.
+  Deferred pending your read on how significant it is.
+- **Audio-only folders have no Library tile** — by design, now documented in
+  the Library user guide. Use Live → Browse.
 
 ---
 

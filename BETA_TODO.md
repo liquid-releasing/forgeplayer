@@ -72,7 +72,8 @@ routing on hybrid-graphics laptops).
 - [ ] **Keyboard shortcuts** — Space = play/pause, Left/Right = skip ±5 s,
       arrow-key Prev/Next chapter, and arrow-key navigation across Library
       tiles. **Partially shipped**: Space (play/pause), F11 (fullscreen), and
-      Escape (close) already work on the player window. Left/Right skip,
+      Escape (leave fullscreen / raise the console — 2026-08-29; it used to
+      close every player) already work on the player window. Left/Right skip,
       chapter-key nav, and Library arrow-key nav are still open.
 - [ ] **Remember control-window size / position** between sessions.
 - [ ] **Per-player window title bar showing filename** — the control window has

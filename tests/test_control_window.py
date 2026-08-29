@@ -232,3 +232,45 @@ def test_stim_folder_scanned_does_not_duplicate_existing_set(control_window):
     # Same base_stem already present -> not appended a second time.
     assert entry.funscript_sets == [existing]
     assert win._current_choices.funscript_set is rescanned
+
+
+# ── Close tears down the stim-audio mirror ───────────────────────────────────
+#
+# Dogfood 2026-08-29 (sound-file scenes): after closing the players, Play was
+# still enabled and pressing it resumed e-stim on the Haptic 2 dongle with no
+# window open and nothing on screen saying anything was running. _close_players
+# terminated every slot and the scene-audio mirror but never the stim-audio
+# mirror, and that mirror counts toward the engine's active list.
+
+class _FakeMirror:
+    """Stands in for the headless mpv that mirrors H1's sound file to H2."""
+
+    def __init__(self) -> None:
+        self.terminated = False
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+
+def test_close_players_terminates_the_stim_audio_mirror(control_window):
+    win = control_window
+    mirror = _FakeMirror()
+    win._engine._stim_audio_mirror = mirror
+
+    win._close_players()
+
+    assert mirror.terminated, "e-stim mirror survived Close"
+    assert win._engine._stim_audio_mirror is None
+
+
+def test_close_players_leaves_nothing_playable_behind(control_window):
+    """The user-visible half: Play must go dead after Close."""
+    win = control_window
+    win._engine._stim_audio_mirror = _FakeMirror()
+    win._engine._scene_audio_mirror = _FakeMirror()
+
+    win._close_players()
+
+    assert not win._engine.has_active_players()
+    assert not win._btn_play.isEnabled()
+    assert win._btn_play.text() == "▶  Play"

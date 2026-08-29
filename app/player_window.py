@@ -56,6 +56,11 @@ class PlayerWindow(QWidget):
     # of it that could drift.
     prev_chapter_requested = Signal()
     next_chapter_requested = Signal()
+    # "Console" on this window's overlay, and Escape from a windowed player.
+    # Raises the control window WITHOUT touching playback — with the console
+    # usually hidden behind fullscreen players, the only way back used to be
+    # closing the players, which lost your place (dogfood 2026-08-29).
+    console_requested = Signal()
 
     def __init__(self, slot_index: int, engine: SyncEngine) -> None:
         super().__init__()
@@ -182,6 +187,21 @@ class PlayerWindow(QWidget):
         self._dur_lbl.setStyleSheet("color: #e0e0e0; font-size: 11px;")
         h.addWidget(self._dur_lbl)
 
+        # Console — bring the control window back to the front. The console
+        # is normally buried under fullscreen players; without this the only
+        # route back was closing them, which throws away your position.
+        self._btn_console = QPushButton("Console")
+        self._btn_console.setFixedHeight(28)
+        self._btn_console.setStyleSheet(
+            "background: #2d3148; color: #e0e0e0; border-radius: 4px;"
+            " font-size: 11px; padding: 0 10px;"
+        )
+        self._btn_console.setToolTip(
+            "Show the ForgePlayer console — playback keeps running"
+        )
+        self._btn_console.clicked.connect(self.console_requested.emit)
+        h.addWidget(self._btn_console)
+
         return bar
 
     # ── Transport slots ────────────────────────────────────────────────────────
@@ -244,11 +264,21 @@ class PlayerWindow(QWidget):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
-            DebugLog.record("key.escape", slot=self.slot_index)
-            # Signal ControlWindow to tear down all players together. Closing
-            # just this window leaves the engine polling a dead mpv handle,
-            # which freezes the remaining player windows.
-            self._request_close_all()
+            # Escape means "get me out of this view", never "throw the
+            # session away" (user decision, 2026-08-29). Fullscreen → drop to
+            # windowed; already windowed → raise the console. Closing is X,
+            # double-click, or the console's Close button — all of which go
+            # through the group teardown, because closing one window alone
+            # leaves the engine polling a dead mpv handle and freezes the rest.
+            fullscreen = self.isFullScreen()
+            DebugLog.record(
+                "key.escape", slot=self.slot_index,
+                action="exit_fullscreen" if fullscreen else "raise_console",
+            )
+            if fullscreen:
+                self.showNormal()
+            else:
+                self.console_requested.emit()
         elif event.key() == Qt.Key.Key_F11:
             DebugLog.record("key.f11", slot=self.slot_index)
             self._toggle_fullscreen()
