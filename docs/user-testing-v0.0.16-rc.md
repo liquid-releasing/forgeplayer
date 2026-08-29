@@ -214,6 +214,27 @@ this view".
 - [ ] Closing still works exactly as before: **X**, **double-click**, and the
       console's **Close players** all tear down every player together.
 
+**11. The seek pop on sound-file stim** *(fixed 2026-08-29)*
+
+The long-running one. `_seek_with_envelope` ramped the live synth down, seeked,
+settled, ramped back up — but it only ever ramped `StimAudioStream`s. A
+pre-rendered stim **sound file** plays through mpv, which has no stream to ramp,
+so the seek landed raw and the waveform spliced mid-phase. That's why funscripts
+never popped and sound files always did. mpv's software volume now rides the
+same envelope, with cosine easing and 10 ms steps so the fade itself is
+inaudible.
+
+- [ ] **Sound-file scene, ±10 s forward and back, repeatedly** — no pop on the
+      stim line. This is the check that matters.
+- [ ] Same on **seek-bar drags** and **chapter Prev/Next**.
+- [ ] A sound-file seek should now *feel* like a funscript seek — same ~1.2 s
+      fade-out / settle / fade-in, not an instant jump.
+- [ ] Set the scene volume to something other than full, then seek: your volume
+      comes back at the **same level**, not reset to 100.
+- [ ] Seek, then hit **Close** mid-fade, then relaunch and play — stim comes
+      back at full level, not stuck quiet.
+- [ ] Funscript scenes are unchanged: same seek feel as before this build.
+
 ## Known — do **not** file these
 
 - **Unsigned build / SmartScreen warning** — code-signing deliberately deferred.
@@ -224,11 +245,6 @@ this view".
 - **+10 s while stopped** jumps to 0.
 - Empty Live tab has no "pick a scene" hint.
 - HDR **thumbnail** renders white (player HDR itself is fine).
-- **Pop on seek with sound-file stim** — reported 2026-08-29, root cause known:
-  `_seek_with_envelope` ramps the live synth down and back up around a seek, but
-  a stim **sound file** plays through mpv, which has no stim stream to ramp, so
-  the waveform splices at an arbitrary phase. Explains why funscripts don't pop.
-  Deferred pending your read on how significant it is.
 - **Audio-only folders have no Library tile** — by design, now documented in
   the Library user guide. Use Live → Browse.
 

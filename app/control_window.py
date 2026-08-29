@@ -49,6 +49,7 @@ _ESTIM_CORES = STEREOSTIM_CHANNELS | FOC_STIM_CHANNELS | FOUR_PHASE_ELECTRODE_CH
 from app.select_picker import SelectPicker, SelectionChoices
 from app.library.pins import has_pin, load_pin, resolve_pin, save_pin
 from app.debug_log import DebugLog
+from app.mpv_envelope import TICK_MS, MpvVolumeEnvelope
 from app.version import __version__
 from app.widgets import ClickableSlider
 from app.preferences import Preferences
@@ -261,6 +262,14 @@ class ControlWindow(QMainWindow):
         self._timer = QTimer(self)
         self._timer.setInterval(_POLL_MS)
         self._timer.timeout.connect(self._poll)
+
+        # Volume envelope for stim that plays through mpv (a pre-rendered
+        # sound file rather than the live synth) — see app/mpv_envelope.py.
+        # Runs only while a seek is fading; stopped the moment it settles.
+        self._mpv_envelope = MpvVolumeEnvelope()
+        self._mpv_envelope_timer = QTimer(self)
+        self._mpv_envelope_timer.setInterval(TICK_MS)
+        self._mpv_envelope_timer.timeout.connect(self._tick_mpv_envelope)
 
     # ── UI construction ────────────────────────────────────────────────────────
 
@@ -3569,6 +3578,10 @@ class ControlWindow(QMainWindow):
             keep_slots=sorted(keep_slots),
         )
         self._timer.stop()
+        # A seek fading when the user hits Close would otherwise leave its
+        # ducked gain behind on a reused mpv instance.
+        self._mpv_envelope_timer.stop()
+        self._mpv_envelope.release()
         self._engine.stop_all()
         # Stop any live StimSynth audio streams BEFORE terminating mpv —
         # the synth's media-sync callback reads mpv state, so killing
@@ -5181,6 +5194,56 @@ class ControlWindow(QMainWindow):
                 streams.append(aux)
         return streams
 
+    def _mpv_stim_players(self) -> list:
+        """Every mpv instance currently playing STIM audio.
+
+        A scene whose stim is a pre-rendered sound file has no StimAudioStream
+        to fade — H1's audio-file dispatch plays through the stim slot's own
+        headless mpv, and Haptic 2 mirrors it through a second one. Those are
+        the players the seek envelope has to duck; without them the seek landed
+        raw and the waveform discontinuity came out of the dongle as a pop
+        (user report, 2026-08-29).
+
+        Scene audio is deliberately not included: it isn't stim, and ducking
+        what the user is listening to on every ±10 s would be its own bug.
+        """
+        players: list = []
+        for i in range(_NUM_SLOTS):
+            if _SLOT_ROLES[i] != "stim":
+                continue
+            if self._slot_data(i).get("primary_dispatch") != "audio_file":
+                continue
+            p = self._engine.player_for_slot(i)
+            if p is not None:
+                players.append(p)
+        mirror = self._engine.stim_audio_mirror()
+        if mirror is not None:
+            players.append(mirror)
+        return players
+
+    def _request_mpv_stim_gain(self, players: list, target: float) -> None:
+        """Ramp mpv-backed stim toward `target` gain over the envelope time.
+
+        Same shape and duration as StimAudioStream.request_envelope, so a scene
+        that has both (synth on H1, sound file mirrored to H2) fades as one.
+        """
+        if not players:
+            # Nothing left to fade. If a duck is still in flight (the scene
+            # changed or closed between ramp-down and ramp-up), reset rather
+            # than leaving the envelope parked at a partial gain — the next
+            # seek would start its fade from that stale value.
+            if self._mpv_envelope.tracks_anything():
+                self._mpv_envelope_timer.stop()
+                self._mpv_envelope.release()
+            return
+        self._mpv_envelope.request(players, target, self._SEEK_ENVELOPE_S)
+        if not self._mpv_envelope_timer.isActive():
+            self._mpv_envelope_timer.start()
+
+    def _tick_mpv_envelope(self) -> None:
+        if not self._mpv_envelope.tick(TICK_MS / 1000.0):
+            self._mpv_envelope_timer.stop()
+
     def _seek_with_envelope(self, pos: float) -> None:
         """Seek every active player to `pos` with a three-stage
         envelope: ramp-down → settle hold → ramp-up. Hides the
@@ -5195,8 +5258,9 @@ class ControlWindow(QMainWindow):
         to fade.
         """
         streams = self._all_active_stim_streams()
+        mpv_stim = self._mpv_stim_players()
         needs_envelope = (
-            bool(streams)
+            (bool(streams) or bool(mpv_stim))
             and self._engine.has_active_players()
             and not self._engine.is_paused()
         )
@@ -5206,11 +5270,13 @@ class ControlWindow(QMainWindow):
 
         DebugLog.record(
             "seek.envelope_start", target_s=pos, streams=len(streams),
+            mpv_stim=len(mpv_stim),
             ramp_seconds=self._SEEK_ENVELOPE_S,
             settle_seconds=self._SEEK_SETTLE_S,
         )
         for s in streams:
             s.request_envelope(0.0, self._SEEK_ENVELOPE_S)
+        self._request_mpv_stim_gain(mpv_stim, 0.0)
 
         def _do_seek() -> None:
             DebugLog.record("seek.execute", target_s=pos)
@@ -5220,6 +5286,7 @@ class ControlWindow(QMainWindow):
                 DebugLog.record("seek.ramp_up", target_s=pos)
                 for s in streams:
                     s.request_envelope(1.0, self._SEEK_ENVELOPE_S)
+                self._request_mpv_stim_gain(self._mpv_stim_players(), 1.0)
 
             QTimer.singleShot(
                 int(self._SEEK_SETTLE_S * 1000), _do_ramp_up,

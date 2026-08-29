@@ -274,3 +274,120 @@ def test_close_players_leaves_nothing_playable_behind(control_window):
     assert not win._engine.has_active_players()
     assert not win._btn_play.isEnabled()
     assert win._btn_play.text() == "▶  Play"
+
+
+# ── Seek envelope covers mpv-backed stim ─────────────────────────────────────
+#
+# A scene whose stim is a pre-rendered sound file plays through mpv, not a
+# StimAudioStream, so the seek envelope used to skip it entirely and the seek
+# landed raw — the pop on sound-file scenes (user report 2026-08-29).
+
+class _FakeMpv:
+    def __init__(self, volume: float = 100.0) -> None:
+        self.volume = volume
+
+
+def _sound_file_scene(win, monkeypatch, *, mirror=True):
+    """Wire the window up as if a sound-file stim scene were playing."""
+    stim = _FakeMpv()
+    video = _FakeMpv()
+    mirror_player = _FakeMpv() if mirror else None
+    win._slot_data(1)["primary_dispatch"] = "audio_file"
+    monkeypatch.setattr(
+        win._engine, "player_for_slot",
+        lambda i: {0: video, 1: stim}.get(i),
+    )
+    monkeypatch.setattr(win._engine, "stim_audio_mirror", lambda: mirror_player)
+    monkeypatch.setattr(win._engine, "has_active_players", lambda: True)
+    monkeypatch.setattr(win._engine, "is_paused", lambda: False)
+    return stim, video, mirror_player
+
+
+def test_mpv_stim_players_finds_the_sound_file_outputs(control_window, monkeypatch):
+    win = control_window
+    stim, video, mirror = _sound_file_scene(win, monkeypatch)
+
+    found = win._mpv_stim_players()
+
+    assert stim in found and mirror in found
+    assert video not in found, "scene audio must not be ducked on every seek"
+
+
+def test_mpv_stim_players_ignores_synth_dispatch(control_window, monkeypatch):
+    """A funscript scene drives StimAudioStream; mpv has no stim to fade."""
+    win = control_window
+    _sound_file_scene(win, monkeypatch, mirror=False)
+    win._slot_data(1)["primary_dispatch"] = "funscript"
+
+    assert win._mpv_stim_players() == []
+
+
+def test_mpv_stim_players_always_include_the_mirror(control_window, monkeypatch):
+    """The H2 mirror IS stim through mpv, whatever H1 happens to dispatch —
+    if it exists at all it's playing a sound file to the dongle, so it fades."""
+    win = control_window
+    _stim, _video, mirror = _sound_file_scene(win, monkeypatch)
+    win._slot_data(1)["primary_dispatch"] = "funscript"
+
+    assert win._mpv_stim_players() == [mirror]
+
+
+def test_seek_fades_mpv_stim_before_seeking(control_window, monkeypatch):
+    win = control_window
+    stim, _video, mirror = _sound_file_scene(win, monkeypatch)
+    seeks: list[float] = []
+    monkeypatch.setattr(win._engine, "seek_all", lambda pos: seeks.append(pos))
+
+    win._seek_with_envelope(42.0)
+
+    assert seeks == [], "the seek must wait for the fade, not fire immediately"
+    for _ in range(200):                     # drive the fade to silence
+        win._tick_mpv_envelope()
+    assert stim.volume == 0
+    assert mirror.volume == 0
+
+
+def test_seek_without_any_stim_still_seeks_immediately(control_window, monkeypatch):
+    """No stim of either kind → nothing to fade, so don't add latency."""
+    win = control_window
+    _sound_file_scene(win, monkeypatch, mirror=False)
+    win._slot_data(1)["primary_dispatch"] = "funscript"
+    seeks: list[float] = []
+    monkeypatch.setattr(win._engine, "seek_all", lambda pos: seeks.append(pos))
+
+    win._seek_with_envelope(7.5)
+
+    assert seeks == [7.5]
+
+
+def test_close_releases_a_fade_in_flight(control_window, monkeypatch):
+    """Close mid-seek must not leave a ducked gain on a reused instance."""
+    win = control_window
+    stim, _video, _mirror = _sound_file_scene(win, monkeypatch)
+    win._seek_with_envelope(10.0)
+    for _ in range(20):
+        win._tick_mpv_envelope()
+    assert stim.volume < 100
+
+    win._close_players()
+
+    assert stim.volume == 100
+    assert not win._mpv_envelope.tracks_anything()
+
+
+def test_fade_resets_when_the_stim_players_disappear(control_window, monkeypatch):
+    """Scene changed (or closed) between ramp-down and ramp-up: the envelope
+    must reset, not stay parked at a partial gain the next seek would ramp
+    from."""
+    win = control_window
+    stim, _video, _mirror = _sound_file_scene(win, monkeypatch)
+    win._request_mpv_stim_gain([stim], 0.0)
+    for _ in range(20):
+        win._tick_mpv_envelope()
+    assert win._mpv_envelope.gain < 1.0
+
+    win._request_mpv_stim_gain([], 1.0)
+
+    assert win._mpv_envelope.gain == 1.0
+    assert not win._mpv_envelope.tracks_anything()
+    assert stim.volume == 100

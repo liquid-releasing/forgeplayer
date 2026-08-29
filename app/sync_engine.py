@@ -725,6 +725,16 @@ class SyncEngine:
                 return True
         return True
 
+    def player_for_slot(self, slot: int) -> Optional["mpv.MPV"]:
+        """The mpv instance in `slot`, or None if that slot is empty."""
+        if 0 <= slot < self.MAX_SLOTS:
+            return self._players[slot]
+        return None
+
+    def stim_audio_mirror(self) -> Optional["mpv.MPV"]:
+        """The headless mpv mirroring H1's stim sound file to Haptic 2."""
+        return self._stim_audio_mirror
+
     def set_volume(self, slot: int, value: int) -> None:
         """Set volume 0–100 for a single slot."""
         p = self._players[slot]
