@@ -337,6 +337,21 @@ def main() -> int:
                             h_process, pid, evt.dwThreadId, out_dir,
                         )
                         print(f"    minidump: {dump}", flush=True)
+                        if dump:
+                            # A debugger has no debuggee-side EXCEPTION_POINTERS
+                            # to give MiniDumpWriteDump, so the dump carries no
+                            # exception stream. Record what we know beside it so
+                            # read_minidump.py can pick the right thread without
+                            # being told.
+                            dump.with_suffix(".txt").write_text(
+                                "\n".join([
+                                    f"tid={evt.dwThreadId}",
+                                    f"code=0x{exc:08X} {FATAL_CODES[exc]}",
+                                    f"address=0x{addr:016x}",
+                                    f"module={where}",
+                                ]) + "\n",
+                                encoding="utf-8",
+                            )
                     status = DBG_EXCEPTION_NOT_HANDLED
                 else:
                     noise += 1
