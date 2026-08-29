@@ -1,6 +1,6 @@
 # ForgePlayer User Guide
 
-Feature-by-feature reference for v0.0.15. If you're brand new, start at
+Feature-by-feature reference for v0.0.16. If you're brand new, start at
 [Getting Started](../getting-started.md) and come back here when you
 need detail.
 
@@ -109,7 +109,7 @@ session unless you explicitly start a new one via the Library scan.
 
 ---
 
-## Known limitations (v0.0.15)
+## Known limitations (v0.0.16)
 
 - **Control panel sizing on monitor change** — moving the control
   window to a smaller secondary screen can leave it taller than
@@ -121,7 +121,7 @@ session unless you explicitly start a new one via the Library scan.
 - **Single-decoder for video walls** — currently three independent
   decoders synced via mpv time-pos. Frame-perfect single-decoder
   rendering is a future feature for true video-wall use cases.
-- **HDR passthrough disabled (v0.0.15)** — the HDR-on-Windows renderer
+- **HDR passthrough disabled (v0.0.16)** — the HDR-on-Windows renderer
   (`gpu-next` / libplacebo) crashed on teardown, so playback uses the stable
   `gpu` renderer. HDR10 content can look over-bright on an **HDR-ON** display;
   turn Windows HDR **off** for now. Re-enabling awaits an upstream fix.
@@ -142,12 +142,12 @@ routing e-stim to your speakers. If you only have one stim box, set **Haptic 2**
 to "— not set —".
 
 **I hear e-stim through my computer speakers.**
-That shouldn't happen in v0.0.15. Check that **Haptic 1 / Haptic 2** point at
+That shouldn't happen in v0.0.16. Check that **Haptic 1 / Haptic 2** point at
 your **USB dongle** (not "Speakers"), and that **Scene Audio** is a *different*
 device. Reselect and **Refresh devices**.
 
 **HDR video looks washed-out or over-bright.**
-HDR passthrough is disabled in v0.0.15 for stability. Turn **Windows HDR off**
+HDR passthrough is disabled in v0.0.16 for stability. Turn **Windows HDR off**
 for the playback monitor (Settings → Display → HDR) while testing.
 
 **Bluetooth output is glitchy / laggy.** Bluetooth audio is untested — use a

@@ -42,7 +42,7 @@ every play, pause, and scrub.
 -   :material-television: **[HDR Content](hdr-content.md)**
 
     Producing HDR10 content (Topaz Video AI workflows). Note: HDR
-    *passthrough* in the player is temporarily disabled in v0.0.15 for
+    *passthrough* in the player is temporarily disabled in v0.0.16 for
     stability — see the page for details.
 
 </div>
@@ -106,9 +106,9 @@ double-click a `.forge`.
 
 ## Download
 
-**v0.0.15 — released 2026-08-07.**
+**v0.0.16 — released 2026-08-29.**
 
-[:material-download: Download v0.0.15 (Windows / macOS / Linux)](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest){ .md-button .md-button--primary }
+[:material-download: Download v0.0.16 (Windows / macOS / Linux)](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest){ .md-button .md-button--primary }
 
 ### Windows: keeping the download
 

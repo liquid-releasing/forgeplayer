@@ -1,6 +1,6 @@
 # Producing HDR content for ForgePlayer
 
-!!! warning "HDR passthrough is disabled in v0.0.15"
+!!! warning "HDR passthrough is disabled in v0.0.16"
     ForgePlayer currently plays with mpv's stable `gpu` renderer, which does
     **not** pass HDR through to the display (the HDR renderer, `gpu-next`,
     crashed on teardown and was reverted for stability). HDR10 files still play

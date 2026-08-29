@@ -299,9 +299,14 @@ jobs:
             ForgePlayer is a synchronized multi-screen player with per-port device routing. Drop a FunscriptForge or ForgeAssembler scene pack into the Library and ForgePlayer plays it across your screens — with audio routed separately to scene speakers, your Haptic 1 stim port, and (optionally) a Haptic 2 prostate port — all from the same timeline.
 
             **What's new since the last cut:**
-            - **Smoother 4K playback** — video now decodes on the GPU when available (`hwdec=auto-safe`), offloading it from the CPU. Fixes the freezes/stutter on large, high-bitrate 4K (e.g. AI-upscaled sources) that previously choked the processor — and, with it, the haptic sync. Falls back to software decode automatically for anything the GPU can't handle. **A GPU is not required**, but it plays big 4K far more smoothly.
-            - **"Now playing" header on Live** — the Live tab now names the active scene, and for FunscriptForge exports the origin `<stem>.forge` bundle, so you always see what's loaded rather than just a relinked video filename
-            - **Clearer Scene Audio labels** — the Scene Audio line names the scene instead of the raw (often cache-named) video file
+            - **Close now shuts off every stim path** — pressing **Close** used to leave a headless audio mirror alive, so a later **Play** could resume e-stim with no player window on screen. It can't any more. If you run stim, take this release.
+            - **The player stopped crashing** — the crash *reporter* was the crash. Python's fault handler was set to print every thread's stack on every low-level exception, and mpv raises hundreds of harmless ones per session; walking ~290 live threads' frames while they were still running is what took the app down mid-playback. One line fixed it: a session that previously died in under three minutes now absorbs three times the exception load for sixteen minutes and exits cleanly. Two earlier crashes are also fixed — closing and relaunching a player, and clicking **Prev/Next chapter** rapidly.
+            - **No more pop when you skip with sound-file stim** — seeking forward/back spliced the stim audio raw. It now rides the same fade the synth path always used.
+            - **Escape doesn't end your session** — it drops a fullscreen player back to a window, and otherwise raises the console. Every player overlay also gets a **Console** button, so a covered console is one click away instead of a lost place in the scene.
+            - **Real Windows file and folder pickers everywhere** — Quick Access, Videos, and the rest of the shell sidebar, on every browse button including the Library root. Picking a folder no longer freezes the app into "(Not Responding)".
+            - **Prev/Next chapter on the player overlay**, plus seek-bar markers — chapter navigation without going back to the console.
+            - **Library scans no longer freeze the window** — folder scanning and thumbnailing moved off the UI thread.
+            - **Update check** — **About → Check for updates** asks forgeplayer.app whether a newer build exists and offers to open the download page.
 
             **Device compatibility:** mechanical, 2b, stereostim, FOC-stim — supported via pre-rendered stim audio (mp3) or live funscript synthesis (vendored restim).
 
