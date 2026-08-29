@@ -89,6 +89,11 @@ _FUNSCRIPT_FILTER = (
     "All files (*)"
 )
 _SESSION_FILTER = "ForgePlayer session (*.forgeplayer-session);;All files (*)"
+# Same filter in Win32 form for the native dialogs (label, semicolon globs).
+_SESSION_FILTER_WIN = [
+    ("ForgePlayer session", "*.forgeplayer-session"),
+    ("All files", "*.*"),
+]
 
 
 def _fmt_time(seconds: float) -> str:
@@ -1575,14 +1580,60 @@ class ControlWindow(QMainWindow):
         modal pump against mpv's event delivery (a hang bad enough to force a
         kill). Falls back to QFileDialog on non-Windows or any native error."""
         start = self._browse_start_dir()
+        return self._pick_file(title, start, filters_qt, filters_win)
+
+    # Every picker in the app goes through one of the three helpers below.
+    # Calling QFileDialog directly on the GUI thread brings back both bugs the
+    # native path exists to fix: Qt's dated non-native chrome (no Quick Access,
+    # no Videos) and a hard "Not Responding" hang while libmpv is playing
+    # in-process. See app/native_dialog.py for the mechanism.
+
+    def _pick_file(
+        self, title: str, start: str,
+        filters_qt: str, filters_win: list[tuple[str, str]],
+    ) -> str | None:
         from app.native_dialog import (  # noqa: PLC0415
-            NativeDialogUnavailable, native_open_file,
+            NativeDialogUnavailable, native_open_file, qt_modal_waiter,
         )
         try:
-            return native_open_file(title, start, filters_win)
+            return native_open_file(
+                title, start, filters_win, qt_modal_waiter(self),
+            )
         except NativeDialogUnavailable:
             path, _ = QFileDialog.getOpenFileName(self, title, start, filters_qt)
             return path or None
+
+    def _pick_save_file(
+        self, title: str, start_path: str,
+        filters_qt: str, filters_win: list[tuple[str, str]],
+        default_ext: str = "",
+    ) -> str | None:
+        """`start_path` is a full suggested path — its folder opens the dialog,
+        its basename pre-fills the filename box."""
+        from app.native_dialog import (  # noqa: PLC0415
+            NativeDialogUnavailable, native_save_file, qt_modal_waiter,
+        )
+        folder = os.path.dirname(start_path)
+        name = os.path.basename(start_path)
+        try:
+            return native_save_file(
+                title, folder, filters_win, name, default_ext,
+                qt_modal_waiter(self),
+            )
+        except NativeDialogUnavailable:
+            path, _ = QFileDialog.getSaveFileName(
+                self, title, start_path, filters_qt,
+            )
+            return path or None
+
+    def _pick_folder(self, title: str, start: str) -> str | None:
+        from app.native_dialog import (  # noqa: PLC0415
+            NativeDialogUnavailable, native_pick_folder, qt_modal_waiter,
+        )
+        try:
+            return native_pick_folder(title, start, qt_modal_waiter(self))
+        except NativeDialogUnavailable:
+            return QFileDialog.getExistingDirectory(self, title, start) or None
 
     def _on_browse_video(self) -> None:
         """Pick any video file as the scene's video → route the live scene to
@@ -3338,8 +3389,7 @@ class ControlWindow(QMainWindow):
     # ── Folder scan ──────────────────────────────────────────────────────────
 
     def _on_scan_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self, "Select media folder", "",        )
+        folder = self._pick_folder("Select media folder", self._browse_start_dir())
         if not folder:
             return
         assignments = auto_assign(folder, self._screen_sizes())
@@ -3394,8 +3444,10 @@ class ControlWindow(QMainWindow):
 
     def _on_session_open(self) -> None:
         DebugLog.record("session.open.dialog_open")
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open session", "", _SESSION_FILTER,        )
+        path = self._pick_file(
+            "Open session", self._browse_start_dir(),
+            _SESSION_FILTER, _SESSION_FILTER_WIN,
+        )
         DebugLog.record("session.open.dialog_closed", picked=bool(path))
         if path:
             self._load_session_from(path)
@@ -3480,9 +3532,10 @@ class ControlWindow(QMainWindow):
 
     def _on_session_save_as(self) -> None:
         DebugLog.record("session.save_as.dialog_open")
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save session as", self._default_session_save_path(),
-            _SESSION_FILTER,        )
+        path = self._pick_save_file(
+            "Save session as", self._default_session_save_path(),
+            _SESSION_FILTER, _SESSION_FILTER_WIN, "forgeplayer-session",
+        )
         DebugLog.record("session.save_as.dialog_closed", picked=bool(path))
         if path:
             if not path.endswith(".forgeplayer-session"):

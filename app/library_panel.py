@@ -46,6 +46,9 @@ from app.library import (
 )
 from app.library.channels import GENERATION_BADGES, DeviceGeneration
 from app.library.pins import has_pin
+from app.native_dialog import (
+    NativeDialogUnavailable, native_pick_folder, qt_modal_waiter,
+)
 from app.thumbnails import ThumbnailService
 
 
@@ -717,9 +720,19 @@ class LibraryPanel(QWidget):
     # ── Event handlers ──
 
     def _pick_root(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self, "Pick library root folder", self._root or os.getcwd(),
-        )
+        """Pick the library root through the real Explorer folder dialog.
+
+        Must go through `native_pick_folder`: `QFileDialog.getExistingDirectory`
+        on the GUI thread while libmpv is playing in-process either drops to
+        Qt's dated chrome (no Quick Access / Videos) or hangs the app outright.
+        See app/native_dialog.py. QFileDialog stays as the non-Windows fallback.
+        """
+        title = "Pick library root folder"
+        start = self._root or os.getcwd()
+        try:
+            folder = native_pick_folder(title, start, qt_modal_waiter(self))
+        except NativeDialogUnavailable:
+            folder = QFileDialog.getExistingDirectory(self, title, start)
         if folder:
             self.set_root(folder)
 
