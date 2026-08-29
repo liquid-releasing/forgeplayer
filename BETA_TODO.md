@@ -52,6 +52,21 @@ routing on hybrid-graphics laptops).
       thumbnail flood. **Next step is a repro on the current build with Debug
       ON**, not a speculative fix. A candidate mitigation if it recurs: hold
       thumbnail generation while players are active.
+- [ ] **An unreadable drive takes the app down instead of saying so** —
+      dogfood 2026-08-29, and the FIRST complete crash dump we've got
+      (`Current thread` marker present): the GUI thread died in native code
+      while **two thumbnail threads sat blocked in `_grab_frame_to`'s 20 s
+      demux wait** on files whose device had stopped responding. Root cause of
+      the symptoms was NOT ForgePlayer — a Samsung T5 EVO on `G:` was dropping
+      off the bus: directory entries still enumerated from cache while every
+      read failed ("The device is not ready" / "No medium found"), VLC couldn't
+      open the same files either, the pin write failed with `PermissionError`,
+      and minutes later the identical file read back fine three times in a row.
+      But the app should surface that, not hang 20 s per file and then die.
+      Proposed fix: probe readability (open + read a block) before `loadfile`
+      and before a thumbnail grab; on failure skip fast and surface a
+      user-actionable "can't read this file — drive disconnected?" instead of
+      the long demux wait. See [[feedback_user_actionable_errors]].
 - [ ] **Prev/Next chapter enabled on a scene that reported 0 chapters** —
       dogfood 2026-08-29, user rates it harmless. Probably correct behavior
       rather than a bug: the sidecar pass logged `chapter_count: 0`, but
