@@ -509,6 +509,35 @@ class TestStimAudioStream:
         mock_stream.close.assert_called_once()
         assert stream.is_running() is False
 
+    def test_stop_closes_the_device_even_if_the_fade_fails(self, fake_sounddevice):
+        """A failed fade must never leave the PortAudio stream open.
+
+        ControlWindow._close_players catches a stop() error and drops its
+        reference to the stream anyway, so an escape here means the audio
+        callback keeps firing into a half-collected Python object — a native
+        use-after-free, not something a try/except upstream can catch. The
+        crash on 2026-08-29 (teardown in flight, audio thread dying inside
+        numpy) is consistent with exactly that.
+        """
+        stream = StimAudioStream(
+            synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),
+            time_source=lambda: 0.0,
+        )
+        stream.start()
+        mock_stream = fake_sounddevice.OutputStream.return_value
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("fade path blew up")
+
+        stream.request_envelope = _boom  # type: ignore[method-assign]
+
+        with pytest.raises(RuntimeError):
+            stream.stop()
+
+        mock_stream.stop.assert_called_once()
+        mock_stream.close.assert_called_once()
+        assert stream.is_running() is False
+
     def test_stop_without_start_is_safe(self):
         stream = StimAudioStream(
             synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),

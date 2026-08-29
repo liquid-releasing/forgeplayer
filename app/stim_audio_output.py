@@ -784,27 +784,40 @@ class StimAudioStream:
             self._stopping = True
 
         fade = self.STOP_FADE_SECONDS if fade_seconds is None else float(fade_seconds)
-        self.request_envelope(0.0, fade)
+        # The fade is a nicety; closing the device is not. Everything from
+        # here runs under `finally` so ANY failure in the fade path still
+        # tears the stream down: if stop() escapes with the PortAudio stream
+        # still open, the caller drops its last reference to this object
+        # (ControlWindow._close_players clears stim_audio_stream even when a
+        # stop errored) and the audio callback keeps firing into a
+        # half-collected Python object — a native use-after-free, not a
+        # catchable exception. That is consistent with the 2026-08-29 crash:
+        # teardown in flight, GUI thread waiting in _close_players, and an
+        # audio thread dying inside numpy mid-generate.
+        try:
+            self.request_envelope(0.0, fade)
 
-        # Block on the GUI thread until the envelope has had time to
-        # complete + a small cushion for the last audio callback to
-        # apply it. Acceptable because every caller of stop() is a
-        # deliberate user gesture (close, calibrate-tap-off).
-        import time  # noqa: PLC0415
-        time.sleep(fade + 0.02)
+            # Block on the GUI thread until the envelope has had time to
+            # complete + a small cushion for the last audio callback to
+            # apply it. Acceptable because every caller of stop() is a
+            # deliberate user gesture (close, calibrate-tap-off).
+            import time  # noqa: PLC0415
+            time.sleep(fade + 0.02)
+        finally:
+            with self._lock:
+                stream = self._stream
+                self._stream = None
 
-        with self._lock:
-            stream = self._stream
-            self._stream = None
+            if stream is not None:
+                try:
+                    # stop() waits for the in-flight callback to return, so
+                    # after close() nothing can call back into this object.
+                    stream.stop()
+                    stream.close()
+                except Exception as exc:
+                    _log.warning("Error closing audio stream: %s", exc)
 
-        if stream is not None:
-            try:
-                stream.stop()
-                stream.close()
-            except Exception as exc:
-                _log.warning("Error closing audio stream: %s", exc)
-
-        self._close_recording()
+            self._close_recording()
 
     def _open_recording_if_requested(self) -> None:
         """If `FORGEPLAYER_RECORD_STIM_DIR` is set, open a per-stream
