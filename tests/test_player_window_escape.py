@@ -13,10 +13,20 @@ state is asserted through the same isFullScreen() the handler reads.
 """
 from __future__ import annotations
 
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
 
-from app.player_window import PlayerWindow
+# python-mpv raises OSError (not ImportError) at import time when libmpv isn't
+# on the loader path, and it is reached transitively through PlayerWindow ->
+# SyncEngine. Without this guard that OSError aborts collection of the WHOLE
+# suite, so a runner missing the library turns 451 passing tests into a red
+# build. A genuinely missing libmpv still fails the release: PyInstaller can't
+# bundle without it.
+try:
+    from app.player_window import PlayerWindow
+except OSError as exc:  # pragma: no cover - runner without libmpv
+    pytest.skip(f"libmpv unavailable: {exc}", allow_module_level=True)
 
 
 class _FakeEngine:

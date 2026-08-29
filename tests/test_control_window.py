@@ -30,7 +30,16 @@ from pathlib import Path
 
 import pytest
 
-from app.control_window import ControlWindow
+# python-mpv raises OSError (not ImportError) at import time when libmpv isn't
+# on the loader path, and it is reached transitively through PlayerWindow ->
+# SyncEngine. Without this guard that OSError aborts collection of the WHOLE
+# suite, so a runner missing the library turns 451 passing tests into a red
+# build. A genuinely missing libmpv still fails the release: PyInstaller can't
+# bundle without it.
+try:
+    from app.control_window import ControlWindow
+except OSError as exc:  # pragma: no cover - runner without libmpv
+    pytest.skip(f"libmpv unavailable: {exc}", allow_module_level=True)
 from app.library.catalog import FunscriptSet, SceneCatalogEntry, VideoVariant
 from app.select_picker import SelectionChoices
 

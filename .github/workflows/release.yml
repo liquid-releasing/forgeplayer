@@ -55,7 +55,13 @@ jobs:
           pip install pyinstaller pytest Pillow
 
       - name: Run tests
-        run: python -m pytest tests/ -q
+        shell: pwsh
+        run: |
+          # libmpv-2.dll was extracted to the workspace root, but python-mpv
+          # resolves it off %PATH% — not the working directory. Without this
+          # the tests that import PlayerWindow/ControlWindow skip themselves.
+          $env:PATH = "$env:GITHUB_WORKSPACE;$env:PATH"
+          python -m pytest tests/ -q
 
       - name: Build with PyInstaller
         run: pyinstaller ForgePlayer.spec --noconfirm --clean
@@ -148,7 +154,12 @@ jobs:
           fi
 
       - name: Run tests
-        run: python -m pytest tests/ -q
+        run: |
+          # ctypes' find_library honours DYLD_FALLBACK_LIBRARY_PATH; the brew
+          # prefix is /opt/homebrew on arm64 runners, which dyld won't search
+          # on its own.
+          export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_FALLBACK_LIBRARY_PATH:-/usr/local/lib:/usr/lib}"
+          python -m pytest tests/ -q
 
       - name: Build with PyInstaller
         run: pyinstaller ForgePlayer.spec --noconfirm --clean
