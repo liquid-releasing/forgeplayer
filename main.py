@@ -5,11 +5,32 @@
 import sys
 from pathlib import Path
 
-# Crash diagnostics: on a fatal native signal (segfault etc.), dump every
-# thread's C-level stack to ~/.forgeplayer/faulthandler.log. libmpv runs
-# in-process and we spawn a worker thread for the native file dialog, so a
-# hard crash needs the per-thread stack to attribute it (mpv vs dialog vs Qt).
-# Keep the file handle alive at module scope so it isn't garbage-collected.
+# Crash diagnostics: dump the faulting thread's C-level stack to
+# ~/.forgeplayer/faulthandler.log. Keep the file handle alive at module scope
+# so it isn't garbage-collected.
+#
+# `all_threads` is deliberately FALSE, and that is load-bearing. On Windows
+# faulthandler's handler runs for every FIRST-CHANCE exception carrying the
+# error bit — not just fatal ones — and libmpv raises a benign 0xe24c4a02
+# constantly (measured 2026-08-29: 39 per 40 thumbnail grabs; 241-295 per app
+# session). With all_threads=True each of those walked the frame chain of every
+# live thread — and this app runs ~290 of them — WITHOUT holding the GIL, while
+# those threads kept executing and freeing the very frames being walked.
+#
+# That is not a theoretical race. Two crashes captured out-of-process on
+# 2026-08-29 (see scripts/crash_watch.py) both faulted at python313.dll
+# +0x3a1480 and +0x3a1a25, which the export table places inside the static
+# functions following PyTraceBack_Print — i.e. inside _Py_DumpTraceback /
+# dump_frame themselves. The crash reporter was the crash: every benign mpv
+# exception rolled the dice on an unsynchronised walk of hundreds of threads,
+# and the "random numpy internal" in older truncated logs was simply whichever
+# thread it was printing when it lost.
+#
+# Dumping only the faulting thread keeps what a user's crash report actually
+# needs (the stack that died) and drops the cross-thread walk entirely — the
+# faulting thread is stopped inside the handler, so its own frames are stable.
+# For real crash work attach scripts/crash_watch.py, which sees the fault from
+# outside the process where nothing can truncate or race it.
 #
 # Always-on (not gated by the in-app Debug toggle), so unlike the Debug
 # stream files this one grows on literally every launch forever if left
@@ -53,7 +74,7 @@ try:
     _cap_faulthandler_log(_FAULT_LOG, _os)
     _FAULT_FP = open(_FAULT_LOG, "a", buffering=1)
     _FAULT_FP.write("\n===== ForgePlayer session start =====\n")
-    faulthandler.enable(file=_FAULT_FP, all_threads=True)
+    faulthandler.enable(file=_FAULT_FP, all_threads=False)
 except Exception:
     pass
 
