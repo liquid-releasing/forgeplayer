@@ -150,6 +150,18 @@ def test_resolve_bundle_backed_falls_back_when_bundle_has_no_haptics(tmp_path):
 def control_window(qapp, monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    # ControlWindow.__init__ probes real hardware: list_audio_devices spins up
+    # a live mpv instance to read audio_device_list. On a headless runner that
+    # segfaults the interpreter — and its own `except Exception` can't catch a
+    # SIGSEGV, so the whole suite dies. Nothing here tests device discovery, so
+    # hand the constructor a fixed list instead of the machine's real one.
+    monkeypatch.setattr(
+        "app.sync_engine.SyncEngine.list_audio_devices",
+        staticmethod(lambda include_hdmi=False: [
+            {"name": "fake-scene", "description": "Fake Scene Output"},
+            {"name": "fake-haptic", "description": "Fake Haptic Dongle"},
+        ]),
+    )
     win = ControlWindow()
     # The real reload re-launches players against the SyncEngine/mpv — out
     # of scope for this guard, and no scene has actually been Launched in
