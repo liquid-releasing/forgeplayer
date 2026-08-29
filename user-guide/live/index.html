@@ -649,6 +649,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#getting-back-to-the-console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting back to the console
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keyboard-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyboard shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#video-playback-4k" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -962,6 +984,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#getting-back-to-the-console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting back to the console
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keyboard-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyboard shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#video-playback-4k" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1086,6 +1130,42 @@ go kiosk-mode covering the whole monitor.</p>
 open window goes fullscreen (or back to windowed) immediately — you don't
 have to relaunch. New launches read the toggle's current state.</p>
 <p><code>F11</code> inside any player window also toggles fullscreen for that slot.</p>
+<h2 id="getting-back-to-the-console">Getting back to the console<a class="headerlink" href="#getting-back-to-the-console" title="Permanent link">&para;</a></h2>
+<p>Players usually cover the monitors they're on, and the console sits behind
+them. Two ways back, neither of which touches playback:</p>
+<ul>
+<li><strong>Console</strong> button on the player's own control bar (click the video once to
+  show the bar if it's hidden).</li>
+<li><strong>Escape</strong> — from a fullscreen player it drops that window back to windowed;
+  from a windowed player it raises the console.</li>
+</ul>
+<p>Escape never closes anything. Closing is the <strong>X</strong> on a player window, a
+<strong>double-click</strong> on a player, or <strong>Close players</strong> on the console — and all
+three tear down every player together, because closing one on its own would
+leave the others frozen against a dead mpv handle.</p>
+<h2 id="keyboard-shortcuts">Keyboard shortcuts<a class="headerlink" href="#keyboard-shortcuts" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>In a player window</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Space</code></td>
+<td>Play / pause</td>
+</tr>
+<tr>
+<td><code>F11</code></td>
+<td>Toggle fullscreen for that slot</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Leave fullscreen, or raise the console</td>
+</tr>
+</tbody>
+</table>
 <h2 id="video-playback-4k">Video playback &amp; 4K<a class="headerlink" href="#video-playback-4k" title="Permanent link">&para;</a></h2>
 <p>ForgePlayer uses GPU hardware decoding when it's available (<code>hwdec=auto-safe</code>),
 falling back to the CPU for anything the GPU can't handle.</p>

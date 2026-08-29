@@ -1069,6 +1069,15 @@ playable haptics, so they never create tiles or get played here. Finish your
 project in FunscriptForge (export a <code>.forge</code> bundle or an <code>.output/</code> folder)
 and <em>that</em> is what ForgePlayer picks up.</p>
 </div>
+<div class="admonition note">
+<p class="admonition-title">Audio-only scenes don't get a tile</p>
+<p>Every tile is anchored to a <strong>video</strong>. A folder holding only a stim sound
+(an e-stim <code>.mp3</code> / <code>.wav</code> with no video beside it) is not listed, because
+the scanner returns scenes that have a video to play. That's deliberate —
+the Library is a launcher for scenes you <em>watch</em>. To play a stim sound on
+its own, use the <strong>Live</strong> tab's <strong>Browse</strong> buttons to point a slot straight
+at the audio file.</p>
+</div>
 <h2 id="how-the-library-matches-files-to-a-video">How the Library matches files to a video<a class="headerlink" href="#how-the-library-matches-files-to-a-video" title="Permanent link">&para;</a></h2>
 <p>The <strong>haptic asset leads</strong>: the scanner finds the funscripts / bundles / stim
 sounds in a folder, and each one finds <em>its</em> video by name. Matching is on a
