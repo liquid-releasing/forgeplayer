@@ -34,24 +34,37 @@ routing on hybrid-graphics laptops).
       workstation + haptic dongle (not just "sounds right" through headphones).
 - [ ] **Confirm the flagged "D29 audio-only ship-blocker"** from the setup/Live
       redesign is actually resolved against the current build.
+- [ ] **Seek pop on sound-file stim — mostly fixed, residual to assess.**
+      `4f862b4` put mpv-backed stim on the same seek envelope as the live
+      synth. First dogfood (2026-08-29, headphones): "much much less and will
+      be tolerable" — pending a check on the real hardware. If a residual
+      remains, the next suspect is timing, not the envelope: the ramp ticks and
+      the seek timer both live on the GUI thread, so a busy launch or thumbnail
+      flood can let the seek fire before the ramp has actually reached zero.
+      Gate the seek on `_mpv_envelope` reaching 0 (with a cap) instead of
+      assuming the fixed 0.5 s elapsed. Distinguish from the device-level
+      transient below before doing that work.
 - [ ] **Residual ~7% audible click rate / hardware-side pop** — narrowed to
       device-level analog transients. Hold-on-fail; investigate only if users
       report.
-- [ ] **Native crash while a big new library root thumbnails during playback**
-      — dogfood 2026-08-29, **not reproduced since, no root cause**. Sequence
-      from `debug-stream-20260829-152833.jsonl`: root changed to `E:i`
-      (177 videos) → activated a video-only scene → Play (2 video slots, one
-      filling an ultrawide) → the grid kept generating thumbnails for ~13 s →
-      process died. `faulthandler.log` ends in an `access violation` that is
-      **truncated mid-write** (severe enough to kill the process before the
-      dump finished), so there is no usable crashing frame. Ruled out: the
-      thumbnail grabber on its own — 40 grabs, 2 concurrent, same folder,
-      headless, zero crashes; and the stim path — that scene had no stim of
-      any kind (slot 1 skipped, "no media"). Remaining suspicion is the known
-      mpv/D3D11 crash class, newly exercised by two live players plus a
-      thumbnail flood. **Next step is a repro on the current build with Debug
-      ON**, not a speculative fix. A candidate mitigation if it recurs: hold
-      thumbnail generation while players are active.
+- [x] **Native crashes during playback / thumbnail floods — ROOT-CAUSED AND
+      FIXED (2026-08-29, `ffed0c7`).** Not mpv, not the GPU driver, not the
+      stim math: **faulthandler was the crash.** On Windows its handler runs
+      for every first-chance exception carrying the error bit, and libmpv
+      raises a benign `0xe24c4a02` constantly (measured 241-295 per session).
+      With `all_threads=True` each one walked the frame chain of every live
+      thread — this app runs ~290 — without the GIL, while those threads kept
+      freeing the frames being walked. Two out-of-process captures both
+      faulted inside `_Py_DumpTraceback`/`dump_frame` themselves
+      (`python313.dll+0x3a1480` and `+0x3a1a25`). Now dumps only the faulting
+      thread. **Dogfooded clean** through a full thumbnail flood plus scene
+      switching, on the exact shape that crashed it twice in ten minutes.
+      Consequences worth knowing: the "different numpy internal every time"
+      that read as a race in the vendored stim math was just whichever
+      thread's frames the dump was printing when it lost — so the 2026-08-20
+      rapid-chapter-click debounce may have been treating this same bug.
+      Leave the debounce in place (harmless, unproven either way), but do not
+      cite it as evidence about the stim math.
 - [ ] **An unreadable drive takes the app down instead of saying so** —
       dogfood 2026-08-29, and the FIRST complete crash dump we've got
       (`Current thread` marker present): the GUI thread died in native code
@@ -66,7 +79,9 @@ routing on hybrid-graphics laptops).
       Proposed fix: probe readability (open + read a block) before `loadfile`
       and before a thumbnail grab; on failure skip fast and surface a
       user-actionable "can't read this file — drive disconnected?" instead of
-      the long demux wait. See [[feedback_user_actionable_errors]].
+      the long demux wait. NOTE: the *crash* that accompanied this was the
+      faulthandler bug above, now fixed; what remains is the 20 s-per-file
+      hang and the silence about why. Still worth fixing before the tag.
 - [ ] **Prev/Next chapter enabled on a scene that reported 0 chapters** —
       dogfood 2026-08-29, user rates it harmless. Probably correct behavior
       rather than a bug: the sidecar pass logged `chapter_count: 0`, but
