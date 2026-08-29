@@ -832,10 +832,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#known-limitations-v0015" class="md-nav__link">
+  <a href="#known-limitations-v0016" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Known limitations (v0.0.15)
+        Known limitations (v0.0.16)
       
     </span>
   </a>
@@ -896,7 +896,7 @@
 
 
 <h1 id="forgeplayer-user-guide">ForgePlayer User Guide<a class="headerlink" href="#forgeplayer-user-guide" title="Permanent link">&para;</a></h1>
-<p>Feature-by-feature reference for v0.0.15. If you're brand new, start at
+<p>Feature-by-feature reference for v0.0.16. If you're brand new, start at
 <a href="../getting-started/">Getting Started</a> and come back here when you
 need detail.</p>
 <p>The guide follows the app's tabs. Four have their own dedicated page;
@@ -993,7 +993,7 @@ session state (which scene is loaded, which monitors / devices are
 assigned) on changes. Re-opening ForgePlayer restores the last
 session unless you explicitly start a new one via the Library scan.</p>
 <hr />
-<h2 id="known-limitations-v0015">Known limitations (v0.0.15)<a class="headerlink" href="#known-limitations-v0015" title="Permanent link">&para;</a></h2>
+<h2 id="known-limitations-v0016">Known limitations (v0.0.16)<a class="headerlink" href="#known-limitations-v0016" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Control panel sizing on monitor change</strong> — moving the control
   window to a smaller secondary screen can leave it taller than
@@ -1005,7 +1005,7 @@ session unless you explicitly start a new one via the Library scan.</p>
 <li><strong>Single-decoder for video walls</strong> — currently three independent
   decoders synced via mpv time-pos. Frame-perfect single-decoder
   rendering is a future feature for true video-wall use cases.</li>
-<li><strong>HDR passthrough disabled (v0.0.15)</strong> — the HDR-on-Windows renderer
+<li><strong>HDR passthrough disabled (v0.0.16)</strong> — the HDR-on-Windows renderer
   (<code>gpu-next</code> / libplacebo) crashed on teardown, so playback uses the stable
   <code>gpu</code> renderer. HDR10 content can look over-bright on an <strong>HDR-ON</strong> display;
   turn Windows HDR <strong>off</strong> for now. Re-enabling awaits an upstream fix.</li>
@@ -1020,11 +1020,11 @@ device, then <strong>Refresh devices</strong>. ForgePlayer keeps the port silent
 routing e-stim to your speakers. If you only have one stim box, set <strong>Haptic 2</strong>
 to "— not set —".</p>
 <p><strong>I hear e-stim through my computer speakers.</strong>
-That shouldn't happen in v0.0.15. Check that <strong>Haptic 1 / Haptic 2</strong> point at
+That shouldn't happen in v0.0.16. Check that <strong>Haptic 1 / Haptic 2</strong> point at
 your <strong>USB dongle</strong> (not "Speakers"), and that <strong>Scene Audio</strong> is a <em>different</em>
 device. Reselect and <strong>Refresh devices</strong>.</p>
 <p><strong>HDR video looks washed-out or over-bright.</strong>
-HDR passthrough is disabled in v0.0.15 for stability. Turn <strong>Windows HDR off</strong>
+HDR passthrough is disabled in v0.0.16 for stability. Turn <strong>Windows HDR off</strong>
 for the playback monitor (Settings → Display → HDR) while testing.</p>
 <p><strong>Bluetooth output is glitchy / laggy.</strong> Bluetooth audio is untested — use a
 <strong>wired / USB</strong> output, especially for stim.</p>
