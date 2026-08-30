@@ -649,6 +649,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#getting-back-to-the-console" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -984,6 +995,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#getting-back-to-the-console" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1096,6 +1118,7 @@ sits above the volume slider.</p>
 it's the other. Volume is per-session (resets to 100 % every scene).</p>
 <h2 id="transport">Transport<a class="headerlink" href="#transport" title="Permanent link">&para;</a></h2>
 <p><code>⏮ Prev · −30 s · −10 s · −5 s · ▶ Play / ⏸ Pause · ■ Stop · +5 s · +10 s · +30 s · Next ⏭</code></p>
+<p>(Looping is set from the player overlay — see <strong><a href="#loop">Loop</a></strong> below.)</p>
 <p><strong>Prev</strong> and <strong>Next</strong> jump to the previous/next chapter boundary — they
 frame the skip buttons on either end of the row. Both are disabled
 (greyed out) until a <code>&lt;stem&gt;.chapters.json</code> sidecar is found for the
@@ -1132,6 +1155,27 @@ go kiosk-mode covering the whole monitor.</p>
 open window goes fullscreen (or back to windowed) immediately — you don't
 have to relaunch. New launches read the toggle's current state.</p>
 <p><code>F11</code> inside any player window also toggles fullscreen for that slot.</p>
+<h2 id="loop">Loop<a class="headerlink" href="#loop" title="Permanent link">&para;</a></h2>
+<p>Each player overlay has a <strong>Loop</strong> button, immediately left of <strong>Console</strong>.
+Switch it on and the scene restarts from the beginning when it plays through;
+leave it off and playback stops on the last frame, as before.</p>
+<p>Two things worth knowing:</p>
+<ul>
+<li><strong>Loop is session-wide, not per-window.</strong> Every screen rides one timeline,
+  so looping one player and not another would desync the scene. Toggling it on
+  any overlay sets it for the whole session, and the other overlays update to
+  match.</li>
+<li><strong>The wrap-around is faded like any other seek.</strong> The jump from the end back
+  to the start is the largest discontinuity in a scene; it runs through the
+  same ramp-down / settle / ramp-up envelope as a manual seek, so the stim
+  doesn't click on the restart.</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Looping keeps e-stim running</p>
+<p>A looped scene doesn't end on its own — stim keeps driving until you stop
+it. Loop is deliberately <strong>off at every launch</strong> and isn't remembered
+between sessions, so it can never be on when you didn't ask for it.</p>
+</div>
 <h2 id="getting-back-to-the-console">Getting back to the console<a class="headerlink" href="#getting-back-to-the-console" title="Permanent link">&para;</a></h2>
 <p>Players usually cover the monitors they're on, and the console sits behind
 them. Two ways back, neither of which touches playback:</p>
@@ -1168,6 +1212,8 @@ leave the others frozen against a dead mpv handle.</p>
 </tr>
 </tbody>
 </table>
+<p>The overlay's <strong>Loop</strong> and <strong>Console</strong> buttons sit at the right end of the bar
+(click the video once to reveal it).</p>
 <h2 id="video-playback-4k">Video playback &amp; 4K<a class="headerlink" href="#video-playback-4k" title="Permanent link">&para;</a></h2>
 <p>ForgePlayer uses GPU hardware decoding when it's available (<code>hwdec=auto-safe</code>),
 falling back to the CPU for anything the GPU can't handle.</p>
