@@ -61,12 +61,22 @@ class PlayerWindow(QWidget):
     # usually hidden behind fullscreen players, the only way back used to be
     # closing the players, which lost your place (dogfood 2026-08-29).
     console_requested = Signal()
+    # "Loop" on this window's overlay. Looping is a SESSION-wide behaviour,
+    # not a per-window one: the slots share one timeline, so a per-window
+    # loop would restart one screen while the others ran on and desync the
+    # whole scene. The button therefore reports intent to ControlWindow,
+    # which owns the state and mirrors it back to every open window via
+    # set_loop_enabled().
+    loop_toggled = Signal(bool)
 
     def __init__(self, slot_index: int, engine: SyncEngine) -> None:
         super().__init__()
         self.slot_index = slot_index
         self._engine = engine
         self._seek_dragging = False
+        # Set while set_loop_enabled() writes the Loop button, so the
+        # resulting `toggled` signal isn't relayed back as a user click.
+        self._loop_echo_guard = False
         # Set by ControlWindow._close_players before calling close() so the
         # user's closeEvent path doesn't re-enter the group-teardown signal.
         self._teardown_in_progress = False
@@ -187,6 +197,25 @@ class PlayerWindow(QWidget):
         self._dur_lbl.setStyleSheet("color: #e0e0e0; font-size: 11px;")
         h.addWidget(self._dur_lbl)
 
+        # Loop — restart the scene when it plays through, instead of
+        # stopping on the last frame. Checkable so the state is visible at a
+        # glance from the overlay alone (the console is usually buried).
+        self._btn_loop = QPushButton("Loop")
+        self._btn_loop.setCheckable(True)
+        self._btn_loop.setFixedHeight(28)
+        self._btn_loop.setStyleSheet(
+            "QPushButton { background: #2d3148; color: #e0e0e0;"
+            " border-radius: 4px; font-size: 11px; padding: 0 10px; }"
+            "QPushButton:checked { background: #ff4b4b; color: white;"
+            " font-weight: bold; }"
+        )
+        self._btn_loop.setToolTip(
+            "Repeat the scene when it reaches the end.\n"
+            "Off: playback stops on the last frame."
+        )
+        self._btn_loop.toggled.connect(self._on_loop_clicked)
+        h.addWidget(self._btn_loop)
+
         # Console — bring the control window back to the front. The console
         # is normally buried under fullscreen players; without this the only
         # route back was closing them, which throws away your position.
@@ -205,6 +234,26 @@ class PlayerWindow(QWidget):
         return bar
 
     # ── Transport slots ────────────────────────────────────────────────────────
+
+    def _on_loop_clicked(self, checked: bool) -> None:
+        """Relay a click to ControlWindow. Suppressed while
+        set_loop_enabled() is writing the button's state, so mirroring the
+        session value back onto this window can't be mistaken for the user
+        toggling it again (which would bounce between windows forever)."""
+        if self._loop_echo_guard:
+            return
+        self.loop_toggled.emit(checked)
+
+    def set_loop_enabled(self, enabled: bool) -> None:
+        """Show the session's loop state on this window's button without
+        emitting — ControlWindow calls this on every open window whenever
+        the value changes, and on newly launched windows, so all the
+        overlays agree."""
+        self._loop_echo_guard = True
+        try:
+            self._btn_loop.setChecked(enabled)
+        finally:
+            self._loop_echo_guard = False
 
     def set_chapter_nav_enabled(self, enabled: bool) -> None:
         """Enable/disable this window's Prev/Next chapter buttons — mirrors

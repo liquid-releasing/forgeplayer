@@ -35,6 +35,8 @@ it's the other. Volume is per-session (resets to 100 % every scene).
 
 `⏮ Prev · −30 s · −10 s · −5 s · ▶ Play / ⏸ Pause · ■ Stop · +5 s · +10 s · +30 s · Next ⏭`
 
+(Looping is set from the player overlay — see **[Loop](#loop)** below.)
+
 **Prev** and **Next** jump to the previous/next chapter boundary — they
 frame the skip buttons on either end of the row. Both are disabled
 (greyed out) until a `<stem>.chapters.json` sidecar is found for the
@@ -81,6 +83,28 @@ have to relaunch. New launches read the toggle's current state.
 
 `F11` inside any player window also toggles fullscreen for that slot.
 
+## Loop
+
+Each player overlay has a **Loop** button, immediately left of **Console**.
+Switch it on and the scene restarts from the beginning when it plays through;
+leave it off and playback stops on the last frame, as before.
+
+Two things worth knowing:
+
+- **Loop is session-wide, not per-window.** Every screen rides one timeline,
+  so looping one player and not another would desync the scene. Toggling it on
+  any overlay sets it for the whole session, and the other overlays update to
+  match.
+- **The wrap-around is faded like any other seek.** The jump from the end back
+  to the start is the largest discontinuity in a scene; it runs through the
+  same ramp-down / settle / ramp-up envelope as a manual seek, so the stim
+  doesn't click on the restart.
+
+!!! warning "Looping keeps e-stim running"
+    A looped scene doesn't end on its own — stim keeps driving until you stop
+    it. Loop is deliberately **off at every launch** and isn't remembered
+    between sessions, so it can never be on when you didn't ask for it.
+
 ## Getting back to the console
 
 Players usually cover the monitors they're on, and the console sits behind
@@ -103,6 +127,9 @@ leave the others frozen against a dead mpv handle.
 | `Space` | Play / pause |
 | `F11` | Toggle fullscreen for that slot |
 | `Esc` | Leave fullscreen, or raise the console |
+
+The overlay's **Loop** and **Console** buttons sit at the right end of the bar
+(click the video once to reveal it).
 
 ## Video playback & 4K
 

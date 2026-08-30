@@ -725,6 +725,27 @@ class SyncEngine:
                 return True
         return True
 
+    def at_end_of_file(self) -> bool:
+        """True when the primary player has played through to the end.
+
+        Players are created with ``keep_open=True``, so mpv does not close
+        the file at EOF — it holds the last frame and sets ``pause``. That
+        makes `is_paused()` alone useless for detecting the end (a user
+        pause looks identical), so this reads mpv's own ``eof-reached``
+        flag, which is set only by playback actually reaching the end and
+        cleared by any seek away from it.
+
+        Returns False on any error: a missing flag must never be reported
+        as "finished", or a loop would restart a scene mid-playback.
+        """
+        p = self._primary()
+        if p is None:
+            return False
+        try:
+            return bool(p.eof_reached)
+        except Exception:
+            return False
+
     def player_for_slot(self, slot: int) -> Optional["mpv.MPV"]:
         """The mpv instance in `slot`, or None if that slot is empty."""
         if 0 <= slot < self.MAX_SLOTS:

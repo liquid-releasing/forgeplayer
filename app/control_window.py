@@ -176,6 +176,16 @@ class ControlWindow(QMainWindow):
         self._update_signals.done.connect(self._on_update_checked)
         self._update_check_is_manual = False
         self._player_windows: list[PlayerWindow | None] = [None] * _NUM_SLOTS
+        # Loop-the-scene, toggled from any player overlay. Session state, NOT
+        # persisted to preferences: this drives e-stim, and a setting that
+        # quietly survived a restart could leave a scene (and the stim with
+        # it) running indefinitely on a launch the user thought was fresh.
+        # Off every launch; the user opts in per session.
+        self._loop_enabled = False
+        # Latches while a loop restart is in flight. mpv's eof-reached stays
+        # set until the seek lands, and _poll runs every few hundred ms, so
+        # without this one end-of-file would fire a burst of restarts.
+        self._loop_restart_pending = False
         self._seek_dragging = False
         self._session_path: str = ""
 
@@ -4986,7 +4996,9 @@ class ControlWindow(QMainWindow):
             pw.prev_chapter_requested.connect(self._on_prev_chapter)
             pw.next_chapter_requested.connect(self._on_next_chapter)
             pw.console_requested.connect(self._raise_console)
+            pw.loop_toggled.connect(self._on_loop_toggled)
             pw.set_chapter_nav_enabled(bool(self._chapters))
+            pw.set_loop_enabled(self._loop_enabled)
             # Always place WINDOWED at launch — even when "Fullscreen players"
             # is on. Going fullscreen here embeds mpv at the windowed size
             # (Windows applies the showFullScreen resize asynchronously, after
@@ -5377,6 +5389,57 @@ class ControlWindow(QMainWindow):
             if w is not None:
                 w.set_chapter_nav_enabled(has_chapters)
 
+    def _on_loop_toggled(self, enabled: bool) -> None:
+        """A Loop button was clicked on one of the player overlays.
+
+        Loop is session-wide because every slot rides one timeline — so
+        adopt the value, then push it to every OTHER open window so their
+        buttons agree. Turning loop off clears any restart already latched,
+        so a scene that just hit the end stays stopped.
+        """
+        if enabled == self._loop_enabled:
+            return
+        self._loop_enabled = enabled
+        if not enabled:
+            self._loop_restart_pending = False
+        DebugLog.record("playback.loop_toggled", enabled=enabled)
+        for w in self._player_windows:
+            if w is not None:
+                w.set_loop_enabled(enabled)
+
+    def _maybe_loop_restart(self) -> None:
+        """Restart the scene if loop is on and playback has run to the end.
+
+        Called from `_poll` rather than from an mpv property observer,
+        because an observer callback arrives on mpv's own event thread and
+        everything the restart touches — the seek envelope and the timers it
+        starts — is GUI-thread state.
+        """
+        if not self._engine.has_active_players():
+            return
+        if not self._engine.at_end_of_file():
+            # Cleared as soon as the restart seek lands, which re-arms the
+            # latch for the next time round.
+            self._loop_restart_pending = False
+        elif self._loop_enabled and not self._loop_restart_pending:
+            self._restart_for_loop()
+
+    def _restart_for_loop(self) -> None:
+        """Send playback back to the start because loop is on and the scene
+        finished.
+
+        Goes through `_seek_with_envelope` rather than `seek_all` so the
+        wrap-around gets the same ramp-down / settle / ramp-up every other
+        seek gets — the end→start jump is the largest discontinuity in the
+        whole scene, and splicing it raw is exactly the pop we just spent a
+        release removing. `keep_open` leaves mpv paused on the last frame,
+        so playback has to be resumed explicitly after the seek.
+        """
+        DebugLog.record("playback.loop_restart")
+        self._loop_restart_pending = True
+        self._seek_with_envelope(0.0)
+        self._engine.play_all()
+
     def _maybe_populate_chapters_from_mpv(
         self, attempts_remaining: int = 3,
     ) -> None:
@@ -5462,6 +5525,8 @@ class ControlWindow(QMainWindow):
             )
         paused = self._engine.is_paused()
         self._btn_play.setText("▶  Play" if paused else "⏸  Pause")
+
+        self._maybe_loop_restart()
 
     # ── Cleanup ────────────────────────────────────────────────────────────────
 
