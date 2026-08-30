@@ -94,8 +94,12 @@ routing on hybrid-graphics laptops).
 
 ## Alpha-polish bugs (non-blocking, but visible)
 
-- [ ] **A native picker can open on a different monitor and the app reads as
-      hung** — dogfood 2026-08-30, and it cost the start of a test session.
+- [x] **A native picker can open on a different monitor and the app reads as
+      hung** — FIXED in v0.1.17-alpha (owner window + a re-centring backstop);
+      dogfooded clean the same day: "nice placement of the dialog". Original
+      report kept below for the reasoning.
+
+      Dogfood 2026-08-30, and it cost the start of a test session.
       The native dialogs are shown **owner-less** (`Show(NULL)`;
       `ofn.hwndOwner = 0`), so Windows places them wherever it likes — on a
       5120-wide ultrawide the folder picker landed ~1900 px away from the
