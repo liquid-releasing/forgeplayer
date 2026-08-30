@@ -9,4 +9,4 @@ here is the dev/working value.
 
 from __future__ import annotations
 
-__version__ = "0.0.16"
+__version__ = "0.1.17-alpha"
