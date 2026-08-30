@@ -1,4 +1,4 @@
-# Settings
+# Preferences
 
 The **Preferences** tab controls how ForgePlayer turns a scene into a signal —
 which form of haptics it prefers, how it synthesizes from a funscript, and

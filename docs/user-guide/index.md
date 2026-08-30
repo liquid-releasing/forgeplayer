@@ -19,8 +19,8 @@ below:
 -   :material-tune-vertical: **[Setup](setup.md)** — audio device roles,
     monitors, and per-monitor crop.
 
--   :material-cog: **[Settings](settings.md)** — content preference, synthesis
-    algorithm, haptic offset, and debug mode.
+-   :material-cog: **[Preferences](settings.md)** — content preference,
+    synthesis algorithm, haptic offset, and debug mode.
 
 </div>
 
@@ -153,9 +153,12 @@ for the playback monitor (Settings → Display → HDR) while testing.
 **Bluetooth output is glitchy / laggy.** Bluetooth audio is untested — use a
 **wired / USB** output, especially for stim.
 
-**Closing a video closed the whole app.** That shouldn't happen — grab the crash
-log below and file an issue. (A crash *as the app itself exits* is a known
-harmless teardown quirk.)
+**The app disappeared mid-playback, or when closing a player.** Both crashes
+were fixed in v0.0.16 — the second one was the *crash reporter* itself, which
+walked every live thread's stack on each of the hundreds of harmless
+exceptions mpv raises per session. If you still see a disappearance, grab the
+crash log below and file an issue; it now records only the thread that
+actually failed, so it's short and worth attaching.
 
 **Filing a good bug report.** Turn on **Debug** (top bar) *before* reproducing,
 then attach:

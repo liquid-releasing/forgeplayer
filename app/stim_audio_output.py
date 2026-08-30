@@ -661,16 +661,14 @@ class StimAudioStream:
 
         Idempotent: calling twice is a no-op after the first call.
 
-        Stim streams open in **WASAPI exclusive mode** when the device is
-        WASAPI-backed (Windows). Exclusive mode locks the device to this
-        process and bypasses Windows' shared-mode mixer entirely — no
-        resampling, no other-app audio bleeding into the stim output, and
-        no shared-mode mixer state transitions that can produce clicks
-        (2026-05-03 dogfood: pops audible across all output devices when
-        stim streams ran shared with mpv, consistent with shared-mode
-        mixer contention). If exclusive mode fails (non-WASAPI host,
-        device busy, format unsupported), we log + retry in shared mode
-        so launch still succeeds.
+        Stim resolves to a **DirectSound** device on Windows and opens on
+        that native host — see `_open_stream_with_fallback` for why. WASAPI
+        exclusive was the default until 2026-06-17; it is now opt-in via
+        `FORGEPLAYER_WASAPI_EXCLUSIVE=1`, because WASAPI (exclusive *and*
+        shared) failed to release some USB DACs on close and caused the very
+        pops it was meant to prevent. Don't reinstate it here without
+        re-running the seek/reopen gauntlet — and note the public site
+        previously advertised exclusive mode off the back of this docstring.
         """
         with self._lock:
             if self._stream is not None:

@@ -49,7 +49,14 @@ install — everything is bundled.
     **More info → Run anyway**. This is a one-time step per download.
 
 The window opens with five tabs: **Library**, **Live**, **Setup**,
-**Preferences**, **About**.
+**Preferences**, **About** — and it lands you on **Library**.
+
+!!! tip "Go to **Setup** first, before you touch the Library"
+    ForgePlayer opens on the Library because that's where you'll start every
+    session *after* the first one. On a fresh install it's empty and nothing
+    can play yet: until your audio devices are assigned in **Setup**, the
+    stim ports have nowhere to send a signal. Do the 60-second tour below in
+    order — **Setup → Preferences → Library → Live**.
 
 ### Run from source (developers)
 
@@ -102,14 +109,27 @@ Library refresh and remembers it after that.
 
 ### 1. Pick your audio devices (Setup tab)
 
-- **Scene Audio** — where the video's mp3 / mp4 audio plays. Usually
+This is the step that makes everything else work — do it before you scan a
+library. Four dropdowns:
+
+- **Scene audio** — where the video's mp3 / mp4 audio plays. Usually
   your headset or speakers.
-- **Haptic 1** — your main stim USB dongle.
-- **Haptic 2** — second USB dongle for prostate, OR **leave unset** if you
-  only have one stim box.
+- **Scene audio (also)** — *optional* second port that gets the **same video
+  sound**. Use it to drive a stim box that takes a plain audio input when a
+  scene has no funscript. Leave it unset if you don't need it.
+- **Haptic 1 (main stim)** — your main stim USB dongle.
+- **Haptic 2 (alt stim)** — second USB dongle for prostate, OR **leave unset**
+  if you only have one stim box.
 
 The dropdowns show every audio output Windows reports. If your dongle isn't
-there, plug it in and click **Refresh devices**. If a stim port later reads
+there, plug it in and click **Refresh devices**. Once a device is assigned to
+one role it's greyed out in the others, so e-stim and your speakers can never
+land on the same port by accident.
+
+Each row has a **🔊 Test** button that plays a short sample through that
+device — a half-second tone for the scene-audio rows, a gentle stim clip for
+the haptic rows. Press it now: it's the fastest way to prove the dongle is
+plugged in, unmuted, and wired to the box before you commit to a scene. If a stim port later reads
 **(unavailable — reselect in Setup)**, that port stays **silent** and you just
 reselect it — ForgePlayer never routes e-stim to your speakers. Use **wired /
 USB** outputs; Bluetooth audio is untested.
@@ -131,7 +151,11 @@ Haptic 2 fall back to the other form so you don't get silent stim.
 
 ### 3. Open a scene (Library tab)
 
-- Click **Refresh** if the library is empty.
+- **Click 📁 Root…** and pick the folder your media lives in. A fresh install
+  has no root set, so the Library starts empty — this is the step that fills
+  it. Scanning runs in the background; the count reads **"Scanning…"** until
+  it finishes. (Later, **⟳ Rescan** re-reads that same folder after you add
+  or remove files.)
 - Click a scene tile. A picker dialog opens listing variants:
   funscript sets, video variants, stim audio variants, subtitles.
   Pick whichever you want (defaults are sensible — the "matched" tag
@@ -152,14 +176,23 @@ Haptic 2 fall back to the other form so you don't get silent stim.
 ![ForgePlayer playing a scene — one timeline drives every screen and output](assets/forgeplayer-play.png)
 
 That's it. Seek with the timeline, ±5/10/30 s with the buttons, scene
-volume with the slider beside the timeline.
+volume with the slider beside the timeline. If the scene has chapters,
+**⏮ Prev** / **Next ⏭** jump between them.
+
+!!! tip "The players cover the console — here's how to get back"
+    Fullscreen players sit on top of the control window. **Escape** brings you
+    back: from a fullscreen player it drops that window to windowed, and from a
+    windowed player it raises the console. You can also **click the video once**
+    to reveal its overlay bar and press **Console**. Neither stops playback —
+    you keep your place. Closing is the **X**, a **double-click** on a player,
+    or **Close Players** on the console.
 
 ---
 
 ## Pre-flight check: Calibrate
 
-Before you wire yourself up, click **Calibrate H1** (and **H2** if you
-have it set). The button generates a steady **test tone** (not a
+Before you wire yourself up, go to the **Live** tab and click
+**Calibrate H1** (and **H2** if you have it set). The button generates a steady **test tone** (not a
 sample of any scene audio — a synthesized continuous carrier) and
 sends it to the configured haptic dongle for ~30 seconds, with an
 optional 5 s ramp-up if the **5 s ramp** checkbox is on. Use this to:
@@ -207,13 +240,12 @@ Off by default; zero overhead when off.
   in v0.0.16 for stability; turn **Windows HDR off** for the playback monitor.
 - **Bluetooth output is glitchy** — Bluetooth audio is untested; use wired /
   USB, especially for stim.
-- **WASAPI exclusive mode warnings** — the stim stream tried to grab the
-  device exclusively and failed; it auto-falls-back to shared mode. Harmless.
 - **Multi-monitor layout looks wrong after moving the control window** —
   known cosmetic limitation; post-alpha fix.
-- **Closing a video closed the whole app** — that shouldn't happen. Grab
-  `~/.forgeplayer/faulthandler.log` and file an issue. (A crash *as the app
-  exits* is a separate, harmless teardown quirk.)
+- **The app disappeared mid-playback, or when closing a player** — both
+  crashes were fixed in v0.0.16. If you still see one, grab
+  `~/.forgeplayer/faulthandler.log` and file an issue; it now records just the
+  thread that failed, so it's short and worth attaching.
 
 **Filing a bug report:** turn on **Debug** before reproducing, then attach
 `~/.forgeplayer/debug-stream-*.jsonl` (session events) and, if it crashed,

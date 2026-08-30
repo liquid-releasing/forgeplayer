@@ -118,10 +118,11 @@ Click the **📌** button on a tile (or right-click → **Change picks…**, or
 the title-bar button on the Live tab) to re-open the picker for the active
 scene. New picks overwrite the pin.
 
-## Refresh
+## Rescan
 
 If you add or remove files in a scene folder while ForgePlayer is
-running, click **Refresh** to re-scan.
+running, click **⟳ Rescan** to re-read the current root. (**📁 Root…**
+is how you point the Library at a different folder in the first place.)
 
 Scanning runs on a background thread, so it never freezes the app —
 important for a root on a slow, removable, or network drive, which can

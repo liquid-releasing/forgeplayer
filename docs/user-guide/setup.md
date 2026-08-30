@@ -2,15 +2,25 @@
 
 ## Audio device roles
 
-Three dropdowns:
+**Do this before you scan a library** — the Library opens first, but a scene
+can't route anything until these are assigned.
 
-- **Scene Audio** — the video's own audio → your speakers / headphones.
-- **Haptic 1** — the main stim port → your USB stim dongle.
-- **Haptic 2** — an *optional* second stim port (prostate side-chain, or it
-  mirrors Haptic 1). **Leave it "— not set —" if you only have one stim box.**
+Four dropdowns:
+
+- **Scene audio** — the video's own audio → your speakers / headphones.
+- **Scene audio (also)** — an *optional* second port that receives the **same
+  video sound**. It exists to drive a stim box that accepts a plain audio input
+  when a scene has no funscript to synthesize from. Leave it unset to disable.
+- **Haptic 1 (main stim)** — the main stim port → your USB stim dongle.
+- **Haptic 2 (alt stim)** — an *optional* second stim port (prostate
+  side-chain, or it mirrors Haptic 1). **Leave it "— not set —" if you only
+  have one stim box.**
 
 Dropdowns list every audio output Windows reports through mpv. If a dongle
 isn't there, plug it in and press **Refresh devices**.
+
+A device assigned to one role is **greyed out in the others**, so e-stim and
+your scene audio can't be sent to the same port by accident.
 
 !!! danger "E-stim never plays through your speakers"
     A stim port only outputs to a device that resolves. If a Haptic device
@@ -29,10 +39,15 @@ isn't there, plug it in and press **Refresh devices**.
 
 ## Test device buttons
 
-Each row has a **Test** button that routes a brief tone to the picked
-device so you can verify the dongle is wired up before launching a
-scene. (Stim test routes to the haptic device; scene-audio test plays
-through the scene-audio device.)
+Each row has a **🔊 Test** button that plays a short sample through the picked
+device, so you can verify the dongle is wired up before launching a scene. The
+sample matches the role: the scene-audio rows get a half-second 440 Hz tone,
+the haptic rows get a synthesized stim clip with a gentle volume ramp — so a
+haptic test feels like real playback rather than a harsh sine into your
+electrodes.
+
+Silent? Check the dongle, the box's own hardware knob, and any OS-level
+per-app mute.
 
 ## Monitors
 

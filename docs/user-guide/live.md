@@ -55,8 +55,10 @@ sync on whether the active scene has chapters.
 
 ## Seek behavior
 
-Every seek runs through the same three-stage envelope to mask the
-funscript-driven carrier discontinuity that would otherwise click:
+Every seek runs through the same four-stage envelope to mask the
+discontinuity that would otherwise click. **Both stim forms ride it** — the
+live funscript synth and pre-rendered sound files (as of v0.0.16; sound-file
+stim used to splice raw, which is what the old skip-forward pop was):
 
 1. **500 ms ramp-down** to silence
 2. **mpv seek** at silence

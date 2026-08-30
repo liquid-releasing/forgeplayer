@@ -34,11 +34,12 @@ AudioAlgorithm = Literal["continuous", "pulse"]
 
 # When a scene ships BOTH a pre-rendered sound file (.wav/.mp3) and a
 # funscript for the same haptic destination, this preference is the
-# tie-breaker. Default is "sound" because (1) most stereo-stim users
-# have one MP4 + one sound file, not two funscripts; (2) sound playback
-# avoids the synth-pop residue we're still chasing in v0.0.3; (3)
-# FunscriptForge produces sound files — choosing Sound rewards users
-# in the lqr content pipeline. Funscript users opt in deliberately.
+# tie-breaker. Default is "funscript" (see the field default below): the
+# funscript is the authored intent, and once the DirectSound-default fix
+# (v0.0.6) ended the USB-DAC pops, live synth played as cleanly as a
+# pre-rendered file. The original v0.0.3 default was "sound" purely to
+# dodge that synth-pop residue; that reason is gone. Public docs quote
+# this default — keep them in step if it ever changes again.
 # Per-port resolution: when only one form exists for a destination,
 # play whichever exists regardless of preference (preference is a
 # tie-breaker, never a filter).

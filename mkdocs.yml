@@ -65,7 +65,7 @@ nav:
       - Library: user-guide/library.md
       - Live: user-guide/live.md
       - Setup: user-guide/setup.md
-      - Settings: user-guide/settings.md
+      - Preferences: user-guide/settings.md
   - Quality:
       - quality.md
       - HDR Content: hdr-content.md
