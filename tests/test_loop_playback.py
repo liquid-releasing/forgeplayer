@@ -112,7 +112,8 @@ class _LoopHost:
     exercises the exact functions under test against fake engine state.
     """
 
-    def __init__(self, *, at_end: bool, active: bool = True):
+    def __init__(self, *, at_end: bool, active: bool = True,
+                 paused: bool = True):
         from app.control_window import ControlWindow
 
         self._loop_enabled = False
@@ -122,10 +123,13 @@ class _LoopHost:
         self.played = 0
         self._at_end = at_end
         self._active = active
+        self._paused = paused
+        self._pending_cb = None
 
         cls = ControlWindow
         self._on_loop_toggled = cls._on_loop_toggled.__get__(self)
         self._restart_for_loop = cls._restart_for_loop.__get__(self)
+        self._resume_after_loop_seek = cls._resume_after_loop_seek.__get__(self)
         # The REAL method, not a copy of it — _poll does nothing here but
         # call this, so a change to the loop rule can't pass these tests
         # while behaving differently in the app.
@@ -140,15 +144,33 @@ class _LoopHost:
             def at_end_of_file(self):
                 return host._at_end
 
+            def is_paused(self):
+                return host._paused
+
             def play_all(self):
                 host.played += 1
+                host._paused = False
 
         self._engine = _Engine()
 
-    # stands in for the enveloped seek; asserts we route through it, not
-    # straight to seek_all
-    def _seek_with_envelope(self, pos: float) -> None:
+    def _seek_with_envelope(self, pos, on_seeked=None) -> None:
+        """Stands in for the real enveloped seek — and, critically, models it
+        as ASYNCHRONOUS.
+
+        With stim live the real one ramps down for ~0.5 s and only then
+        seeks, so it returns long before the position actually moves.
+        Holding the callback here instead of running it inline is what makes
+        these tests able to fail the way the app failed.
+        """
         self.seeks.append(pos)
+        self._pending_cb = on_seeked
+
+    def land_seek(self) -> None:
+        """The deferred seek finally executes."""
+        cb, self._pending_cb = self._pending_cb, None
+        self._at_end = False
+        if cb is not None:
+            cb()
 
 
 def test_scene_at_end_does_not_restart_when_loop_is_off():
@@ -163,11 +185,84 @@ def test_scene_at_end_restarts_and_resumes_when_loop_is_on():
     host._loop_enabled = True
 
     host.poll_once()
+    host.land_seek()
 
     # keep_open leaves mpv paused on the last frame, so a seek alone would
     # sit there frozen at 0:00 — play_all is what actually resumes it.
     assert host.seeks == [0.0]
     assert host.played == 1
+
+
+def test_resume_waits_for_the_seek_to_land():
+    """THE 2026-08-30 BUG. The enveloped seek returns ~0.5s before it moves
+    the position; resuming inline landed while mpv was still parked at EOF,
+    where unpausing does nothing, and the scene rewound but never played.
+    Nothing may resume playback until the seek has actually executed."""
+    host = _LoopHost(at_end=True)
+    host._loop_enabled = True
+
+    host.poll_once()
+    assert host.seeks == [0.0]
+    assert host.played == 0, "resumed before the seek landed"
+
+    host.land_seek()
+    assert host.played == 1
+
+
+def test_catch_up_resumes_if_the_seek_landed_still_paused():
+    """mpv applies a seek asynchronously even after the command is issued,
+    so the on_seeked resume can still be swallowed. The next tick notices
+    playback is parked and re-issues it."""
+    host = _LoopHost(at_end=True)
+    host._loop_enabled = True
+    host.poll_once()
+
+    # seek lands, but the resume is lost (mpv still at EOF when it arrived)
+    host._pending_cb = None
+    host._at_end = False
+    assert host.played == 0
+
+    host.poll_once()
+    assert host.played == 1
+    assert host._paused is False
+
+
+def test_catch_up_fires_at_most_once():
+    """It must never fight a user who deliberately pauses after a wrap."""
+    host = _LoopHost(at_end=True)
+    host._loop_enabled = True
+    host.poll_once()
+    host._pending_cb = None
+    host._at_end = False
+
+    host.poll_once()            # catch-up resumes
+    host._paused = True         # user pauses
+    host.poll_once()
+    host.poll_once()
+
+    assert host.played == 1     # not resumed out from under them
+
+
+def test_no_catch_up_when_playback_already_resumed():
+    host = _LoopHost(at_end=True)
+    host._loop_enabled = True
+    host.poll_once()
+    host.land_seek()            # on_seeked resumed it
+    assert host.played == 1
+
+    host.poll_once()            # latch clears; no second play
+    assert host.played == 1
+
+
+def test_switching_loop_on_at_the_end_restarts_immediately():
+    """Dogfood 2026-08-30 asked for this explicitly: flipping Loop on while
+    parked on the last frame should restart rather than sit dead."""
+    host = _LoopHost(at_end=True)
+
+    host._on_loop_toggled(True)
+    host.poll_once()
+
+    assert host.seeks == [0.0]
 
 
 def test_restart_goes_through_the_seek_envelope():
@@ -188,20 +283,20 @@ def test_one_end_of_file_restarts_exactly_once():
         host.poll_once()
 
     assert host.seeks == [0.0]
-    assert host.played == 1
 
 
 def test_latch_rearms_once_playback_leaves_the_end():
     host = _LoopHost(at_end=True)
     host._loop_enabled = True
     host.poll_once()
+    host.land_seek()                # restart landed; playing again
 
-    host._at_end = False            # the restart landed; playing again
     host.poll_once()
     assert host._loop_restart_pending is False
 
     host._at_end = True             # reached the end a second time
     host.poll_once()
+    host.land_seek()
     assert host.seeks == [0.0, 0.0]
     assert host.played == 2
 

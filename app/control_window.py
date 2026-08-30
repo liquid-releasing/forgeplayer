@@ -6,6 +6,7 @@ from __future__ import annotations
 import html
 import os
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtWidgets import (
@@ -4987,6 +4988,13 @@ class ControlWindow(QMainWindow):
                     self._engine.set_volume(i, 0)
                 elif _SLOT_ROLES[i] == "video":
                     self._engine.set_volume(i, int(self._scene_volume_slider.value()))
+                # A reused window keeps its old button states; re-assert the
+                # session values so a relaunch can't leave two overlays
+                # disagreeing about loop or chapter availability.
+                reused_pw = self._player_windows[i]
+                if reused_pw is not None:
+                    reused_pw.set_loop_enabled(self._loop_enabled)
+                    reused_pw.set_chapter_nav_enabled(bool(self._chapters))
                 DebugLog.record("players.launch_slot_reused", slot=i)
                 launched = True
                 continue
@@ -5256,7 +5264,9 @@ class ControlWindow(QMainWindow):
         if not self._mpv_envelope.tick(TICK_MS / 1000.0):
             self._mpv_envelope_timer.stop()
 
-    def _seek_with_envelope(self, pos: float) -> None:
+    def _seek_with_envelope(
+        self, pos: float, on_seeked: "Callable[[], None] | None" = None,
+    ) -> None:
         """Seek every active player to `pos` with a three-stage
         envelope: ramp-down → settle hold → ramp-up. Hides the
         funscript-axis discontinuity AND the post-seek warm-up window
@@ -5268,6 +5278,14 @@ class ControlWindow(QMainWindow):
         If nothing is currently audible (no players, paused), seeks
         immediately — no envelope dance needed when there's nothing
         to fade.
+
+        `on_seeked` runs immediately after the seek is issued, on BOTH
+        paths. Callers that must act on the new position need this: the
+        enveloped path returns ~0.5 s before the seek actually happens
+        (it's a ramp-down plus a QTimer), so anything they do inline
+        would run against the OLD position. That cost the loop restart a
+        release — it called play_all() inline, which landed while mpv was
+        still parked at EOF and did nothing.
         """
         streams = self._all_active_stim_streams()
         mpv_stim = self._mpv_stim_players()
@@ -5278,6 +5296,8 @@ class ControlWindow(QMainWindow):
         )
         if not needs_envelope:
             self._engine.seek_all(pos)
+            if on_seeked is not None:
+                on_seeked()
             return
 
         DebugLog.record(
@@ -5293,6 +5313,8 @@ class ControlWindow(QMainWindow):
         def _do_seek() -> None:
             DebugLog.record("seek.execute", target_s=pos)
             self._engine.seek_all(pos)
+            if on_seeked is not None:
+                on_seeked()
 
             def _do_ramp_up() -> None:
                 DebugLog.record("seek.ramp_up", target_s=pos)
@@ -5417,12 +5439,25 @@ class ControlWindow(QMainWindow):
         """
         if not self._engine.has_active_players():
             return
-        if not self._engine.at_end_of_file():
-            # Cleared as soon as the restart seek lands, which re-arms the
-            # latch for the next time round.
+        if self._engine.at_end_of_file():
+            # Also covers switching Loop ON while already parked at the end:
+            # the scene restarts there and then instead of sitting dead until
+            # the user seeks. Dogfood 2026-08-30 called that out as wanted.
+            if self._loop_enabled and not self._loop_restart_pending:
+                self._restart_for_loop()
+            return
+
+        if self._loop_restart_pending:
+            # The seek has landed, so the latch re-arms for the next lap.
+            # mpv applies a seek asynchronously, so the resume issued from
+            # `on_seeked` can still have been swallowed while it was parked
+            # at EOF — one catch-up here, and only here, guarantees the
+            # scene is actually running again. Bounded to a single attempt
+            # so it can never fight a user who pauses right after a wrap.
             self._loop_restart_pending = False
-        elif self._loop_enabled and not self._loop_restart_pending:
-            self._restart_for_loop()
+            if self._engine.is_paused():
+                DebugLog.record("playback.loop_resume_catchup")
+                self._engine.play_all()
 
     def _restart_for_loop(self) -> None:
         """Send playback back to the start because loop is on and the scene
@@ -5432,12 +5467,27 @@ class ControlWindow(QMainWindow):
         wrap-around gets the same ramp-down / settle / ramp-up every other
         seek gets — the end→start jump is the largest discontinuity in the
         whole scene, and splicing it raw is exactly the pop we just spent a
-        release removing. `keep_open` leaves mpv paused on the last frame,
-        so playback has to be resumed explicitly after the seek.
+        release removing.
+
+        `keep_open` parks mpv on the last frame, so playback has to be
+        resumed explicitly — and the resume MUST ride `on_seeked` rather
+        than being called inline. With stim live the envelope path returns
+        ~0.5 s before it actually seeks, so an inline `play_all()` landed
+        while mpv was still at EOF, where unpausing does nothing; the seek
+        then arrived with nothing left to restart it. That was the
+        "loop rewinds but doesn't always play" report (dogfood 2026-08-30,
+        debug stream: loop_restart and envelope_start at t=46.836,
+        seek.execute at t=47.348). `_maybe_loop_restart` re-checks on the
+        next tick as a backstop, since mpv applies the seek asynchronously
+        even once the command is issued.
         """
         DebugLog.record("playback.loop_restart")
         self._loop_restart_pending = True
-        self._seek_with_envelope(0.0)
+        self._seek_with_envelope(0.0, on_seeked=self._resume_after_loop_seek)
+
+    def _resume_after_loop_seek(self) -> None:
+        """Resume playback once the loop's seek has been issued."""
+        DebugLog.record("playback.loop_resume")
         self._engine.play_all()
 
     def _maybe_populate_chapters_from_mpv(

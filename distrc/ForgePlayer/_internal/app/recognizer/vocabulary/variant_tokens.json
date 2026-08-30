@@ -1,0 +1,17 @@
+{
+  "_comment": "Single source of truth for filename QUALITY/FORMAT tokens — the noise a title-recognizer must strip to find a work's identity. Language-neutral DATA so both the Python recognizer (forgeplayer/forgeassembler) and the JS scanner (forgemoment) can load ONE copy. Adding a token here must NOT require code changes. See project_forgeplayer_media_recognizer.",
+  "resolution": {
+    "4k":    ["4k", "4k60", "4k30", "4k24", "2160p", "uhd"],
+    "1440p": ["1440p", "2k", "qhd"],
+    "1080p": ["1080p", "fhd", "hd"],
+    "720p":  ["720p"],
+    "480p":  ["480p", "sd"]
+  },
+  "resolution_rank": {
+    "4k": 0, "1440p": 1, "1080p": 2, "720p": 3, "480p": 4
+  },
+  "upscaler": ["iris", "chf", "topaz", "rhea", "proteus", "nyx", "gaia", "artemis", "apollo"],
+  "aspect": ["ultrawide", "cropped", "crop", "vr", "sbs", "fisheye", "mkx200", "fisheye190"],
+  "codec_format": ["h264", "h265", "hevc", "x264", "x265", "av1", "avc", "remux", "reencode", "reenc"],
+  "misc_noise": ["final", "fixed", "edit", "cut", "hdr", "sdr", "60fps", "30fps", "24fps", "web", "webrip"]
+}

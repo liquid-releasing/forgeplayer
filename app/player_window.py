@@ -26,6 +26,12 @@ def _fmt_time(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
+# Loop button faces. The tick is what makes the state readable on an overlay
+# floating above arbitrary video, where the checked colour alone can wash out.
+_LOOP_OFF_TEXT = "Loop"
+_LOOP_ON_TEXT = "✓ Loop"
+
+
 class PlayerWindow(QWidget):
     """
     Borderless window that covers one monitor.
@@ -200,7 +206,7 @@ class PlayerWindow(QWidget):
         # Loop — restart the scene when it plays through, instead of
         # stopping on the last frame. Checkable so the state is visible at a
         # glance from the overlay alone (the console is usually buried).
-        self._btn_loop = QPushButton("Loop")
+        self._btn_loop = QPushButton(_LOOP_OFF_TEXT)
         self._btn_loop.setCheckable(True)
         self._btn_loop.setFixedHeight(28)
         self._btn_loop.setStyleSheet(
@@ -213,6 +219,7 @@ class PlayerWindow(QWidget):
             "Repeat the scene when it reaches the end.\n"
             "Off: playback stops on the last frame."
         )
+        self._btn_loop.toggled.connect(self._paint_loop_button)
         self._btn_loop.toggled.connect(self._on_loop_clicked)
         h.addWidget(self._btn_loop)
 
@@ -234,6 +241,16 @@ class PlayerWindow(QWidget):
         return bar
 
     # ── Transport slots ────────────────────────────────────────────────────────
+
+    def _paint_loop_button(self, checked: bool) -> None:
+        """Show a tick when looping is on.
+
+        Colour alone carried the state at first, and the first dogfooder
+        asked "should there be a checkmark?" — which is the answer. On a
+        translucent overlay above arbitrary video, a red fill is not
+        reliably readable as "on"; a glyph is.
+        """
+        self._btn_loop.setText(_LOOP_ON_TEXT if checked else _LOOP_OFF_TEXT)
 
     def _on_loop_clicked(self, checked: bool) -> None:
         """Relay a click to ControlWindow. Suppressed while
