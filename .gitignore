@@ -12,6 +12,9 @@ env/
 # PyInstaller build artifacts
 build/
 dist/
+# Side-by-side build dir used to rebuild while the app is running
+# (`--distpath distrc`), so the running dist/ isn't overwritten under it.
+distrc/
 *.spec.bak
 
 # IDE
