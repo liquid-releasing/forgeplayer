@@ -711,7 +711,7 @@
   <span class="md-ellipsis">
     
   
-    Settings
+    Preferences
   
 
     
@@ -1056,9 +1056,11 @@ matches them by name and shows one Library tile. A folder can hold:</p>
   box (Haptic 2). Funscripts synthesize to a stim waveform live (pulse-based or
   continuous). <em>(Multi-axis / OSR-style axis files aren't a target yet — the
   focus is e-stim.)</em></li>
-<li><strong>E-stim audio</strong> (<code>.wav</code> / <code>.mp3</code>) — pre-rendered stim sound. When it's
-  present ForgePlayer <strong>prefers it over live synth</strong> (no synth artifacts).
-  Includes a separate prostate track (<code>my-scene.prostate.wav</code>) for Haptic 2.</li>
+<li><strong>E-stim audio</strong> (<code>.wav</code> / <code>.mp3</code>) — pre-rendered stim sound, an alternative
+  to synthesizing the funscript live. When a scene ships <strong>both</strong> forms, the
+  <strong>Content preference</strong> setting breaks the tie (default: <strong>funscript</strong>) — and
+  when only one form exists, that one plays regardless of the setting. Includes
+  a separate prostate track (<code>my-scene.prostate.wav</code>) for Haptic 2.</li>
 <li><strong>The video</strong> (<code>.mp4</code>, <code>.mkv</code>, …) — plus any alternate renders (4K, 1080p,
   upscaled); the picker lets you choose which to play.</li>
 </ul>

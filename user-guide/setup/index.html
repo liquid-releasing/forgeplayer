@@ -682,7 +682,7 @@
   <span class="md-ellipsis">
     
   
-    Settings
+    Preferences
   
 
     
@@ -927,15 +927,23 @@
 
 <h1 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h1>
 <h2 id="audio-device-roles">Audio device roles<a class="headerlink" href="#audio-device-roles" title="Permanent link">&para;</a></h2>
-<p>Three dropdowns:</p>
+<p><strong>Do this before you scan a library</strong> — the Library opens first, but a scene
+can't route anything until these are assigned.</p>
+<p>Four dropdowns:</p>
 <ul>
-<li><strong>Scene Audio</strong> — the video's own audio → your speakers / headphones.</li>
-<li><strong>Haptic 1</strong> — the main stim port → your USB stim dongle.</li>
-<li><strong>Haptic 2</strong> — an <em>optional</em> second stim port (prostate side-chain, or it
-  mirrors Haptic 1). <strong>Leave it "— not set —" if you only have one stim box.</strong></li>
+<li><strong>Scene audio</strong> — the video's own audio → your speakers / headphones.</li>
+<li><strong>Scene audio (also)</strong> — an <em>optional</em> second port that receives the <strong>same
+  video sound</strong>. It exists to drive a stim box that accepts a plain audio input
+  when a scene has no funscript to synthesize from. Leave it unset to disable.</li>
+<li><strong>Haptic 1 (main stim)</strong> — the main stim port → your USB stim dongle.</li>
+<li><strong>Haptic 2 (alt stim)</strong> — an <em>optional</em> second stim port (prostate
+  side-chain, or it mirrors Haptic 1). <strong>Leave it "— not set —" if you only
+  have one stim box.</strong></li>
 </ul>
 <p>Dropdowns list every audio output Windows reports through mpv. If a dongle
 isn't there, plug it in and press <strong>Refresh devices</strong>.</p>
+<p>A device assigned to one role is <strong>greyed out in the others</strong>, so e-stim and
+your scene audio can't be sent to the same port by accident.</p>
 <div class="admonition danger">
 <p class="admonition-title">E-stim never plays through your speakers</p>
 <p>A stim port only outputs to a device that resolves. If a Haptic device
@@ -954,10 +962,14 @@ reboot or a USB re-plug).</p>
 a USB dongle for stim.</p>
 </div>
 <h2 id="test-device-buttons">Test device buttons<a class="headerlink" href="#test-device-buttons" title="Permanent link">&para;</a></h2>
-<p>Each row has a <strong>Test</strong> button that routes a brief tone to the picked
-device so you can verify the dongle is wired up before launching a
-scene. (Stim test routes to the haptic device; scene-audio test plays
-through the scene-audio device.)</p>
+<p>Each row has a <strong>🔊 Test</strong> button that plays a short sample through the picked
+device, so you can verify the dongle is wired up before launching a scene. The
+sample matches the role: the scene-audio rows get a half-second 440 Hz tone,
+the haptic rows get a synthesized stim clip with a gentle volume ramp — so a
+haptic test feels like real playback rather than a harsh sine into your
+electrodes.</p>
+<p>Silent? Check the dongle, the box's own hardware knob, and any OS-level
+per-app mute.</p>
 <h2 id="monitors">Monitors<a class="headerlink" href="#monitors" title="Permanent link">&para;</a></h2>
 <p>For each player slot, pick which monitor it lands on. The dropdown
 auto-populates with whatever Qt enumerates. Helpful labels include

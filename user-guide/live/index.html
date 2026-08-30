@@ -743,7 +743,7 @@
   <span class="md-ellipsis">
     
   
-    Settings
+    Preferences
   
 
     
@@ -1111,8 +1111,10 @@ video once</strong> to reveal it (click again to hide). Same
 chapters.json gate as the console buttons: both button sets stay in
 sync on whether the active scene has chapters.</p>
 <h2 id="seek-behavior">Seek behavior<a class="headerlink" href="#seek-behavior" title="Permanent link">&para;</a></h2>
-<p>Every seek runs through the same three-stage envelope to mask the
-funscript-driven carrier discontinuity that would otherwise click:</p>
+<p>Every seek runs through the same four-stage envelope to mask the
+discontinuity that would otherwise click. <strong>Both stim forms ride it</strong> — the
+live funscript synth and pre-rendered sound files (as of v0.0.16; sound-file
+stim used to splice raw, which is what the old skip-forward pop was):</p>
 <ol>
 <li><strong>500 ms ramp-down</strong> to silence</li>
 <li><strong>mpv seek</strong> at silence</li>
