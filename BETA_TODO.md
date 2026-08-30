@@ -116,6 +116,17 @@ routing on hybrid-graphics laptops).
       skips a root that fails `isdir`, but nothing tells the user their
       library root is gone; they just get the empty welcome screen.
 
+- [ ] **A stale screen/root preference silently does nothing** — found while
+      chasing the off-monitor picker, 2026-08-30. `control_panel_screen` was
+      `2` on a machine with two screens (0 and 1), and
+      `if 0 <= idx < len(self._screens)` just skips, so the console opens
+      wherever Qt happens to put it with no hint that the saved monitor is
+      gone. The stale `library_root` on an unmounted drive behaves the same
+      way. Both should either fall back visibly (clamp to primary, say so in
+      the status line) or tell the user their saved choice no longer resolves.
+      Deliberately NOT changed at release time — moving where the console
+      opens is not a change to make while cutting.
+
 - [ ] **Control panel taller than a small secondary monitor** — moving the
       control window to a 1280×720 screen leaves it overflowing. Cosmetic.
 - [ ] **+10 s while stopped jumps to 0** instead of holding the seeked position
