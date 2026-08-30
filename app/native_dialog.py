@@ -94,9 +94,21 @@ def qt_modal_waiter(widget=None) -> Waiter:
         timer = QTimer()
         timer.setInterval(30)
 
+        owner = owner_hwnd_for(widget)
+        moved = [False]
+
         def _poll() -> None:
             if not thread.is_alive():
                 loop.quit()
+                return
+            # Drag the dialog onto the owner's monitor the first time we see
+            # it. An owner window alone is NOT enough: the shell remembers the
+            # common dialog's last position per application (ComDlg32 user
+            # state) and restores it there regardless of who owns it, which is
+            # how the picker kept reopening on the far side of a 5120-wide
+            # desktop while the console sat disabled and apparently hung.
+            if owner and not moved[0] and _recentre_dialog_on_owner(owner):
+                moved[0] = True
 
         timer.timeout.connect(_poll)
         timer.start()
@@ -111,6 +123,99 @@ def qt_modal_waiter(widget=None) -> Waiter:
                 top.setEnabled(True)
 
     return _wait
+
+
+def _recentre_dialog_on_owner(owner_hwnd: int) -> bool:
+    """Centre this process's visible dialog on the owner's monitor.
+
+    Returns True once a dialog was found and moved (or found already in the
+    right place), so the caller stops looking. Best-effort throughout:
+    placement is cosmetic, and nothing here may break the picker itself or the
+    event loop that is pumping while it is open. Windows only; a no-op
+    elsewhere.
+    """
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        import ctypes  # noqa: PLC0415
+        from ctypes import wintypes  # noqa: PLC0415
+
+        user32 = ctypes.windll.user32
+
+        class _RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+        class _MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", _RECT),
+                        ("rcWork", _RECT), ("dwFlags", wintypes.DWORD)]
+
+        # Owner's monitor work area — the area excluding the taskbar.
+        MONITOR_DEFAULTTONEAREST = 2
+        mon = user32.MonitorFromWindow(
+            wintypes.HWND(owner_hwnd), MONITOR_DEFAULTTONEAREST,
+        )
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(_MONITORINFO)
+        if not user32.GetMonitorInfoW(mon, ctypes.byref(info)):
+            return False
+        work = info.rcWork
+
+        # The dialog is a standard "#32770" owned by our own process. Take the
+        # first visible one that isn't the owner itself.
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(
+            wintypes.HWND(owner_hwnd), ctypes.byref(pid),
+        )
+        found: list[int] = []
+
+        CB = ctypes.WINFUNCTYPE(
+            wintypes.BOOL, wintypes.HWND, wintypes.LPARAM,
+        )
+
+        def _each(hwnd, _lparam):
+            if hwnd == owner_hwnd or not user32.IsWindowVisible(hwnd):
+                return True
+            other = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(other))
+            if other.value != pid.value:
+                return True
+            cls = ctypes.create_unicode_buffer(64)
+            user32.GetClassNameW(hwnd, cls, 64)
+            if cls.value == "#32770":
+                found.append(hwnd)
+                return False
+            return True
+
+        user32.EnumWindows(CB(_each), 0)
+        if not found:
+            return False
+
+        dlg = found[0]
+        rect = _RECT()
+        if not user32.GetWindowRect(wintypes.HWND(dlg), ctypes.byref(rect)):
+            return False
+        w = rect.right - rect.left
+        h = rect.bottom - rect.top
+
+        # Already on the owner's monitor? Leave it exactly where the user last
+        # dragged it — the remembered position is a feature when it's on the
+        # right screen.
+        cx = rect.left + w // 2
+        cy = rect.top + h // 2
+        if work.left <= cx < work.right and work.top <= cy < work.bottom:
+            return True
+
+        x = work.left + max(0, (work.right - work.left - w) // 2)
+        y = work.top + max(0, (work.bottom - work.top - h) // 2)
+        SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0004, 0x0010
+        user32.SetWindowPos(
+            wintypes.HWND(dlg), None, int(x), int(y), 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def _run_on_sta(work: Callable[[], T], waiter: Optional[Waiter] = None) -> T:
