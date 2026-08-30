@@ -51,6 +51,25 @@ T = TypeVar("T")
 Waiter = Callable[[threading.Thread], None]
 
 
+def owner_hwnd_for(widget) -> int:
+    """Native handle of *widget*'s top-level window, or 0 if unavailable.
+
+    Used as the dialog's owner so Windows places it on the owner's monitor.
+    Without an owner the shell picks its own spot: on a 5120-wide ultrawide the
+    folder picker opened ~1900 px away from the console, and since the console
+    is disabled while a dialog is up, the app simply looked hung (dogfood
+    2026-08-30 — "the lib pick dialog was in a different window from the app so
+    I missed it").
+    """
+    if widget is None:
+        return 0
+    try:
+        top = widget.window()
+        return int(top.winId()) if top is not None else 0
+    except Exception:
+        return 0
+
+
 def qt_modal_waiter(widget=None) -> Waiter:
     """Waiter that keeps the Qt event loop alive while the dialog is open.
 
@@ -62,8 +81,11 @@ def qt_modal_waiter(widget=None) -> Waiter:
     The worker thread still owns the dialog's modal pump (that's what keeps it
     off the GUI thread's dirtied COM apartment); the GUI thread just runs its own
     normal event loop, repainting and keeping mpv's queued events flowing.
-    Input to *widget*'s window is blocked meanwhile so the dialog behaves modally
-    — the native dialog is deliberately owner-less, so nothing else enforces it.
+    Input to *widget*'s window is blocked meanwhile so the dialog behaves
+    modally. Supplying this waiter is also what makes it safe to give the
+    dialog an owner window (see `owner_hwnd_for` / `_safe_owner`): an owned
+    dialog needs its owner's thread to keep pumping, which is exactly what
+    this loop does.
     """
     def _wait(thread: threading.Thread) -> None:
         from PySide6.QtCore import QEventLoop, QTimer  # noqa: PLC0415
@@ -129,6 +151,7 @@ def native_open_file(
     start_dir: str,
     filters: list[tuple[str, str]],
     waiter: Optional[Waiter] = None,
+    owner_hwnd: int = 0,
 ) -> Optional[str]:
     """Show the OS file-open dialog and return the chosen path (or None if the
     user cancelled). `filters` is a list of ``(label, pattern)`` where pattern is
@@ -137,8 +160,12 @@ def native_open_file(
     Raises `NativeDialogUnavailable` on non-Windows or any Win32/ctypes error so
     the caller can fall back to a Qt dialog.
     """
+    owner_hwnd = _safe_owner(waiter, owner_hwnd)
     return _run_on_sta(
-        lambda: _win_file_dialog(title, start_dir, filters, save=False), waiter,
+        lambda: _win_file_dialog(
+            title, start_dir, filters, save=False, owner_hwnd=owner_hwnd,
+        ),
+        waiter,
     )
 
 
@@ -149,16 +176,19 @@ def native_save_file(
     default_name: str = "",
     default_ext: str = "",
     waiter: Optional[Waiter] = None,
+    owner_hwnd: int = 0,
 ) -> Optional[str]:
     """Show the OS file-save dialog and return the chosen path (or None if the
     user cancelled). `default_name` pre-fills the filename box; `default_ext` is
     appended by the shell when the user types a name without one (no leading
     dot). Overwrite confirmation is handled by the dialog.
     """
+    owner_hwnd = _safe_owner(waiter, owner_hwnd)
     return _run_on_sta(
         lambda: _win_file_dialog(
             title, start_dir, filters,
             save=True, default_name=default_name, default_ext=default_ext,
+            owner_hwnd=owner_hwnd,
         ),
         waiter,
     )
@@ -166,11 +196,28 @@ def native_save_file(
 
 def native_pick_folder(
     title: str, start_dir: str, waiter: Optional[Waiter] = None,
+    owner_hwnd: int = 0,
 ) -> Optional[str]:
     """Show the OS folder picker (Quick Access, This PC, drive navigation) and
     return the chosen folder (or None if the user cancelled).
     """
-    return _run_on_sta(lambda: _win_pick_folder(title, start_dir), waiter)
+    owner_hwnd = _safe_owner(waiter, owner_hwnd)
+    return _run_on_sta(
+        lambda: _win_pick_folder(title, start_dir, owner_hwnd=owner_hwnd),
+        waiter,
+    )
+
+
+def _safe_owner(waiter: Optional[Waiter], owner_hwnd: int) -> int:
+    """Drop the owner unless a waiter is keeping the owning thread pumping.
+
+    An owned dialog whose owner's thread is blocked in `join()` can misbehave —
+    that is why these dialogs were owner-less to begin with. `qt_modal_waiter`
+    removed that constraint by running a real `QEventLoop` on the GUI thread,
+    so an owner is safe *when a waiter is supplied* and not otherwise. Encoding
+    the rule here means no call site can get the pairing wrong.
+    """
+    return owner_hwnd if waiter is not None else 0
 
 
 # ── Win32 implementations (worker thread only) ───────────────────────────────
@@ -184,6 +231,7 @@ def _win_file_dialog(
     save: bool,
     default_name: str = "",
     default_ext: str = "",
+    owner_hwnd: int = 0,
 ) -> Optional[str]:
     """`GetOpenFileNameW` / `GetSaveFileNameW`. Runs on the STA worker only."""
     import ctypes
@@ -237,8 +285,10 @@ def _win_file_dialog(
 
         ofn = OPENFILENAMEW()
         ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
-        ofn.hwndOwner = 0  # no owner — the GUI thread is parked in join(), so an
-        #                    owned dialog whose owner never pumps could misbehave.
+        # Owner (when the caller supplied a waiter — see `_safe_owner`) so the
+        # shell places the dialog on the owner's monitor instead of wherever it
+        # likes. 0 keeps the old owner-less behaviour for waiter-less callers.
+        ofn.hwndOwner = owner_hwnd
         ofn.lpstrFilter = ctypes.cast(filt_buf, wintypes.LPCWSTR)
         ofn.lpstrFile = ctypes.cast(path_buf, wintypes.LPWSTR)
         ofn.nMaxFile = 2048
@@ -261,7 +311,9 @@ def _win_file_dialog(
             ole32.CoUninitialize()
 
 
-def _win_pick_folder(title: str, start_dir: str) -> Optional[str]:
+def _win_pick_folder(
+    title: str, start_dir: str, owner_hwnd: int = 0,
+) -> Optional[str]:
     """`IFileOpenDialog` in folder-pick mode. Runs on the STA worker only.
 
     Called through raw ctypes vtable dispatch — no comtypes/pywin32 dependency,
@@ -360,7 +412,13 @@ def _win_pick_folder(title: str, start_dir: str) -> Optional[str]:
                      argtypes=(ctypes.c_void_p,))
                 release(start_item)
 
-        hr = call(dialog, IDX_SHOW, None, argtypes=(wintypes.HWND,))
+        # Owner window: Windows centres an owned dialog on its owner, which is
+        # what keeps the picker on the same monitor as the console. Passing 0
+        # (waiter-less callers) restores the previous owner-less placement.
+        hr = call(
+            dialog, IDX_SHOW, wintypes.HWND(owner_hwnd) if owner_hwnd else None,
+            argtypes=(wintypes.HWND,),
+        )
         if hr == HRESULT_CANCELLED:
             return None
         if hr < 0:

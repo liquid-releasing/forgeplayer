@@ -47,7 +47,8 @@ from app.library import (
 from app.library.channels import GENERATION_BADGES, DeviceGeneration
 from app.library.pins import has_pin
 from app.native_dialog import (
-    NativeDialogUnavailable, native_pick_folder, qt_modal_waiter,
+    NativeDialogUnavailable, native_pick_folder, owner_hwnd_for,
+    qt_modal_waiter,
 )
 from app.thumbnails import ThumbnailService
 
@@ -730,7 +731,10 @@ class LibraryPanel(QWidget):
         title = "Pick library root folder"
         start = self._root or os.getcwd()
         try:
-            folder = native_pick_folder(title, start, qt_modal_waiter(self))
+            folder = native_pick_folder(
+                title, start, qt_modal_waiter(self),
+                owner_hwnd=owner_hwnd_for(self),
+            )
         except NativeDialogUnavailable:
             folder = QFileDialog.getExistingDirectory(self, title, start)
         if folder:

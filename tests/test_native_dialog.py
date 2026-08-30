@@ -177,3 +177,72 @@ def test_fallback_helpers_are_all_present():
         fn for _f, fn, _line in _qfiledialog_call_sites()
     }
     assert found == _FALLBACK_FUNCTIONS
+
+
+# ── owner window (dogfood 2026-08-30) ────────────────────────────────────────
+#
+# The dialogs used to be shown owner-less, so Windows placed them wherever it
+# liked. On a 5120-wide ultrawide the Library root picker opened ~1900px from
+# the console, and because qt_modal_waiter disables the console for the
+# dialog's lifetime, the app just looked hung. An owner window makes Windows
+# place the dialog on the owner's monitor.
+
+def test_owner_is_dropped_without_a_waiter():
+    """An owned dialog needs its owner's thread to keep pumping. That is the
+    whole reason these were owner-less; the rule now lives in one place so no
+    call site can pair an owner with a blocked GUI thread."""
+    assert native_dialog._safe_owner(None, 4242) == 0
+
+
+def test_owner_is_kept_when_a_waiter_pumps():
+    assert native_dialog._safe_owner(lambda _t: None, 4242) == 4242
+
+
+def test_owner_hwnd_for_handles_no_widget():
+    assert native_dialog.owner_hwnd_for(None) == 0
+
+
+def test_owner_hwnd_for_survives_a_broken_widget():
+    """Placement is a nicety; failing to compute it must never break the
+    picker, which is the part the user actually needs."""
+    class _Broken:
+        def window(self):
+            raise RuntimeError("widget already destroyed")
+
+    assert native_dialog.owner_hwnd_for(_Broken()) == 0
+
+
+def test_owner_hwnd_for_returns_the_top_level_window(qapp):
+    from PySide6.QtWidgets import QWidget
+
+    top = QWidget()
+    child = QWidget(top)
+    assert native_dialog.owner_hwnd_for(child) == int(top.winId())
+
+
+def test_every_native_picker_call_passes_an_owner():
+    """Regression gate: a new picker that forgets owner_hwnd reintroduces the
+    off-monitor dialog, which reads as a hung app rather than a misplaced
+    window — so it is worth failing the build over."""
+    import ast
+
+    wanted = {"native_open_file", "native_save_file", "native_pick_folder"}
+    offenders = []
+    for path in (Path("app/control_window.py"), Path("app/library_panel.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = getattr(node.func, "id", None) or getattr(
+                node.func, "attr", None,
+            )
+            if fn not in wanted:
+                continue
+            if not any(kw.arg == "owner_hwnd" for kw in node.keywords):
+                offenders.append(f"{path.name}:{node.lineno} {fn}()")
+
+    assert not offenders, (
+        "these open a native dialog without an owner window, so it can land "
+        "on another monitor while the console sits disabled: "
+        + ", ".join(offenders)
+    )

@@ -1640,11 +1640,13 @@ class ControlWindow(QMainWindow):
         filters_qt: str, filters_win: list[tuple[str, str]],
     ) -> str | None:
         from app.native_dialog import (  # noqa: PLC0415
-            NativeDialogUnavailable, native_open_file, qt_modal_waiter,
+            NativeDialogUnavailable, native_open_file, owner_hwnd_for,
+            qt_modal_waiter,
         )
         try:
             return native_open_file(
                 title, start, filters_win, qt_modal_waiter(self),
+                owner_hwnd=owner_hwnd_for(self),
             )
         except NativeDialogUnavailable:
             path, _ = QFileDialog.getOpenFileName(self, title, start, filters_qt)
@@ -1658,7 +1660,8 @@ class ControlWindow(QMainWindow):
         """`start_path` is a full suggested path — its folder opens the dialog,
         its basename pre-fills the filename box."""
         from app.native_dialog import (  # noqa: PLC0415
-            NativeDialogUnavailable, native_save_file, qt_modal_waiter,
+            NativeDialogUnavailable, native_save_file, owner_hwnd_for,
+            qt_modal_waiter,
         )
         folder = os.path.dirname(start_path)
         name = os.path.basename(start_path)
@@ -1666,6 +1669,7 @@ class ControlWindow(QMainWindow):
             return native_save_file(
                 title, folder, filters_win, name, default_ext,
                 qt_modal_waiter(self),
+                owner_hwnd=owner_hwnd_for(self),
             )
         except NativeDialogUnavailable:
             path, _ = QFileDialog.getSaveFileName(
@@ -1675,10 +1679,14 @@ class ControlWindow(QMainWindow):
 
     def _pick_folder(self, title: str, start: str) -> str | None:
         from app.native_dialog import (  # noqa: PLC0415
-            NativeDialogUnavailable, native_pick_folder, qt_modal_waiter,
+            NativeDialogUnavailable, native_pick_folder, owner_hwnd_for,
+            qt_modal_waiter,
         )
         try:
-            return native_pick_folder(title, start, qt_modal_waiter(self))
+            return native_pick_folder(
+                title, start, qt_modal_waiter(self),
+                owner_hwnd=owner_hwnd_for(self),
+            )
         except NativeDialogUnavailable:
             return QFileDialog.getExistingDirectory(self, title, start) or None
 
