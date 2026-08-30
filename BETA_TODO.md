@@ -94,6 +94,28 @@ routing on hybrid-graphics laptops).
 
 ## Alpha-polish bugs (non-blocking, but visible)
 
+- [ ] **A native picker can open on a different monitor and the app reads as
+      hung** — dogfood 2026-08-30, and it cost the start of a test session.
+      The native dialogs are shown **owner-less** (`Show(NULL)`;
+      `ofn.hwndOwner = 0`), so Windows places them wherever it likes — on a
+      5120-wide ultrawide the folder picker landed ~1900 px away from the
+      console. Meanwhile `qt_modal_waiter` disables the console for the
+      dialog's whole lifetime, by design. Net effect: a dead-looking app with
+      no on-screen explanation. User: "the lib pick dialog was in a different
+      window from the app so I missed it."
+      Fix candidates, cheapest first: (a) pass the console HWND as the
+      dialog owner so Windows centres it on the right monitor — the normal
+      Win32 arrangement, and the original "owner-less" rationale (GUI thread
+      parked in `join()`, not pumping) no longer holds now that the waiter
+      runs a real `QEventLoop`; **verify it doesn't reintroduce
+      "(Not Responding)"**, since cross-thread ownership attaches the two
+      threads' input queues. (b) Failing that, show a "Waiting for the folder
+      picker…" state on the disabled console so the app explains itself.
+      Related: the same launch had a **stale library root on an unmounted
+      drive** (`G:i`, the T5 EVO) — `control_window.py:313` correctly
+      skips a root that fails `isdir`, but nothing tells the user their
+      library root is gone; they just get the empty welcome screen.
+
 - [ ] **Control panel taller than a small secondary monitor** — moving the
       control window to a 1280×720 screen leaves it overflowing. Cosmetic.
 - [ ] **+10 s while stopped jumps to 0** instead of holding the seeked position
