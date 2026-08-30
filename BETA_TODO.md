@@ -30,14 +30,21 @@ routing on hybrid-graphics laptops).
       Prev/Next clicking (~1/s) raced the live-synth math into an access
       violation; fixed via a debounce on the trigger (commit `5d0e897`),
       not a patch to the vendored math itself.
-- [ ] **Hardware feel-test the actual v0.0.12 release artifact** on the
-      workstation + haptic dongle (not just "sounds right" through headphones).
+- [x] **Hardware feel-test the actual release artifact** on the workstation +
+      haptic dongle (not just "sounds right" through headphones).
+      **Done 2026-08-29 against the real v0.0.16 installer** — not a dev-venv
+      run, not the frozen dir, the installed build: "i used the real installer
+      yesterday and am satisfied with the v0.0.16 build that we shipped."
+      (Gate text previously said v0.0.12; it had been carried forward
+      unchanged across four releases.)
 - [ ] **Confirm the flagged "D29 audio-only ship-blocker"** from the setup/Live
       redesign is actually resolved against the current build.
 - [ ] **Seek pop on sound-file stim — mostly fixed, residual to assess.**
       `4f862b4` put mpv-backed stim on the same seek envelope as the live
       synth. First dogfood (2026-08-29, headphones): "much much less and will
-      be tolerable" — pending a check on the real hardware. If a residual
+      be tolerable". The installed v0.0.16 build was then used on the real rig
+      and judged satisfactory overall — but the seek pop was not called out
+      separately, so treat this as "no longer reported", not as measured. If a residual
       remains, the next suspect is timing, not the envelope: the ramp ticks and
       the seek timer both live on the GUI thread, so a busy launch or thumbnail
       flood can let the seek fire before the ramp has actually reached zero.
