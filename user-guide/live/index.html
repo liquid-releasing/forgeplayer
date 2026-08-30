@@ -1118,7 +1118,7 @@ sits above the volume slider.</p>
 it's the other. Volume is per-session (resets to 100 % every scene).</p>
 <h2 id="transport">Transport<a class="headerlink" href="#transport" title="Permanent link">&para;</a></h2>
 <p><code>⏮ Prev · −30 s · −10 s · −5 s · ▶ Play / ⏸ Pause · ■ Stop · +5 s · +10 s · +30 s · Next ⏭</code></p>
-<p>(Looping is set from the player overlay — see <strong><a href="#loop">Loop</a></strong> below.)</p>
+<p>Plus <strong>Loop</strong> — see <strong><a href="#loop">Loop</a></strong> below.</p>
 <p><strong>Prev</strong> and <strong>Next</strong> jump to the previous/next chapter boundary — they
 frame the skip buttons on either end of the row. Both are disabled
 (greyed out) until a <code>&lt;stem&gt;.chapters.json</code> sidecar is found for the
@@ -1156,15 +1156,22 @@ open window goes fullscreen (or back to windowed) immediately — you don't
 have to relaunch. New launches read the toggle's current state.</p>
 <p><code>F11</code> inside any player window also toggles fullscreen for that slot.</p>
 <h2 id="loop">Loop<a class="headerlink" href="#loop" title="Permanent link">&para;</a></h2>
-<p>Each player overlay has a <strong>Loop</strong> button, immediately left of <strong>Console</strong>.
-Switch it on and the scene restarts from the beginning when it plays through;
-leave it off and playback stops on the last frame, as before.</p>
+<p><strong>Loop</strong> appears in two places — on the console's transport row, and on every
+player overlay immediately left of <strong>Console</strong>. Switch it on and the scene
+restarts from the beginning when it plays through; leave it off and playback
+stops on the last frame, as before. When it's on the button reads <strong>✓ Loop</strong>.</p>
+<p>Switching Loop on while a scene is already sitting on its last frame restarts
+it straight away, rather than leaving it parked.</p>
 <p>Two things worth knowing:</p>
 <ul>
 <li><strong>Loop is session-wide, not per-window.</strong> Every screen rides one timeline,
-  so looping one player and not another would desync the scene. Toggling it on
-  any overlay sets it for the whole session, and the other overlays update to
-  match.</li>
+  so looping one player and not another would desync the scene. Toggling it
+  anywhere — console or any overlay — sets it for the whole session, and every
+  other Loop control updates to match.</li>
+<li><strong>It stays on when you change scenes</strong>, because looping is a way of watching
+  rather than a property of one video. That's also why there's a control on the
+  console: the overlay bar is hidden until you click the video, so without it a
+  new scene could be looping with nothing on screen saying so.</li>
 <li><strong>The wrap-around is faded like any other seek.</strong> The jump from the end back
   to the start is the largest discontinuity in a scene; it runs through the
   same ramp-down / settle / ramp-up envelope as a manual seek, so the stim
@@ -1173,8 +1180,9 @@ leave it off and playback stops on the last frame, as before.</p>
 <div class="admonition warning">
 <p class="admonition-title">Looping keeps e-stim running</p>
 <p>A looped scene doesn't end on its own — stim keeps driving until you stop
-it. Loop is deliberately <strong>off at every launch</strong> and isn't remembered
-between sessions, so it can never be on when you didn't ask for it.</p>
+it. Loop is deliberately <strong>off at every launch</strong> and isn't written to your
+preferences, so a setting from a previous day can never arm it on a session
+you thought was fresh.</p>
 </div>
 <h2 id="getting-back-to-the-console">Getting back to the console<a class="headerlink" href="#getting-back-to-the-console" title="Permanent link">&para;</a></h2>
 <p>Players usually cover the monitors they're on, and the console sits behind
@@ -1213,7 +1221,8 @@ leave the others frozen against a dead mpv handle.</p>
 </tbody>
 </table>
 <p>The overlay's <strong>Loop</strong> and <strong>Console</strong> buttons sit at the right end of the bar
-(click the video once to reveal it).</p>
+(click the video once to reveal it). Loop is also on the console's transport
+row.</p>
 <h2 id="video-playback-4k">Video playback &amp; 4K<a class="headerlink" href="#video-playback-4k" title="Permanent link">&para;</a></h2>
 <p>ForgePlayer uses GPU hardware decoding when it's available (<code>hwdec=auto-safe</code>),
 falling back to the CPU for anything the GPU can't handle.</p>
