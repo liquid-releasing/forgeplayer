@@ -29,7 +29,9 @@ from app.chapters import (
     next_chapter,
     prev_chapter,
 )
-from app.player_window import PlayerWindow
+from app.player_window import (
+    _LOOP_OFF_TEXT, _LOOP_ON_TEXT, PlayerWindow,
+)
 from app.sync_engine import SyncEngine
 from app.session import Session, SlotConfig
 from app.folder_scanner import auto_assign
@@ -183,6 +185,9 @@ class ControlWindow(QMainWindow):
         # it) running indefinitely on a launch the user thought was fresh.
         # Off every launch; the user opts in per session.
         self._loop_enabled = False
+        # Set while _on_loop_toggled writes the console's own Loop button, so
+        # the resulting `toggled` doesn't re-enter as a fresh user click.
+        self._console_loop_echo_guard = False
         # Latches while a loop restart is in flight. mpv's eof-reached stays
         # set until the seek lands, and _poll runs every few hundred ms, so
         # without this one end-of-file would fire a burst of restarts.
@@ -518,6 +523,28 @@ class ControlWindow(QMainWindow):
         self._btn_next_chapter.clicked.connect(self._on_next_chapter)
         self._btn_next_chapter.setEnabled(False)
         transport.addWidget(self._btn_next_chapter)
+
+        # Loop — same session state the player overlays carry, surfaced here
+        # too. The overlay bar is hidden until you click the video, so without
+        # a console control a scene could be looping with nothing on screen
+        # saying why; loop persists across scene changes, which makes unseen
+        # state a support question waiting to happen. Mirrored both ways, the
+        # way Prev/Next chapter already appear in both places.
+        self._btn_loop = QPushButton(_LOOP_OFF_TEXT)
+        self._btn_loop.setCheckable(True)
+        self._btn_loop.setFixedHeight(46)
+        self._btn_loop.setMinimumWidth(88)
+        self._btn_loop.setStyleSheet(
+            "QPushButton { font-size: 13px; }"
+            "QPushButton:checked { background: #ff4b4b; color: white;"
+            " font-weight: bold; }"
+        )
+        self._btn_loop.setToolTip(
+            "Repeat the scene when it reaches the end.\n"
+            "Stays on across scene changes; always off at startup."
+        )
+        self._btn_loop.toggled.connect(self._on_console_loop_clicked)
+        transport.addWidget(self._btn_loop)
 
         transport.addStretch()
         vbox.addLayout(transport)
@@ -5428,6 +5455,26 @@ class ControlWindow(QMainWindow):
         for w in self._player_windows:
             if w is not None:
                 w.set_loop_enabled(enabled)
+        self._paint_console_loop(enabled)
+
+    def _on_console_loop_clicked(self, checked: bool) -> None:
+        """The console's own Loop button. Guarded the same way the overlay's
+        is, so mirroring the session value onto it isn't read back as a
+        click and bounced around the windows."""
+        if self._console_loop_echo_guard:
+            return
+        self._on_loop_toggled(checked)
+
+    def _paint_console_loop(self, enabled: bool) -> None:
+        """Show the session value on the console button without re-emitting."""
+        self._console_loop_echo_guard = True
+        try:
+            self._btn_loop.setChecked(enabled)
+            self._btn_loop.setText(
+                _LOOP_ON_TEXT if enabled else _LOOP_OFF_TEXT
+            )
+        finally:
+            self._console_loop_echo_guard = False
 
     def _maybe_loop_restart(self) -> None:
         """Restart the scene if loop is on and playback has run to the end.

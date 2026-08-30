@@ -112,7 +112,7 @@ routing on hybrid-graphics laptops).
       threads' input queues. (b) Failing that, show a "Waiting for the folder
       picker…" state on the disabled console so the app explains itself.
       Related: the same launch had a **stale library root on an unmounted
-      drive** (`G:i`, the T5 EVO) — `control_window.py:313` correctly
+      drive** (`G:\ai`, the T5 EVO) — `control_window.py:313` correctly
       skips a root that fails `isdir`, but nothing tells the user their
       library root is gone; they just get the empty welcome screen.
 

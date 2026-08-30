@@ -105,6 +105,21 @@ def test_echo_guard_is_released_even_if_setchecked_raises(qapp):
 
 # ── the restart, driven from ControlWindow's poll ────────────────────────────
 
+class _FakeButton:
+    """Stands in for the console's Loop QPushButton (constructing the real
+    ControlWindow would spin up mpv and probe audio hardware)."""
+
+    def __init__(self):
+        self.checked = False
+        self.text = "Loop"
+
+    def setChecked(self, value):   # noqa: N802 - Qt API shape
+        self.checked = value
+
+    def setText(self, value):      # noqa: N802 - Qt API shape
+        self.text = value
+
+
 class _LoopHost:
     """The loop half of ControlWindow, with the real methods bound to it.
 
@@ -118,6 +133,8 @@ class _LoopHost:
 
         self._loop_enabled = False
         self._loop_restart_pending = False
+        self._console_loop_echo_guard = False
+        self._btn_loop = _FakeButton()
         self._player_windows = []
         self.seeks: list[float] = []
         self.played = 0
@@ -130,6 +147,10 @@ class _LoopHost:
         self._on_loop_toggled = cls._on_loop_toggled.__get__(self)
         self._restart_for_loop = cls._restart_for_loop.__get__(self)
         self._resume_after_loop_seek = cls._resume_after_loop_seek.__get__(self)
+        self._paint_console_loop = cls._paint_console_loop.__get__(self)
+        self._on_console_loop_clicked = (
+            cls._on_console_loop_clicked.__get__(self)
+        )
         # The REAL method, not a copy of it — _poll does nothing here but
         # call this, so a change to the loop rule can't pass these tests
         # while behaving differently in the app.
@@ -393,3 +414,62 @@ def test_at_end_of_file_is_true_only_when_mpv_says_so():
 
     e._players[0] = _FakePlayer(False)
     assert e.at_end_of_file() is False
+
+
+# ── console button ───────────────────────────────────────────────────────────
+#
+# The overlay bar is hidden until you click the video, and loop persists across
+# scene changes — so without a console control a scene can be looping with
+# nothing on screen explaining why.
+
+def test_console_button_mirrors_a_toggle_from_an_overlay(qapp):
+    host = _LoopHost(at_end=False)
+    win = _player(qapp)
+    host._player_windows = [win]
+
+    win._btn_loop.setChecked(True)      # click on the overlay
+    host._on_loop_toggled(True)         # ControlWindow receives it
+
+    assert host._btn_loop.checked is True
+    assert host._btn_loop.text == "✓ Loop"
+
+
+def test_console_button_drives_the_session_and_the_overlays(qapp):
+    host = _LoopHost(at_end=False)
+    win = _player(qapp)
+    host._player_windows = [win]
+
+    host._on_console_loop_clicked(True)
+
+    assert host._loop_enabled is True
+    assert win._btn_loop.isChecked()
+    assert win._btn_loop.text() == "✓ Loop"
+
+
+def test_console_mirror_does_not_re_enter_as_a_click():
+    """Painting the console button emits `toggled`; without the guard that
+    would re-enter _on_loop_toggled and bounce between the two controls."""
+    host = _LoopHost(at_end=False)
+    host._loop_enabled = True
+
+    host._paint_console_loop(True)
+
+    # guard released, and no spurious state change
+    assert host._console_loop_echo_guard is False
+    assert host._loop_enabled is True
+
+
+def test_console_guard_is_released_even_if_the_button_raises():
+    host = _LoopHost(at_end=False)
+
+    class _Boom(Exception):
+        pass
+
+    def _explode(_v):
+        raise _Boom
+
+    host._btn_loop.setChecked = _explode
+    with pytest.raises(_Boom):
+        host._paint_console_loop(True)
+
+    assert host._console_loop_echo_guard is False

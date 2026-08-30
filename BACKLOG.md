@@ -15,7 +15,20 @@ alpha
 
 - [x] rename eHaptic Studio Player to ForgePlayer
 - [x] rename syncplayer in this project to ForgePlayer (syncplayer project is the video wall industrial version)
-- [ ] Loop mode (loop a single file or all slots)
+- [x] Loop mode — **shipped**: a Loop toggle on every player overlay and
+      on the console transport row, session-wide (all slots wrap
+      together off one timeline), off at every startup. The wrap-around
+      rides the seek envelope so stim doesn't click on the restart.
+- [ ] **Playlist** — the feature Loop is standing in for. Loop repeats one
+      scene; what's actually wanted is a queue that plays scene after
+      scene, with the same one-timeline device routing per scene and an
+      optional repeat-the-whole-list. Dogfood 2026-08-30: "the real
+      feature to build in the future is a playlist." Open questions worth
+      settling before building: whether device roles and the content
+      preference are per-list or re-resolved per scene, what happens when
+      the next scene's channel set differs from the current one, and
+      whether the stim envelope should fade across the scene boundary the
+      way the loop wrap does.
 - [~] jump to next chapter or previous chapter — **Prev/Next chapter transport
       buttons shipped (v0.0.10, gate on `<stem>.chapters.json`)**; keyboard
       (arrow-key) chapter nav still open

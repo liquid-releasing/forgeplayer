@@ -35,7 +35,7 @@ it's the other. Volume is per-session (resets to 100 % every scene).
 
 `⏮ Prev · −30 s · −10 s · −5 s · ▶ Play / ⏸ Pause · ■ Stop · +5 s · +10 s · +30 s · Next ⏭`
 
-(Looping is set from the player overlay — see **[Loop](#loop)** below.)
+Plus **Loop** — see **[Loop](#loop)** below.
 
 **Prev** and **Next** jump to the previous/next chapter boundary — they
 frame the skip buttons on either end of the row. Both are disabled
@@ -85,16 +85,24 @@ have to relaunch. New launches read the toggle's current state.
 
 ## Loop
 
-Each player overlay has a **Loop** button, immediately left of **Console**.
-Switch it on and the scene restarts from the beginning when it plays through;
-leave it off and playback stops on the last frame, as before.
+**Loop** appears in two places — on the console's transport row, and on every
+player overlay immediately left of **Console**. Switch it on and the scene
+restarts from the beginning when it plays through; leave it off and playback
+stops on the last frame, as before. When it's on the button reads **✓ Loop**.
+
+Switching Loop on while a scene is already sitting on its last frame restarts
+it straight away, rather than leaving it parked.
 
 Two things worth knowing:
 
 - **Loop is session-wide, not per-window.** Every screen rides one timeline,
-  so looping one player and not another would desync the scene. Toggling it on
-  any overlay sets it for the whole session, and the other overlays update to
-  match.
+  so looping one player and not another would desync the scene. Toggling it
+  anywhere — console or any overlay — sets it for the whole session, and every
+  other Loop control updates to match.
+- **It stays on when you change scenes**, because looping is a way of watching
+  rather than a property of one video. That's also why there's a control on the
+  console: the overlay bar is hidden until you click the video, so without it a
+  new scene could be looping with nothing on screen saying so.
 - **The wrap-around is faded like any other seek.** The jump from the end back
   to the start is the largest discontinuity in a scene; it runs through the
   same ramp-down / settle / ramp-up envelope as a manual seek, so the stim
@@ -102,8 +110,9 @@ Two things worth knowing:
 
 !!! warning "Looping keeps e-stim running"
     A looped scene doesn't end on its own — stim keeps driving until you stop
-    it. Loop is deliberately **off at every launch** and isn't remembered
-    between sessions, so it can never be on when you didn't ask for it.
+    it. Loop is deliberately **off at every launch** and isn't written to your
+    preferences, so a setting from a previous day can never arm it on a session
+    you thought was fresh.
 
 ## Getting back to the console
 
@@ -129,7 +138,8 @@ leave the others frozen against a dead mpv handle.
 | `Esc` | Leave fullscreen, or raise the console |
 
 The overlay's **Loop** and **Console** buttons sit at the right end of the bar
-(click the video once to reveal it).
+(click the video once to reveal it). Loop is also on the console's transport
+row.
 
 ## Video playback & 4K
 
