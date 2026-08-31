@@ -324,7 +324,7 @@ jobs:
 
             **First run — do Setup first.** The app opens on the Library, but nothing can route until your devices are assigned. Go to **Setup**, pick your Scene audio and Haptic 1 devices (and Haptic 2 if you have a second stim dongle), and press **🔊 Test** on each row to confirm the dongle is live. Then **Library → 📁 Root…** at your media folder, click a scene tile to activate it, and press Play.
 
-            Questions, bug reports, and feedback welcome in [our Discord](https://discord.gg/MHucAwwRc).
+            Questions, bug reports, and feedback welcome in [our Discord](https://discord.gg/UHdJFhEZF).
           append_body: true
           # Auto-prepend the commit/PR list since the previous tag.
           # Cross-project policy (FA, FunscriptForge, ForgeYT, FP) —
