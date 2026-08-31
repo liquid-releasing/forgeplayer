@@ -8,7 +8,7 @@ Play a video across your monitors and drive e-stim from the **same
 timeline and seek bar** — video and haptics stay in sync through every
 play, pause, seek, and skip. No mouse required once you're watching.
 
-### ▶ Download & try it at [forgeplayer.app](https://forgeplayer.app) · [Discord](https://discord.gg/MHucAwwRc) · [Docs](https://liquid-releasing.github.io/forgeplayer/)
+### ▶ Download & try it at [forgeplayer.app](https://forgeplayer.app) · [Discord](https://discord.gg/UHdJFhEZF) · [Docs](https://liquid-releasing.github.io/forgeplayer/)
 
 ---
 
@@ -19,8 +19,8 @@ play, pause, seek, and skip. No mouse required once you're watching.
 - **User docs:** [getting started](https://liquid-releasing.github.io/forgeplayer/getting-started/)
   · [user guide](https://liquid-releasing.github.io/forgeplayer/user-guide/)
   · [docs home](https://liquid-releasing.github.io/forgeplayer/)
-- **Discord:** [discord.gg/MHucAwwRc](https://discord.gg/MHucAwwRc) — feedback,
-  ideas, bug reports.
+- **Discord:** [discord.gg/UHdJFhEZF](https://discord.gg/UHdJFhEZF) — feedback,
+  ideas, bug reports. *(Invite valid through 2026-09-30 — refresh it before then.)*
 
 ---
 

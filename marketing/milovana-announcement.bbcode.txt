@@ -58,4 +58,4 @@ Set your audio devices up first — the app opens on the Library, but nothing ca
 
 Feedback, ideas, and bug reports are very welcome — this is the stage where your input shapes it. Join the Discord:
 
-[b][url=https://discord.gg/MHucAwwRc]discord.gg/MHucAwwRc[/url][/b]
+[b][url=https://discord.gg/UHdJFhEZF]discord.gg/UHdJFhEZF[/url][/b]

@@ -144,7 +144,7 @@ before you commit to a scene.
 Feedback, ideas, and bug reports are very welcome — this is the stage where your
 input shapes it. Join the Discord:
 
-**https://discord.gg/MHucAwwRc**
+**https://discord.gg/UHdJFhEZF**
 
 ---
 
