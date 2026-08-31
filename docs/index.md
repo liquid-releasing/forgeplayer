@@ -135,6 +135,14 @@ Source on GitHub:
 
 ---
 
+## Community
+
+Questions, feedback, bug reports — and the place to say what ForgePlayer got
+wrong on your hardware: join the
+[Liquid Releasing Discord](https://discord.gg/UHdJFhEZF).
+
+---
+
 <p align="center">
   <img src="assets/liquid-releasing-logo.svg" alt="Liquid Releasing" width="120">
 </p>

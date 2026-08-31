@@ -100,3 +100,5 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/liquid-releasing/forgeplayer
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/UHdJFhEZF
