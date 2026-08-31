@@ -43,6 +43,29 @@ Tagging `vX.Y.Z-alpha` on `main` triggers `.github/workflows/release.yml`:
 
 ## Cutting a release
 
+### Before you tag: check the Discord invite
+
+`release.yml` writes the Discord invite into the body of every published
+release, and `docs/index.md` + `mkdocs.yml` carry it on the docs site. A
+timed invite that lapses turns all of those into dead ends, and a shipped
+release body can never be corrected. Check it:
+
+```
+code=$(git grep -hoE 'discord\.gg/[A-Za-z0-9]+' | head -1 | cut -d/ -f2)
+curl -sS "https://discord.com/api/v10/invites/$code?with_expiration=true"
+```
+
+`"expires_at": null` means permanent — proceed. A date before the next
+expected cut, or `"Invite is expired."`, means stop: get a fresh invite and
+roll it across every forge repo first. One server backs all the Forge apps,
+so they all take the same code, and it hides in more places than you expect
+(`README.md`, `docs/**`, `mkdocs.yml`, `about.py`, `ui.py`, and the
+release-notes body in `.github/workflows/release.yml`).
+
+The invite in use as of 2026-08-31 is `UHdJFhEZF`, **expiring 2026-09-30**.
+
+### Tag and push
+
 ```
 git checkout main
 git pull
