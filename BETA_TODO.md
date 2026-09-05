@@ -18,6 +18,39 @@ routing on hybrid-graphics laptops).
 
 ## Beta quality gates (do these first)
 
+- [ ] **Beta output targets — FOC-Stim, subwoofer/bass-shaker, and the rest of
+      what FunscriptForge emits. Target: before 2026-09-30.**
+
+      Where the code actually stands (checked 2026-09-05, post-v0.1.18-alpha):
+
+      - **FOC-Stim — partial.** `app/library/channels.py` recognizes the full
+        `FOC_STIM_CHANNELS` set and the `-foc-stim` generation modifier, and
+        the catalog/picker route those scenes. The synth consumes the *pulse*
+        parameters — `pulse_frequency`, `pulse_width`, `pulse_rise_time`
+        (`app/stim_synth.py:275-283`). **Not consumed:** `gamma` (3-phase
+        position) and `e1..e4` (`FOUR_PHASE_ELECTRODE_CHANNELS`) — neither
+        appears anywhere in `stim_synth.py` or `funscript_loader.py`. The
+        vendored math to derive 4-phase already exists and is unused:
+        `app/vendor/restim_stim_math/transforms_4.py::abc_to_e1234()`. So the
+        wiring gap is gamma + 4-phase electrode output, not the parameter set.
+      - **Subwoofer / bass shaker — absent.** No channel kind, no role, no
+        output path. FunscriptForge ships Bass Shaker as a Polish station, so
+        the authored data exists upstream; ForgePlayer has nowhere to send it.
+        Needs a new device role in Setup alongside Scene/Haptic 1/Haptic 2 —
+        and note it is a *plain audio* output, so it must NOT be gated by the
+        haptic-only routing rule added in v0.1.18-alpha (see
+        `_launch_stim_synth`); give it its own role membership.
+      - **Vibration — recognized, not driven.** `VIBRATION_1_CHANNELS`
+        (Lovense-style dual-motor) already exists in `channels.py` with no
+        output path.
+
+      ⚠️ **Claim check before shipping:** the release body in
+      `.github/workflows/release.yml` already says ForgePlayer "drives e-stim —
+      2b, stereostim, and FOC-stim boxes". That is ahead of the code while
+      gamma / 4-phase are unwired. Either finish the wiring or soften the
+      claim — this is exactly the pattern called out in
+      `feedback_forge_docs_claims_need_code_proof`.
+
 - [ ] **Code-sign the Windows installer.** Currently unsigned — that's why the
       docs walk users through the SmartScreen "Keep / Run anyway" steps. Signing
       removes that friction; biggest single beta-polish win. (macOS notarization
