@@ -252,13 +252,18 @@ Off by default; zero overhead when off.
   device resolves — ForgePlayer will not route e-stim to your speakers. Still
   silent with a valid device? Try **Calibrate H1** to isolate wiring vs
   playback.
-- **I hear e-stim through my computer speakers** — shouldn't happen in
-  v0.1.17-alpha. Confirm **Haptic 1 / 2** point at your **USB dongle** (not
-  "Speakers") and that **Scene Audio** is a *different* device.
+- **I hear e-stim through my computer speakers, monitor or TV** — fixed in
+  v0.1.18-alpha, which was the release that closed it: stim now opens **only**
+  on a device assigned to **Haptic 1** or **Haptic 2**, and stays silent if
+  neither is set. On earlier builds, leaving the haptic roles unset could send
+  stim to whatever Windows called the default output. If you see this on
+  v0.1.18-alpha or later, please report it — confirm first that **Haptic 1 / 2**
+  point at your **USB dongle** and that **Scene audio** is a *different* device.
 - **HDR video looks washed-out / over-bright** — HDR passthrough is disabled
   in v0.1.17-alpha for stability; turn **Windows HDR off** for the playback monitor.
-- **Bluetooth output is glitchy** — Bluetooth audio is untested; use wired /
-  USB, especially for stim.
+- **Bluetooth output is glitchy** — Bluetooth plays fine for scene audio, but
+  use wired / USB for stim: A2DP re-encodes the waveform that *is* the stim
+  drive signal, and its latency drifts.
 - **Multi-monitor layout looks wrong after moving the control window** —
   known cosmetic limitation; post-alpha fix.
 - **The app disappeared mid-playback, or when closing a player** — both

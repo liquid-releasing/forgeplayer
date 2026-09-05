@@ -7,7 +7,8 @@ can't route anything until these are assigned.
 
 Four dropdowns:
 
-- **Scene audio** — the video's own audio → your speakers / headphones.
+- **Scene audio** — the video's own audio → your speakers, headphones, or a
+  **monitor / TV over HDMI**.
 - **Scene audio (also)** — an *optional* second port that receives the **same
   video sound**. It exists to drive a stim box that accepts a plain audio input
   when a scene has no funscript to synthesize from. Leave it unset to disable.
@@ -16,26 +17,49 @@ Four dropdowns:
   side-chain, or it mirrors Haptic 1). **Leave it "— not set —" if you only
   have one stim box.**
 
-Dropdowns list every audio output Windows reports through mpv. If a dongle
-isn't there, plug it in and press **Refresh devices**.
+The two **Scene audio** dropdowns list every audio output Windows reports
+through mpv, including HDMI / DisplayPort displays — a TV or monitor with
+speakers is a perfectly good place to send scene audio, and those rows label
+them `monitor / TV (HDMI)`. The **Haptic** dropdowns deliberately list only
+e-stim-capable outputs; a display is never a stim box. If a dongle isn't
+there, plug it in and press **Refresh devices**.
+
+Be aware that some displays advertise an audio path and have **no speakers
+wired behind it** — a manufacturer can expose HDMI audio and simply not fit
+any. Software cannot tell that apart from a working output: the device
+appears, Windows accepts the stream, and playback runs normally into silence.
+The **Test** button below is the only way to know.
 
 A device assigned to one role is **greyed out in the others**, so e-stim and
 your scene audio can't be sent to the same port by accident.
 
-!!! danger "E-stim never plays through your speakers"
-    A stim port only outputs to a device that resolves. If a Haptic device
-    reads **"(unavailable — reselect in Setup)"** — the saved device was
-    unplugged or its name changed — that port stays **silent** rather than
-    falling back to the default output. ForgePlayer will not route the raw
-    e-stim waveform to your speakers. If a stim port is unexpectedly silent,
-    open Setup and **reselect the device** (its name may have shifted after a
-    reboot or a USB re-plug).
+!!! danger "E-stim leaves only by a port you assigned to a haptic role"
+    A stim stream may open **only** on the device set as **Haptic 1** or
+    **Haptic 2**. If neither is set, the haptic side stays **silent** — it
+    does not fall back to your speakers, a monitor, or whatever Windows
+    currently calls the default output. The same applies when a saved device
+    stops resolving: if a Haptic row reads **"(unavailable — reselect in
+    Setup)"** because the device was unplugged or renamed, that port goes
+    silent rather than finding somewhere else to play.
 
-!!! note "Bluetooth audio is untested"
-    The tested path is **wired / USB** audio outputs. Bluetooth audio devices
-    (BT headphones/speakers for scene audio, or a BT-connected stim box)
-    **haven't been tested** — expect added latency and possible dropouts. Use
-    a USB dongle for stim.
+    If a stim port is unexpectedly quiet, that is the safety rule doing its
+    job. Open Setup, **reselect the device** (names can shift after a reboot
+    or a USB re-plug), and press **Test**.
+
+!!! note "Bluetooth works for scene audio; use wired for stim"
+    Bluetooth outputs are selectable for every role and will play. For **scene
+    audio** that's fine — A2DP's latency is roughly constant, which is what
+    the offset control exists to absorb.
+
+    For **stim**, prefer a wired / USB dongle. Bluetooth re-encodes audio with
+    a lossy codec, and for stereostim that waveform *is* the drive signal, not
+    merely its fidelity — so the codec is altering what you feel. Bluetooth
+    latency also drifts rather than holding steady, so the offset can cancel
+    the average lag but not the wander around it.
+
+    Note that a **BT-connected stim box** such as the DG-Lab Coyote is a
+    different thing again: those speak their own wireless protocol rather than
+    taking an audio signal, and ForgePlayer does not drive them at all.
 
 ## Test device buttons
 

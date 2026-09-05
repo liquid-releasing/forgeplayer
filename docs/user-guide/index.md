@@ -142,16 +142,22 @@ routing e-stim to your speakers. If you only have one stim box, set **Haptic 2**
 to "— not set —".
 
 **I hear e-stim through my computer speakers.**
-That shouldn't happen in v0.1.17-alpha. Check that **Haptic 1 / Haptic 2** point at
-your **USB dongle** (not "Speakers"), and that **Scene Audio** is a *different*
-device. Reselect and **Refresh devices**.
+Fixed in v0.1.18-alpha — that was the release which closed it. A stim stream now
+opens **only** on a device assigned to **Haptic 1** or **Haptic 2**, and the haptic
+side stays silent when neither is set, instead of falling back to the system
+default output (which, once displays became selectable, could be a monitor or TV).
+On v0.1.18-alpha or later this should not occur: check that **Haptic 1 / Haptic 2**
+point at your **USB dongle** (not "Speakers"), that **Scene audio** is a *different*
+device, then reselect and **Refresh devices** — and please report it if it persists.
 
 **HDR video looks washed-out or over-bright.**
 HDR passthrough is disabled in v0.1.17-alpha for stability. Turn **Windows HDR off**
 for the playback monitor (Settings → Display → HDR) while testing.
 
-**Bluetooth output is glitchy / laggy.** Bluetooth audio is untested — use a
-**wired / USB** output, especially for stim.
+**Bluetooth output is glitchy / laggy.** Bluetooth outputs are selectable and
+play fine for **scene audio**. For **stim**, use a **wired / USB** dongle: A2DP
+re-encodes audio with a lossy codec and for stereostim that waveform *is* the
+drive signal, plus Bluetooth latency drifts rather than holding steady.
 
 **The app disappeared mid-playback, or when closing a player.** Both crashes
 were fixed in v0.0.16 — the second one was the *crash reporter* itself, which
