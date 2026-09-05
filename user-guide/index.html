@@ -1020,14 +1020,20 @@ device, then <strong>Refresh devices</strong>. ForgePlayer keeps the port silent
 routing e-stim to your speakers. If you only have one stim box, set <strong>Haptic 2</strong>
 to "— not set —".</p>
 <p><strong>I hear e-stim through my computer speakers.</strong>
-That shouldn't happen in v0.1.17-alpha. Check that <strong>Haptic 1 / Haptic 2</strong> point at
-your <strong>USB dongle</strong> (not "Speakers"), and that <strong>Scene Audio</strong> is a <em>different</em>
-device. Reselect and <strong>Refresh devices</strong>.</p>
+Fixed in v0.1.18-alpha — that was the release which closed it. A stim stream now
+opens <strong>only</strong> on a device assigned to <strong>Haptic 1</strong> or <strong>Haptic 2</strong>, and the haptic
+side stays silent when neither is set, instead of falling back to the system
+default output (which, once displays became selectable, could be a monitor or TV).
+On v0.1.18-alpha or later this should not occur: check that <strong>Haptic 1 / Haptic 2</strong>
+point at your <strong>USB dongle</strong> (not "Speakers"), that <strong>Scene audio</strong> is a <em>different</em>
+device, then reselect and <strong>Refresh devices</strong> — and please report it if it persists.</p>
 <p><strong>HDR video looks washed-out or over-bright.</strong>
 HDR passthrough is disabled in v0.1.17-alpha for stability. Turn <strong>Windows HDR off</strong>
 for the playback monitor (Settings → Display → HDR) while testing.</p>
-<p><strong>Bluetooth output is glitchy / laggy.</strong> Bluetooth audio is untested — use a
-<strong>wired / USB</strong> output, especially for stim.</p>
+<p><strong>Bluetooth output is glitchy / laggy.</strong> Bluetooth outputs are selectable and
+play fine for <strong>scene audio</strong>. For <strong>stim</strong>, use a <strong>wired / USB</strong> dongle: A2DP
+re-encodes audio with a lossy codec and for stereostim that waveform <em>is</em> the
+drive signal, plus Bluetooth latency drifts rather than holding steady.</p>
 <p><strong>The app disappeared mid-playback, or when closing a player.</strong> Both crashes
 were fixed in v0.0.16 — the second one was the <em>crash reporter</em> itself, which
 walked every live thread's stack on each of the hundreds of harmless
