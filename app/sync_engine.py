@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
@@ -79,6 +80,64 @@ def _detect_nvidia_adapter() -> bool:
 _HAS_NVIDIA_ADAPTER = _detect_nvidia_adapter()
 
 
+def apply_platform_video_kwargs(
+    kwargs: dict,
+    wid: int,
+    *,
+    platform: str = sys.platform,
+    env=None,
+) -> dict:
+    """Platform-adjust an embedded-video player's mpv kwargs. Mutates and
+    returns *kwargs*.
+
+    **macOS: `--wid` embedding does not work.** Upstream mpv is explicit that
+    window embedding via `--wid` is an X11/win32 feature, not properly
+    supported on macOS with GPU rendering; the Cocoa OpenGL backend is
+    deprecated in favour of the render API (`vo=libmpv` +
+    `mpv_render_context`). The documented failure mode is *audio with a black
+    video surface* — exactly the user report this branch exists for: on both
+    an M1 and an M3 Max the window opened black and the app deadlocked at
+    ~0.4% CPU, never reaching the log line that follows `init_player`.
+
+    The deadlock shape fits. mpv's Cocoa VO needs the **main queue** to touch
+    an NSView, while our Qt main thread sits inside a synchronous libmpv call
+    — python-mpv reads `mpv_version` (an `mpv_get_property`) at the end of its
+    constructor, and we then set `target-colorspace-hint` and register
+    `on_key_press` bindings, all blocking. Each side waits on the other, so
+    nothing burns CPU.
+
+    So on macOS we drop `wid` and let mpv own a normal window. That costs the
+    Qt chrome overlay on that platform — the on-video click bindings still
+    work, being mpv-level — but a detached window that plays beats an embedded
+    one that hangs. The real fix is the render API; see BETA_TODO.
+
+    Overrides, both for A/B testing on a real Mac without a rebuild:
+
+    - ``FORGEPLAYER_MACOS_EMBED=wid`` forces the old embedding path back on.
+    - ``FORGEPLAYER_HWDEC=<value>`` replaces ``hwdec`` on any platform
+      (``no`` disables hardware decode, to rule VideoToolbox in or out as a
+      secondary suspect).
+    """
+    env = os.environ if env is None else env
+    hwdec_override = (env.get("FORGEPLAYER_HWDEC") or "").strip()
+    if hwdec_override:
+        kwargs["hwdec"] = hwdec_override
+
+    if not platform.startswith("darwin"):
+        kwargs["wid"] = str(wid)
+        return kwargs
+
+    if (env.get("FORGEPLAYER_MACOS_EMBED") or "").strip().lower() == "wid":
+        kwargs["wid"] = str(wid)
+        return kwargs
+
+    # Detached window: mpv creates and owns its NSWindow, so it never needs
+    # our main thread to hand it an NSView mid-initialization.
+    kwargs.pop("wid", None)
+    kwargs["force_window"] = "yes"
+    return kwargs
+
+
 class SyncEngine:
     """Manages up to 3 mpv instances.
 
@@ -152,7 +211,8 @@ class SyncEngine:
                 # GPU-embedded player.
                 self._teardown_mpv_instance(self._players[slot])  # type: ignore[union-attr]
             kwargs: dict = {
-                "wid": str(wid),
+                # `wid` is added by apply_platform_video_kwargs below — it is
+                # omitted on macOS, where embedding deadlocks.
                 "keep_open": True,
                 "pause": True,
                 "input_default_bindings": False,
@@ -241,7 +301,20 @@ class SyncEngine:
                     )
             kwargs["log_handler"] = _gpu_log_handler
             kwargs["msg_level"] = "vo=v"
+            apply_platform_video_kwargs(kwargs, wid)
+
+            # Fine-grained construction trace. The macOS hang (2026-09-05,
+            # M1 + M3 Max) stopped dead after `player.gpu_adapter` and never
+            # reached `player.fill_mode`, which _on_launch logs the instant
+            # init_player returns — proving the block is inside this method,
+            # but not which call. These records name it exactly.
+            DebugLog.record(
+                "player.mpv_construct_begin",
+                slot=slot, embedded=("wid" in kwargs),
+                hwdec=kwargs.get("hwdec"), vo=kwargs.get("vo"),
+            )
             p = mpv.MPV(**kwargs)
+            DebugLog.record("player.mpv_construct_done", slot=slot)
             # Hint the display colorspace so a Windows-HDR-ON desktop composits
             # the mpv surface correctly (HDR passthrough) instead of blowing it
             # out to white. Newer libmpv option — set best-effort so an older
@@ -250,6 +323,7 @@ class SyncEngine:
                 p["target-colorspace-hint"] = "yes"
             except Exception:
                 pass
+            DebugLog.record("player.colorspace_hint_done", slot=slot)
             # Double-click the video surface = the Escape teardown. mpv owns the
             # video's native child window, so a Qt mouseDoubleClickEvent on the
             # PlayerWindow never sees clicks over the video — bind it at the mpv
@@ -278,6 +352,7 @@ class SyncEngine:
                         on_single_click()
                 except Exception:
                     pass
+            DebugLog.record("player.key_bindings_done", slot=slot)
             self._players[slot] = p
             return p
 

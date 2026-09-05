@@ -18,6 +18,46 @@ routing on hybrid-graphics laptops).
 
 ## Beta quality gates (do these first)
 
+- [ ] **macOS video playback — `--wid` embedding is the wrong architecture.**
+      User report 2026-09-05: Launch Players hangs indefinitely on **both** an
+      M1 (macOS Tahoe 26.5) and an M3 Max (Sequoia 15.6.1) — black video
+      window, ~0.4% CPU, "Not Responding". Debug log stops dead after
+      `player.gpu_adapter` and never reaches `player.fill_mode`, which
+      `_on_launch` records the instant `init_player` returns — so the block is
+      *inside* `init_player`.
+
+      Root cause is architectural, not a tunable. Upstream mpv does not
+      properly support `--wid` embedding on macOS with GPU rendering (it is an
+      X11/win32 feature); the Cocoa OpenGL backend is deprecated in favour of
+      the render API, and the documented symptom is **"audio with a black
+      video surface"**. The deadlock shape fits exactly: mpv's Cocoa VO needs
+      the **main queue** to touch an NSView while our Qt main thread is inside
+      a blocking libmpv call — python-mpv reads `mpv_version` at the end of its
+      constructor, then we set `target-colorspace-hint` and register
+      `on_key_press` bindings. Mutual wait, zero CPU. NOT a Vulkan/MoltenVK
+      GPU hang, which is what it superficially resembles.
+
+      **Shipped as a stopgap (v0.1.19):** `apply_platform_video_kwargs()` drops
+      `wid` on darwin and lets mpv own a detached window. Costs the Qt chrome
+      overlay on macOS; mpv-level click bindings still work.
+
+      **The real fix for beta:** render API — `vo=libmpv` +
+      `mpv_render_context` drawing into an app-owned view. That is also what
+      unblocks proper embedding on macOS rather than a floating window.
+
+      Note for whoever picks this up: **libmpv does not read the user's
+      `~/.config/mpv/mpv.conf`** (the client API loads no config by default),
+      so the reporter's attempt to tune Vulkan options there was inert — and
+      any future "try setting X in mpv.conf" advice to a macOS user is wrong
+      for the same reason. Options must be passed as kwargs.
+
+      ⚠️ **Open question worth answering before beta: has the macOS artifact
+      EVER played video?** CI builds and publishes `ForgePlayer-macos.zip`
+      every cut, and the docs walk macOS users through a Homebrew libmpv
+      install, but if `--wid` never worked there, every macOS download to date
+      has been broken on first Launch. Verify on the Mac Neo before shipping
+      another macOS artifact.
+
 - [ ] **Beta output targets — FOC-Stim, subwoofer/bass-shaker, and the rest of
       what FunscriptForge emits. Target: before 2026-09-30.**
 
