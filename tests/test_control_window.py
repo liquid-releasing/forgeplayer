@@ -492,3 +492,132 @@ def test_refresh_preserves_the_per_role_split(control_window_with_display):
     assert "tv" not in _combo_device_ids(win._setup_haptic1_combo)
     assert "tv" not in _combo_device_ids(win._setup_haptic2_combo)
 
+
+# ── Haptics leave only by a haptic port (2026-09-05) ─────────────────────────
+#
+# Dogfood: with NO haptic device selected, e-stim was audible through an HDMI
+# monitor. Two independent defects fed it, and _launch_stim_synth's gate closes
+# both:
+#
+#   1. Unset device → StimAudioStream opened with device=None → sounddevice
+#      used the SYSTEM DEFAULT output.
+#   2. Wrong slot → the synth branch runs for ANY slot holding a funscript, but
+#      the device comes from _audio_device_for_slot(i), which returns
+#      scene_audio_device for the "video" role (slot 0). A funscript landing on
+#      slot 0 synthesized raw e-stim DIRECTLY onto the scene output. No
+#      default-device fallback needed — the device resolved fine, it was just
+#      the wrong one, which is why the StimAudioStream backstop cannot catch it.
+
+class _FakeFunscriptSet:
+    base_stem = "scene"
+
+
+@pytest.fixture
+def debug_events(monkeypatch):
+    from app.debug_log import DebugLog
+    # Set the flag directly rather than via set_enabled() so no on-disk
+    # stream is opened for a unit test.
+    monkeypatch.setattr(DebugLog, "enabled", True)
+    DebugLog.reset()
+    yield DebugLog._events
+    DebugLog.reset()
+
+
+def _refusals(events):
+    return [e for e in events
+            if e["kind"] == "stim.synth_refused_non_haptic_device"]
+
+
+def test_stim_synth_refused_when_no_haptic_device_selected(
+    control_window_with_display, debug_events,
+):
+    """Defect 1. Nothing may open on the default output."""
+    win = control_window_with_display
+    win._prefs.haptic1_audio_device = ""
+    win._prefs.haptic2_audio_device = ""
+    win._prefs.scene_audio_device = "tv"
+    data: dict = {}
+
+    assert win._launch_stim_synth(1, data, _FakeFunscriptSet(), "") is False
+
+    refused = _refusals(debug_events)
+    assert refused, "expected the gate to refuse and log"
+    assert refused[0]["reason"] == "no haptic device is selected in Setup"
+    assert data["primary_dispatch"] == "none"
+
+
+def test_stim_synth_refused_on_the_scene_audio_device(
+    control_window_with_display, debug_events,
+):
+    """Defect 2 — the path that actually put haptics through the TV.
+
+    Slot 0 is the "video" role, so its device IS scene_audio_device. That
+    resolves perfectly well, so only a routing rule can reject it.
+    """
+    win = control_window_with_display
+    win._prefs.haptic1_audio_device = "spk"
+    win._prefs.haptic2_audio_device = ""
+    win._prefs.scene_audio_device = "tv"
+    data: dict = {}
+
+    assert win._launch_stim_synth(0, data, _FakeFunscriptSet(), "tv") is False
+
+    refused = _refusals(debug_events)
+    assert refused, "e-stim must never be routed to the scene-audio output"
+    assert refused[0]["is_scene_audio"] is True
+    assert refused[0]["device"] == "tv"
+
+
+def test_stim_synth_refused_on_an_unrelated_device(
+    control_window_with_display, debug_events,
+):
+    """Any device that isn't a configured haptic port is rejected — this is
+    the general rule, not a pair of special cases."""
+    win = control_window_with_display
+    win._prefs.haptic1_audio_device = "spk"
+    win._prefs.haptic2_audio_device = ""
+    win._prefs.scene_audio_device = "tv"
+    data: dict = {}
+
+    assert win._launch_stim_synth(1, data, _FakeFunscriptSet(), "some-other") is False
+    assert _refusals(debug_events)
+
+
+def test_stim_synth_proceeds_on_a_configured_haptic_device(
+    control_window_with_display, debug_events, monkeypatch,
+):
+    """The gate must not block the legitimate path.
+
+    Channel loading is stubbed to fail immediately, so reaching
+    `stim.load_failed` proves execution got PAST the gate without dragging the
+    real synth/audio stack into a unit test.
+    """
+    win = control_window_with_display
+    win._prefs.haptic1_audio_device = "spk"
+    win._prefs.scene_audio_device = "tv"
+
+    def _boom(*_a, **_k):
+        raise ValueError("stubbed — we only need to get past the gate")
+
+    monkeypatch.setattr("app.funscript_loader.load_stim_channels", _boom)
+
+    assert win._launch_stim_synth(1, {}, _FakeFunscriptSet(), "spk") is False
+    assert not _refusals(debug_events), "gate wrongly rejected a haptic device"
+    assert any(e["kind"] == "stim.load_failed" for e in debug_events)
+
+
+def test_haptic2_device_also_counts_as_a_haptic_port(
+    control_window_with_display, debug_events, monkeypatch,
+):
+    """H2 is a legitimate stim destination — the gate accepts either port."""
+    win = control_window_with_display
+    win._prefs.haptic1_audio_device = ""
+    win._prefs.haptic2_audio_device = "dongle2"
+
+    def _boom(*_a, **_k):
+        raise ValueError("stubbed")
+
+    monkeypatch.setattr("app.funscript_loader.load_stim_channels", _boom)
+
+    assert win._launch_stim_synth(1, {}, _FakeFunscriptSet(), "dongle2") is False
+    assert not _refusals(debug_events)

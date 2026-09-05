@@ -674,12 +674,28 @@ class StimAudioStream:
             if self._stream is not None:
                 return
             # SAFETY: never open an e-stim stream on the system default output.
-            # A configured device that no longer resolves (unplugged / stale
-            # pref, or a name sounddevice can't find) makes resolve_audio_device
-            # return None, and sounddevice would silently use the DEFAULT device
-            # — blasting the raw e-stim waveform through the computer speakers.
-            # Refuse instead; callers surface this (H1 → dialog, H2 → silent).
-            if self._device_name is None and self._device_id and self._device_id != "auto":
+            # sounddevice reads device=None as "the system default", so ANY
+            # unresolved device puts the raw e-stim waveform through whatever
+            # Windows currently calls default — speakers, a monitor, a TV.
+            #
+            # The pre-2026-09-05 guard also required `self._device_id` to be
+            # truthy, which covered only the STALE case (configured device now
+            # unplugged/renamed). The UNSET case — stim never configured, so the
+            # caller passes `device_id=None` — short-circuited straight past it
+            # and played e-stim on the default output. That is how haptics came
+            # out of an HDMI monitor with no haptic device selected (dogfood
+            # 2026-09-05). Refuse on an unresolved device, however it got that
+            # way; callers surface it (H1 → dialog, H2 → silent).
+            #
+            # `is None` is deliberate, not truthiness: PortAudio index 0 is a
+            # perfectly legitimate device and is falsy.
+            if self._device_name is None:
+                if not self._device_id or self._device_id == "auto":
+                    raise RuntimeError(
+                        "No haptic device is selected — refusing to play e-stim "
+                        "on the system default output (speakers / monitor / TV). "
+                        "Pick a Haptic device in Setup."
+                    )
                 raise RuntimeError(
                     f"Stim device {self._device_id!r} is unavailable — refusing "
                     f"to play e-stim on the system default output (the speakers). "

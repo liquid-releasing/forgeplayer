@@ -4177,6 +4177,60 @@ class ControlWindow(QMainWindow):
         Play state: `not engine.is_paused()` gates the synth's volume
         to zero when video is paused. Hard mute through transport.
         """
+        # ── SAFETY GATE: e-stim leaves only by a haptic port ────────────────
+        # THE invariant (user, dogfood 2026-09-05): "haptics should only go to
+        # haptic selected devices." Enforced here, once, rather than trusting
+        # every caller to have picked a sane device.
+        #
+        # Two ways e-stim escaped before this gate existed:
+        #
+        #  1. No haptic device configured. `audio_device` is "" → the stream
+        #     was opened with device=None → sounddevice used the SYSTEM
+        #     DEFAULT output. Whatever Windows calls default — speakers, or
+        #     since displays became selectable, an HDMI monitor or TV.
+        #
+        #  2. Wrong slot. This method runs for ANY slot carrying a funscript,
+        #     but the device comes from `_audio_device_for_slot(i)`, which
+        #     returns `scene_audio_device` for the "video" role (slot 0). A
+        #     funscript landing on slot 0 therefore synthesized raw e-stim
+        #     DIRECTLY onto the scene-audio output — no fallback required.
+        #     This is the path that put haptics through the TV.
+        #
+        # Membership in the configured haptic set rejects both, and rejects
+        # any future caller that wires a non-haptic device in by mistake.
+        # StimAudioStream refuses an unresolved device too, but that is a
+        # backstop: it cannot catch case 2, where the device resolves fine
+        # and is simply the wrong one.
+        haptic_devices = {
+            d for d in (
+                self._prefs.haptic1_audio_device,
+                self._prefs.haptic2_audio_device,
+            ) if d
+        }
+        if audio_device not in haptic_devices:
+            reason = (
+                "no haptic device is selected in Setup"
+                if not audio_device
+                else "device is not one of the configured haptic outputs"
+            )
+            slot_data["primary_dispatch"] = "none"
+            slot_data["stim_silent_reason"] = (
+                f"Haptics suppressed — {reason}."
+            )
+            DebugLog.record(
+                "stim.synth_refused_non_haptic_device",
+                slot=slot_idx,
+                role=_SLOT_ROLES[slot_idx] if slot_idx < len(_SLOT_ROLES) else "?",
+                device=audio_device,
+                is_scene_audio=(
+                    bool(audio_device)
+                    and audio_device == self._prefs.scene_audio_device
+                ),
+                haptic_devices=sorted(haptic_devices),
+                reason=reason,
+            )
+            return False
+
         # Lazy imports — keep the audio stack out of cold-start when the
         # user's not playing a stim scene.
         from app.funscript_loader import (  # noqa: PLC0415

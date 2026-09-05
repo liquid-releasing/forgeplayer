@@ -441,6 +441,19 @@ class TestTimeSmoother:
 
 # ── StimAudioStream ───────────────────────────────────────────────────────────
 
+# A device that RESOLVES. StimAudioStream refuses to open on the system
+# default output — that is the guard stopping raw e-stim from coming out of
+# the speakers / a monitor / a TV when no haptic device is configured (dogfood
+# 2026-09-05). Tests below exercise callbacks, fades and teardown, not device
+# selection, and used to lean on device_id=None as a shortcut; that shortcut is
+# now exactly the thing the guard rejects, so they name a real device instead.
+_TEST_DEVICE_ID = "wasapi/{test}"
+_TEST_MPV_DEVICES = [
+    {"name": _TEST_DEVICE_ID, "description": "Test Stim Device"},
+]
+
+
+
 class TestStimAudioStream:
     def test_resolves_device_name_at_construction(self):
         stream = StimAudioStream(
@@ -467,8 +480,8 @@ class TestStimAudioStream:
         stream = StimAudioStream(
             synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),
             time_source=lambda: 0.0,
-            device_id=None,
-            mpv_devices=[],
+            device_id=_TEST_DEVICE_ID,
+            mpv_devices=_TEST_MPV_DEVICES,
         )
         stream.start()
         try:
@@ -481,7 +494,10 @@ class TestStimAudioStream:
             # dongles than pinning a small explicit value.
             assert kwargs["blocksize"] == 0
             assert kwargs["latency"] == "high"
-            assert kwargs["device"] is None
+            # The RESOLVED device, never None. `device=None` means "system
+            # default output" to sounddevice, and an e-stim stream must never
+            # open there — see the _TEST_DEVICE_ID note above.
+            assert kwargs["device"] == "Test Stim Device"
             assert callable(kwargs["callback"])
             assert stream.is_running() is True
         finally:
@@ -491,6 +507,8 @@ class TestStimAudioStream:
         stream = StimAudioStream(
             synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),
             time_source=lambda: 0.0,
+            device_id=_TEST_DEVICE_ID,
+            mpv_devices=_TEST_MPV_DEVICES,
         )
         stream.start()
         stream.start()
@@ -501,6 +519,8 @@ class TestStimAudioStream:
         stream = StimAudioStream(
             synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),
             time_source=lambda: 0.0,
+            device_id=_TEST_DEVICE_ID,
+            mpv_devices=_TEST_MPV_DEVICES,
         )
         stream.start()
         mock_stream = fake_sounddevice.OutputStream.return_value
@@ -522,6 +542,8 @@ class TestStimAudioStream:
         stream = StimAudioStream(
             synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),
             time_source=lambda: 0.0,
+            device_id=_TEST_DEVICE_ID,
+            mpv_devices=_TEST_MPV_DEVICES,
         )
         stream.start()
         mock_stream = fake_sounddevice.OutputStream.return_value
@@ -553,8 +575,8 @@ class TestStimAudioStream:
         stream = StimAudioStream(
             synth=synth,
             time_source=lambda: (time_calls.append(media_t), media_t)[1],
-            device_id=None,
-            mpv_devices=[],
+            device_id=_TEST_DEVICE_ID,
+            mpv_devices=_TEST_MPV_DEVICES,
         )
         stream.start()
 
@@ -674,7 +696,8 @@ class TestStimAudioStream:
         broken_time = MagicMock(side_effect=RuntimeError("boom"))
 
         stream = StimAudioStream(
-            synth=synth, time_source=broken_time, device_id=None, mpv_devices=[],
+            synth=synth, time_source=broken_time, device_id=_TEST_DEVICE_ID,
+            mpv_devices=_TEST_MPV_DEVICES,
         )
         stream.start()
         callback = fake_sounddevice.OutputStream.call_args.kwargs["callback"]
@@ -731,8 +754,8 @@ class TestPopFixEnvelope:
         # secondary envelope, not the gate.
         synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
         stream = StimAudioStream(
-            synth=synth, time_source=lambda: 0.0, device_id=None,
-            mpv_devices=[], is_playing_source=lambda: True,
+            synth=synth, time_source=lambda: 0.0, device_id=_TEST_DEVICE_ID,
+            mpv_devices=_TEST_MPV_DEVICES, is_playing_source=lambda: True,
         )
         stream.start()
         callback = fake_sounddevice.OutputStream.call_args.kwargs["callback"]
@@ -766,8 +789,8 @@ class TestPopFixEnvelope:
         completes, audio resumes)."""
         synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
         stream = StimAudioStream(
-            synth=synth, time_source=lambda: 0.0, device_id=None,
-            mpv_devices=[], is_playing_source=lambda: True,
+            synth=synth, time_source=lambda: 0.0, device_id=_TEST_DEVICE_ID,
+            mpv_devices=_TEST_MPV_DEVICES, is_playing_source=lambda: True,
         )
         stream.start()
         callback = fake_sounddevice.OutputStream.call_args.kwargs["callback"]
@@ -810,8 +833,8 @@ class TestPopFixEnvelope:
         """
         synth = StimSynth(_scene_channels(), CallbackMediaSync(lambda: True))
         stream = StimAudioStream(
-            synth=synth, time_source=lambda: 0.0, device_id=None,
-            mpv_devices=[], is_playing_source=lambda: True,
+            synth=synth, time_source=lambda: 0.0, device_id=_TEST_DEVICE_ID,
+            mpv_devices=_TEST_MPV_DEVICES, is_playing_source=lambda: True,
         )
         stream.start()
         callback = fake_sounddevice.OutputStream.call_args.kwargs["callback"]
@@ -858,3 +881,67 @@ class TestPopFixEnvelope:
             f"at full output by now."
         )
         stream.stop()
+
+
+class TestStimNeverOpensTheDefaultOutput:
+    """E-stim may only ever leave by a device the user picked for a haptic role.
+
+    sounddevice reads `device=None` as "system default output", so an
+    unresolved device means the raw e-stim waveform goes to whatever Windows
+    currently calls default. Dogfood 2026-09-05: with no haptic device
+    selected, haptics came out of an HDMI monitor. The pre-existing guard
+    required `device_id` to be truthy, so it caught a STALE device but let the
+    UNSET case fall straight through.
+    """
+
+    @staticmethod
+    def _stream(**kwargs):
+        return StimAudioStream(
+            synth=StimSynth(_scene_channels(), CallbackMediaSync(lambda: True)),
+            time_source=lambda: 0.0,
+            **kwargs,
+        )
+
+    def test_refuses_when_no_haptic_device_is_configured(self, fake_sounddevice):
+        """THE regression: unset device must not fall back to the speakers."""
+        stream = self._stream(device_id=None, mpv_devices=[])
+        with pytest.raises(RuntimeError, match="No haptic device is selected"):
+            stream.start()
+        fake_sounddevice.OutputStream.assert_not_called()
+        assert stream.is_running() is False
+
+    def test_refuses_an_empty_device_id(self, fake_sounddevice):
+        """"" is what an unconfigured Setup pref actually holds."""
+        stream = self._stream(device_id="", mpv_devices=[])
+        with pytest.raises(RuntimeError, match="No haptic device is selected"):
+            stream.start()
+        fake_sounddevice.OutputStream.assert_not_called()
+
+    def test_refuses_mpv_auto(self, fake_sounddevice):
+        """'auto' is mpv's "you pick" sentinel — the default output by
+        another name."""
+        stream = self._stream(device_id="auto", mpv_devices=[])
+        with pytest.raises(RuntimeError, match="No haptic device is selected"):
+            stream.start()
+        fake_sounddevice.OutputStream.assert_not_called()
+
+    def test_still_refuses_a_configured_device_that_no_longer_resolves(
+        self, fake_sounddevice,
+    ):
+        """The original guard's case — unplugged / stale / renamed pref."""
+        stream = self._stream(device_id="wasapi/{gone}", mpv_devices=[])
+        with pytest.raises(RuntimeError, match="unavailable"):
+            stream.start()
+        fake_sounddevice.OutputStream.assert_not_called()
+
+    def test_opens_when_the_device_resolves(self, fake_sounddevice):
+        """The guard must not block the legitimate path."""
+        stream = self._stream(
+            device_id=_TEST_DEVICE_ID, mpv_devices=_TEST_MPV_DEVICES,
+        )
+        stream.start()
+        try:
+            fake_sounddevice.OutputStream.assert_called_once()
+            assert stream.is_running() is True
+        finally:
+            stream.stop()
