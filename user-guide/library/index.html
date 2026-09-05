@@ -1151,6 +1151,22 @@ matched stim audio, no subtitle. Click <strong>OK</strong>.</p>
 <p>Your picks are saved as a <code>&lt;scene&gt;.forgeplayer.json</code> pin in the scene
 folder. Next time you single-click the tile, ForgePlayer skips the picker
 and re-uses the pinned choices.</p>
+<div class="admonition note">
+<p class="admonition-title">Pin files live beside your media — and can accumulate</p>
+<p>These pins are small (a few hundred bytes) and they are <strong>your data</strong>,
+not debug output — deleting one just means the picker asks again for
+that scene. They sit next to the media on purpose, so moving a scene
+folder somewhere else carries its remembered picks along with it.</p>
+<p>One wrinkle to be aware of: a pin's <strong>filename</strong> is derived from the
+scene's name <em>as the Library sees it</em>, which depends on your library
+root, while the file itself is written into the scene folder. So if you
+point <strong>📁 Root…</strong> at a different folder, the same scene picks up a
+second pin under a different name, and the earlier one is left behind
+unread. Nothing breaks and nothing is lost — but if you have moved your
+root around, expect a few stale <code>.forgeplayer.json</code> files in your media
+folders. They are safe to delete.</p>
+<p>Consolidating pins into a single application folder is planned for beta.</p>
+</div>
 <h2 id="re-opening-the-picker">Re-opening the picker<a class="headerlink" href="#re-opening-the-picker" title="Permanent link">&para;</a></h2>
 <p>Click the <strong>📌</strong> button on a tile (or right-click → <strong>Change picks…</strong>, or
 the title-bar button on the Live tab) to re-open the picker for the active

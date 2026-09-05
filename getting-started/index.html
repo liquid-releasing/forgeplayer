@@ -1240,7 +1240,8 @@ Library refresh and remembers it after that.</p>
 library. Four dropdowns:</p>
 <ul>
 <li><strong>Scene audio</strong> — where the video's mp3 / mp4 audio plays. Usually
-  your headset or speakers.</li>
+  your headset or speakers, but a <strong>monitor or TV connected over HDMI</strong>
+  works too — those are listed and marked <code>monitor / TV (HDMI)</code>.</li>
 <li><strong>Scene audio (also)</strong> — <em>optional</em> second port that gets the <strong>same video
   sound</strong>. Use it to drive a stim box that takes a plain audio input when a
   scene has no funscript. Leave it unset if you don't need it.</li>
@@ -1248,17 +1249,32 @@ library. Four dropdowns:</p>
 <li><strong>Haptic 2 (alt stim)</strong> — second USB dongle for prostate, OR <strong>leave unset</strong>
   if you only have one stim box.</li>
 </ul>
-<p>The dropdowns show every audio output Windows reports. If your dongle isn't
-there, plug it in and click <strong>Refresh devices</strong>. Once a device is assigned to
-one role it's greyed out in the others, so e-stim and your speakers can never
-land on the same port by accident.</p>
+<p>The two Scene audio dropdowns show every audio output Windows reports,
+including HDMI/DisplayPort displays. The <strong>Haptic</strong> dropdowns list only
+e-stim-capable outputs — a display is never a stim box, so those stay out of
+the way. If your dongle isn't there, plug it in and click <strong>Refresh devices</strong>.
+Once a device is assigned to one role it's greyed out in the others, so e-stim
+and your speakers can never land on the same port by accident.</p>
+<p>Some displays advertise audio but have <strong>no speakers behind it</strong> — a monitor
+maker can wire the HDMI audio path and simply not fit any. Nothing in software
+can tell that apart from a working output: the device appears, Windows accepts
+it, and playback runs normally into silence. That's what the <strong>Test</strong> button is
+for.</p>
 <p>Each row has a <strong>🔊 Test</strong> button that plays a short sample through that
 device — a half-second tone for the scene-audio rows, a gentle stim clip for
 the haptic rows. Press it now: it's the fastest way to prove the dongle is
 plugged in, unmuted, and wired to the box before you commit to a scene. If a stim port later reads
 <strong>(unavailable — reselect in Setup)</strong>, that port stays <strong>silent</strong> and you just
-reselect it — ForgePlayer never routes e-stim to your speakers. Use <strong>wired /
-USB</strong> outputs; Bluetooth audio is untested.</p>
+reselect it.</p>
+<p><strong>E-stim only ever leaves by a port you assigned to Haptic 1 or Haptic 2.</strong> If
+neither is set, the haptic side stays silent rather than falling back to your
+speakers, a monitor, or anything else Windows happens to call the default
+output.</p>
+<p>Use <strong>wired / USB</strong> outputs for stim. Bluetooth devices are selectable and will
+play, but they're a poor fit for stim: Bluetooth re-encodes audio with a lossy
+codec, and for stereostim that waveform <em>is</em> the drive signal, not just its
+fidelity — and Bluetooth latency drifts, so the offset control can cancel the
+average lag but not the wander around it.</p>
 <p><img alt="ForgePlayer Setup tab — audio device roles and monitors" src="../assets/forgeplayer-setup.png" /></p>
 <h3 id="2-choose-a-content-preference-preferences-tab">2. Choose a content preference (Preferences tab)<a class="headerlink" href="#2-choose-a-content-preference-preferences-tab" title="Permanent link">&para;</a></h3>
 <ul>
