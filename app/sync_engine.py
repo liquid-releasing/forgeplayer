@@ -777,16 +777,24 @@ class SyncEngine:
         return any(p is not None for p in self._players)
 
     # ── Device discovery ──────────────────────────────────────────────────────
-
     @staticmethod
     def list_audio_devices(include_hdmi: bool = False) -> list[dict]:
         """Return mpv's audio device list as [{name, description}, ...].
 
-        HDMI/DisplayPort display-audio devices (e.g. a monitor's built-in
-        audio driver, which often has no speakers) are filtered out by
-        default — they appear in Windows' device list but confuse the
-        Scene/Haptic role picker. Pass ``include_hdmi=True`` to see the
-        full raw list.
+        Two callers, two needs:
+
+        - ``include_hdmi=True`` — the RAW list, meta-entries and all. This
+          is what `resolve_audio_device` matches an mpv id against to find
+          the corresponding PortAudio device, so nothing may be missing
+          from it.
+        - ``include_hdmi=False`` (default) — the conservative list: meta
+          entries and display (HDMI/DisplayPort) outputs dropped. Used for
+          the e-stim role pickers, where a display endpoint is never valid
+          hardware.
+
+        For the Setup tab's *scene audio* pickers use `list_output_devices`
+        instead: a monitor or TV over HDMI is a legitimate speaker, so those
+        roles show display outputs too.
         """
         try:
             # vo="null" — this instance never loads or renders anything, it
@@ -808,22 +816,26 @@ class SyncEngine:
             return devices
         return [d for d in devices if not _is_display_audio(d)]
 
+    @staticmethod
+    def list_output_devices() -> list[dict]:
+        """Every device a user may legitimately route audio to.
 
-def _is_display_audio(device: dict) -> bool:
-    """Heuristically identify devices the user almost never wants to
-    route to: the mpv 'auto' / 'openal' meta-entries and HDMI / DP
-    phantom outputs.
+        Real outputs only — mpv's ``auto`` / ``openal`` meta-entries are
+        dropped — but display (HDMI/DisplayPort) endpoints are KEPT. A
+        monitor with built-in speakers, and especially a TV on the end of
+        an HDMI cable, is an ordinary output device; hiding those made
+        them unselectable and cost a user their intended speakers
+        (dogfood 2026-09-05). The Setup picker labels them so a genuinely
+        speakerless display is still recognizable before it's chosen.
+        """
+        return [
+            d for d in SyncEngine.list_audio_devices(include_hdmi=True)
+            if not _is_meta_device(d)
+        ]
 
-    HDMI/DP phantoms: mpv's WASAPI backend exposes devices like
-    'Odyssey G95NC (NVIDIA High Definition Audio)' or '1 - 12.3FHD
-    (AMD High Definition Audio Device)'. These are the GPU-driven
-    display audio outputs — most monitors don't have speakers, so
-    routing here ends up silent. The 'High Definition Audio' phrase
-    is the canonical Microsoft Class Driver name for HDMI/DP audio
-    paths; any device with that descriptor is overwhelmingly likely
-    to be a phantom. Real speaker devices use names like 'Speakers
-    (Realtek(R) Audio)' or 'Speakers (USB Audio Device)' — the
-    'Speakers' prefix is the tell.
+
+def _is_meta_device(device: dict) -> bool:
+    """mpv list entries that aren't a physical output at all.
 
     'auto' (Autoselect device): mpv's "let me pick the OS default"
     meta-entry. Redundant with our role-combo "— not set —" sentinel;
@@ -835,24 +847,85 @@ def _is_display_audio(device: dict) -> bool:
     WASAPI on Windows and frequently broken; we standardize on
     WASAPI for stim routing where timing matters.
     """
+    name = (device.get("name", "") or "").lower()
+    if name == "auto":
+        return True
+    return name == "openal" or name.startswith("openal/")
+
+
+def is_display_audio(device: dict) -> bool:
+    """True when *device* is a GPU-driven display (HDMI/DisplayPort) audio
+    endpoint — a monitor, a TV, or an AV receiver on the end of an HDMI
+    cable.
+
+    This is a LABEL, not a veto. Such a device may well have speakers (a
+    TV always does), so `list_output_devices` returns it and the Setup
+    scene-audio pickers offer it; the classification only drives the
+    "monitor / TV (HDMI)" hint in the picker and keeps display endpoints
+    out of the e-stim role combos.
+
+    Detection keys off the GPU vendors' class-driver names, which is how
+    WASAPI presents these: 'Odyssey G95NC (NVIDIA High Definition Audio)',
+    '1 - 12.3FHD (AMD High Definition Audio Device)', 'Intel(R) Display
+    Audio'. Deliberately NOT the bare phrase 'high definition audio' —
+    that also matches 'Speakers (Realtek High Definition Audio)', the most
+    common ONBOARD analog output there is, and classifying that as a
+    display endpoint would drop a machine's real speakers out of the
+    haptic pickers.
+    """
     desc = (device.get("description", "") or "").lower()
     name = (device.get("name", "") or "").lower()
     haystack = desc + " " + name
 
-    # mpv's "auto" entry — surfaces as name='auto' description='Autoselect device'.
-    if name == "auto":
+    # Unambiguous connector names.
+    if any(n in haystack for n in ("hdmi", "displayport", "display audio",
+                                   "dp audio")):
         return True
 
-    # OpenAL backend — different audio abstraction layer; not what we want.
-    if name.startswith("openal") or name == "openal":
-        return True
-
-    # HDMI / DisplayPort phantom audio.
-    needles = (
-        "display audio",
-        "displayport",
-        "hdmi",
-        "dp audio",
-        "high definition audio",  # NVIDIA/AMD/Intel HDMI/DP class driver
+    # GPU vendor class drivers for HDMI/DP audio. Vendor-qualified on
+    # purpose — see the docstring's Realtek caveat.
+    return any(
+        f"{vendor} high definition audio" in haystack
+        for vendor in ("nvidia", "amd", "ati", "intel(r)", "intel")
     )
-    return any(n in haystack for n in needles)
+
+
+def _is_display_audio(device: dict) -> bool:
+    """Union filter used by ``list_audio_devices(include_hdmi=False)``:
+    everything that must stay out of the e-stim role pickers. Kept under
+    the original private name because that's what the conservative list
+    has always meant."""
+    return _is_meta_device(device) or is_display_audio(device)
+
+
+def is_bluetooth_audio(device: dict) -> bool:
+    """True when *device* looks like a Bluetooth endpoint.
+
+    A label only — Bluetooth outputs have never been filtered and stay
+    fully selectable for every role, scene audio and e-stim alike. The
+    hint exists because the two roles carry very different risk:
+
+    - Scene audio over Bluetooth is fine. A2DP's constant latency is what
+      the Setup offset control already exists to absorb.
+    - E-stim over Bluetooth is workable but compromised, and the user
+      should know before they wire it that way. A2DP re-encodes the
+      stream with a lossy codec (SBC/AAC), and for stereostim the audio
+      waveform *is* the drive signal — so the codec is mangling the thing
+      being felt, not just its fidelity. On top of that, BT latency
+      drifts rather than holding constant, so `haptic_offset_ms` can
+      cancel the average lag but not the wander around it.
+
+    Detection is conservative. Windows does not consistently put
+    "Bluetooth" in an endpoint's friendly name (a paired headset often
+    enumerates as plain "Headphones (WH-1000XM4 Stereo)"), so an
+    unrecognized BT device simply goes unlabelled — it still works, it
+    just doesn't get the hint. Guessing from looser tells would mislabel
+    wired gear, which is the worse error.
+    """
+    desc = (device.get("description", "") or "").lower()
+    name = (device.get("name", "") or "").lower()
+    haystack = desc + " " + name
+    return any(
+        n in haystack
+        for n in ("bluetooth", "hands-free", "handsfree", "a2dp", " bt ")
+    )

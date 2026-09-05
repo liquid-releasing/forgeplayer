@@ -412,3 +412,83 @@ def test_fade_resets_when_the_stim_players_disappear(control_window, monkeypatch
     assert win._mpv_envelope.gain == 1.0
     assert not win._mpv_envelope.tracks_anything()
     assert stim.volume == 100
+
+
+# ── Audio device role pickers (2026-09-05) ───────────────────────────────────
+#
+# Monitor / TV HDMI endpoints used to be filtered out of every picker on the
+# theory that they're speakerless phantoms. Dogfooding on this rig proved the
+# heuristic can't be made to work: an Odyssey G95NC (no speakers — Samsung
+# didn't fit any) and a 12.3FHD (real, audible speakers) are INDISTINGUISHABLE
+# from software. Both declare audio in EDID, both get a Windows endpoint, both
+# accept an mpv stream without error; only one makes a sound. So the app stops
+# guessing — it offers both, labels them, and lets the Test button settle it.
+
+def _combo_device_ids(combo) -> list[str]:
+    return [combo.itemData(i) for i in range(combo.count())]
+
+
+@pytest.fixture
+def control_window_with_display(qapp, monkeypatch, tmp_path):
+    """A ControlWindow whose device list contains a display endpoint."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(
+        "app.sync_engine.SyncEngine.list_audio_devices",
+        staticmethod(lambda include_hdmi=False: [
+            {"name": "auto", "description": "Autoselect device"},
+            {"name": "spk", "description": "Speakers (Realtek(R) Audio)"},
+            {"name": "tv", "description": "LG TV (NVIDIA High Definition Audio)"},
+        ]),
+    )
+    win = ControlWindow()
+    monkeypatch.setattr(win, "_reload_current_scene", lambda: None)
+    yield win
+    # No win.close() — see module docstring.
+
+
+def test_scene_pickers_offer_display_outputs(control_window_with_display):
+    """The feature: a TV on HDMI must be selectable for scene audio."""
+    win = control_window_with_display
+    for combo in (win._setup_scene_combo, win._setup_scene_secondary_combo):
+        ids = _combo_device_ids(combo)
+        assert "tv" in ids
+        assert "spk" in ids
+        assert "auto" not in ids  # mpv meta-entry never reaches a picker
+
+
+def test_haptic_pickers_exclude_display_outputs(control_window_with_display):
+    """A display is never e-stim hardware — those combos stay narrow."""
+    win = control_window_with_display
+    for combo in (win._setup_haptic1_combo, win._setup_haptic2_combo):
+        ids = _combo_device_ids(combo)
+        assert "spk" in ids
+        assert "tv" not in ids
+
+
+def test_display_outputs_are_labelled(control_window_with_display):
+    """Silent phantoms still exist; the label is what makes one recognizable
+    before the user picks it."""
+    win = control_window_with_display
+    labels = dict(win._audio_devices)
+    assert "monitor / TV (HDMI)" in labels["tv"]
+    assert "monitor / TV (HDMI)" not in labels["spk"]
+
+
+def test_saved_display_device_still_resolves_a_label(control_window_with_display):
+    """`_audio_devices` is the FULL list, so a display device chosen for scene
+    audio reads as itself on the Live tab — not "(unavailable — reselect in
+    Setup)", which is what a haptic-only device list would have produced."""
+    win = control_window_with_display
+    assert win._audio_device_label("tv") == dict(win._audio_devices)["tv"]
+
+
+def test_refresh_preserves_the_per_role_split(control_window_with_display):
+    """Refresh rebuilds both lists; the haptic combos must not silently gain
+    display devices on the rebuild path."""
+    win = control_window_with_display
+    win._on_refresh_audio_devices()
+    assert "tv" in _combo_device_ids(win._setup_scene_combo)
+    assert "tv" not in _combo_device_ids(win._setup_haptic1_combo)
+    assert "tv" not in _combo_device_ids(win._setup_haptic2_combo)
+

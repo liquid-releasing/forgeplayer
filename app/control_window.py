@@ -32,7 +32,11 @@ from app.chapters import (
 from app.player_window import (
     _LOOP_OFF_TEXT, _LOOP_ON_TEXT, PlayerWindow,
 )
-from app.sync_engine import SyncEngine
+from app.sync_engine import (
+    SyncEngine,
+    is_bluetooth_audio,
+    is_display_audio,
+)
 from app.session import Session, SlotConfig
 from app.folder_scanner import auto_assign
 from app.library_panel import LibraryPanel
@@ -203,13 +207,15 @@ class ControlWindow(QMainWindow):
         self._current_entry: "SceneCatalogEntry | None" = None
         self._current_choices: "SelectionChoices | None" = None
 
-        # Discover screens and audio devices (HDMI phantom devices filtered
-        # out — they confuse the Scene/Haptic role picker).
+        # Discover screens and audio devices. The picker offers every real
+        # output Windows reports, monitor/TV HDMI endpoints included — see
+        # _rebuild_audio_device_lists for why, and for the one role that
+        # still excludes them.
         self._screens: list[QScreen] = self.screen().virtualSiblings()
-        raw_devices = SyncEngine.list_audio_devices()
-        self._audio_devices: list[tuple[str, str]] = (
-            self._disambiguate_audio_descriptions(raw_devices)
-        )
+        self._audio_devices: list[tuple[str, str]] = []
+        self._haptic_audio_devices: list[tuple[str, str]] = []
+        self._display_device_ids: set[str] = set()
+        self._rebuild_audio_device_lists()
 
         # Load persisted device-role preferences (Scene / Haptic 1 / Haptic 2).
         self._prefs = Preferences.load()
@@ -1466,7 +1472,9 @@ class ControlWindow(QMainWindow):
 
         subtitle = self._column_subtitle(
             "Pick which physical audio device handles each role. Library "
-            "clicks use these to route automatically — set this once."
+            "clicks use these to route automatically — set this once. "
+            "Monitors and TVs on HDMI can take scene audio; the haptic "
+            "roles list e-stim-capable outputs only."
         )
         root.addWidget(subtitle)
 
@@ -1482,9 +1490,11 @@ class ControlWindow(QMainWindow):
         )
         self._setup_haptic1_combo = self._build_role_combo(
             saved_value=self._prefs.haptic1_audio_device,
+            devices=self._haptic_audio_devices,
         )
         self._setup_haptic2_combo = self._build_role_combo(
             saved_value=self._prefs.haptic2_audio_device,
+            devices=self._haptic_audio_devices,
         )
 
         self._setup_scene_combo.currentIndexChanged.connect(self._on_setup_changed)
@@ -1507,7 +1517,9 @@ class ControlWindow(QMainWindow):
 
         rl.addLayout(self._labeled_row_with_test(
             "Scene audio", self._setup_scene_combo,
-            "Video's embedded sound (speakers / headphones).",
+            "Video's embedded sound — speakers, headphones, or a "
+            "monitor / TV over HDMI. Not sure a display has speakers? "
+            "Pick it and hit Test.",
             is_haptic=False,
         ))
         rl.addLayout(self._labeled_row_with_test(
@@ -1519,7 +1531,9 @@ class ControlWindow(QMainWindow):
         ))
         rl.addLayout(self._labeled_row_with_test(
             "Haptic 1 (main stim)", self._setup_haptic1_combo,
-            "Primary estim output (USB dongle).",
+            "Primary estim output (USB dongle). Wired is strongly "
+            "recommended — Bluetooth re-encodes the waveform that IS the "
+            "stim signal, and its latency drifts.",
             is_haptic=True,
         ))
         rl.addLayout(self._labeled_row_with_test(
@@ -2394,6 +2408,51 @@ class ControlWindow(QMainWindow):
         # marker reflects the change.
         self._refresh_live_panels()
 
+    def _rebuild_audio_device_lists(self) -> None:
+        """(Re)build the two device lists the Setup pickers draw from.
+
+        `_audio_devices` — everything selectable, INCLUDING monitor/TV
+        HDMI endpoints. Until 2026-09-05 these were filtered out of the
+        whole app on the theory that a display's audio output is a
+        speakerless phantom. That is wrong often enough to matter: a TV
+        on the end of an HDMI cable always has speakers, and plenty of
+        monitors do too, so the filter made a user's intended output
+        impossible to choose. They are offered and labelled instead —
+        a genuinely silent display is one Test-tone click away from being
+        identified, which beats hiding a working device.
+
+        `_haptic_audio_devices` — the same list minus display endpoints,
+        for the Haptic 1 / Haptic 2 combos. A display is never e-stim
+        hardware, so nothing is lost by keeping those two pickers narrow.
+
+        Both lists share the disambiguated labels (and therefore the
+        `[N]` PortAudio prefixes) so a device reads identically in
+        whichever combo it appears.
+        """
+        raw = SyncEngine.list_output_devices()
+        self._display_device_ids = {
+            d.get("name", "") for d in raw if is_display_audio(d)
+        }
+        bluetooth_ids = {
+            d.get("name", "") for d in raw if is_bluetooth_audio(d)
+        }
+        # Suffix AFTER disambiguation: _disambiguate_audio_descriptions
+        # matches descriptions against sounddevice's own device names to
+        # find the PortAudio index, so it must see the raw description.
+        pairs = self._disambiguate_audio_descriptions(raw)
+        labelled: list[tuple[str, str]] = []
+        for name, desc in pairs:
+            if name in self._display_device_ids:
+                desc = f"{desc}  —  monitor / TV (HDMI)"
+            elif name in bluetooth_ids:
+                desc = f"{desc}  —  Bluetooth"
+            labelled.append((name, desc))
+        self._audio_devices = labelled
+        self._haptic_audio_devices = [
+            (name, desc) for name, desc in labelled
+            if name not in self._display_device_ids
+        ]
+
     @staticmethod
     def _disambiguate_audio_descriptions(
         raw_devices: list[dict],
@@ -2458,24 +2517,26 @@ class ControlWindow(QMainWindow):
         """Re-query Windows audio devices and rebuild the Setup combos.
 
         Devices plugged in after app start aren't visible until the
-        cached ``self._audio_devices`` is refreshed. This rebuilds it
-        from a fresh ``SyncEngine.list_audio_devices()`` call and
-        repopulates each combo, preserving the saved selection if the
-        device is still present (or falling back to "— not set —").
+        cached device lists are refreshed. This rebuilds both of them
+        (see _rebuild_audio_device_lists) and repopulates each combo from
+        the list appropriate to its role, preserving the saved selection
+        if the device is still present (or falling back to "— not set —").
         """
-        raw_devices = SyncEngine.list_audio_devices()
-        self._audio_devices = self._disambiguate_audio_descriptions(raw_devices)
-        for combo, saved in (
-            (self._setup_scene_combo, self._prefs.scene_audio_device),
+        self._rebuild_audio_device_lists()
+        for combo, saved, devices in (
+            (self._setup_scene_combo, self._prefs.scene_audio_device,
+             self._audio_devices),
             (self._setup_scene_secondary_combo,
-             self._prefs.scene_audio_secondary_device),
-            (self._setup_haptic1_combo, self._prefs.haptic1_audio_device),
-            (self._setup_haptic2_combo, self._prefs.haptic2_audio_device),
+             self._prefs.scene_audio_secondary_device, self._audio_devices),
+            (self._setup_haptic1_combo, self._prefs.haptic1_audio_device,
+             self._haptic_audio_devices),
+            (self._setup_haptic2_combo, self._prefs.haptic2_audio_device,
+             self._haptic_audio_devices),
         ):
             blocker = combo.blockSignals(True)
             combo.clear()
             combo.addItem("— not set —", "")
-            for name, desc in self._audio_devices:
+            for name, desc in devices:
                 combo.addItem(desc, name)
             for idx in range(combo.count()):
                 if combo.itemData(idx) == saved:
@@ -2611,7 +2672,12 @@ class ControlWindow(QMainWindow):
                 taken_by = owner.get(dev)
                 item.setEnabled((not dev) or taken_by is None or taken_by is c)
 
-    def _build_role_combo(self, *, saved_value: str) -> QComboBox:
+    def _build_role_combo(
+        self, *, saved_value: str, devices: list[tuple[str, str]] | None = None,
+    ) -> QComboBox:
+        """Build one role dropdown over *devices* (default: every selectable
+        output). The haptic roles pass `_haptic_audio_devices` to keep
+        monitor/TV endpoints out of an e-stim picker."""
         combo = QComboBox()
         combo.setMinimumHeight(32)
         # Without these, the combo's preferred width is the longest item
@@ -2629,7 +2695,9 @@ class ControlWindow(QMainWindow):
         )
         self._style_combo_dropdown(combo)
         combo.addItem("— not set —", "")
-        for name, desc in self._audio_devices:
+        for name, desc in (
+            self._audio_devices if devices is None else devices
+        ):
             combo.addItem(desc, name)
         # Restore previous selection if the device is still available.
         for idx in range(combo.count()):
