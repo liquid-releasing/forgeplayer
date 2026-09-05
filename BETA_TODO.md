@@ -101,6 +101,22 @@ routing on hybrid-graphics laptops).
 
 ## Alpha-polish bugs (non-blocking, but visible)
 
+- [ ] **Move pin files out of the user's media folders.** Every successful
+      scene activation writes `<scene>.forgeplayer.json` next to the media
+      (`app/library/pins.py`). They're tiny and they're real user data — the
+      remembered picker choices — so they stay for now, and the Library docs
+      page carries a note explaining them. The defect to fix for beta: the
+      pin's *filename* comes from `entry.name`, which is relative to the
+      **library root**, while its *location* is the scene folder. Repoint
+      **📁 Root…** and the same scene gains a second pin under a new name
+      while the old one is orphaned — unread, never cleaned. Observed on the
+      dogfood rig 2026-09-05: two `funscriptforge_complete.forgeplayer.json`
+      files in different folders, ten minutes apart. Consolidate into one
+      app-owned folder (`~/.forgeplayer/pins/`, keyed by scene folder path)
+      — `~/.forgeplayer/catalog.json` already maps folder path → last pin, so
+      the index exists. Keep or drop the travels-with-the-folder property
+      deliberately; that was the original reason for the sidecar.
+
 - [x] **A native picker can open on a different monitor and the app reads as
       hung** — FIXED in v0.1.17-alpha (owner window + a re-centring backstop);
       dogfooded clean the same day: "nice placement of the dialog". Original
