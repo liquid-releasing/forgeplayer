@@ -2214,8 +2214,9 @@ class ControlWindow(QMainWindow):
         ml.addWidget(pb_label)
 
         pb_helper = QLabel(
-            "Check the monitors you use for video. Leave all unchecked to "
-            "allow any screen. Crop = scale the video to fill this "
+            "Check the monitors you use for video — Screen 1 is checked by "
+            "default, which is where playback lands. Clear every box to let "
+            "any screen be used. Crop = scale the video to fill this "
             "monitor's aspect (useful on ultrawide); off = letterbox/"
             "pillarbox to preserve the video's native aspect. "
             "(Fullscreen on Live is a separate choice — kiosk mode on/off.)"

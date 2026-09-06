@@ -83,10 +83,28 @@ class Preferences:
     haptic_offset_ms: int = 0
     # Monitor roles. -1 = not set (ControlWindow uses Qt's default placement).
     control_panel_screen: int = -1
-    # Which screen indices are usable for video playback. Empty list means
-    # "all screens are fair game" (the v0.0.1 default — user hasn't opted in
-    # to filtering).
-    playback_screen_indices: List[int] = field(default_factory=list)
+    # Which screen indices are usable for video playback.
+    #
+    # Defaults to [0] — Screen 1 — rather than the empty list it was through
+    # v0.1.18-alpha. Empty still MEANS "any screen is fair game", and a user
+    # can still clear every checkbox to get that; the problem was that empty
+    # was also the FIRST-RUN state, so Setup showed nothing ticked while
+    # `_screen_index_for_slot` fell through to `return slot_idx` and put the
+    # video on Screen 1 anyway. The UI disagreed with what the app actually
+    # did, which is the trust-breaking shape called out in
+    # `feedback_forgeplayer_reporting_must_match_actual` — a first-time user
+    # reasonably reads "no monitor is selected" as "playback isn't configured".
+    #
+    # This is a truthfulness fix, not a behaviour change: [] and [0] launch
+    # identically. Slot 0 lands on screen 0 either way, and mirror slots need
+    # 2+ checked screens before they get any media at all, so the one place
+    # the two differ (a mirror slot's index on a 3-monitor rig) is a slot that
+    # is skipped for having no media regardless.
+    #
+    # Existing users are unaffected: `load()` only applies a default when the
+    # key is ABSENT from preferences.json, so anyone who deliberately cleared
+    # every box keeps their empty list.
+    playback_screen_indices: List[int] = field(default_factory=lambda: [0])
     # Which screen indices should mpv crop-fill (panscan=1.0) instead of
     # letterbox. Spirit: aspect-handling is per-monitor (each physical
     # screen has its own native aspect, e.g. 32:9 ultrawide vs 16:9
