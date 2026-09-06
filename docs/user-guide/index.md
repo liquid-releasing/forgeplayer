@@ -150,6 +150,21 @@ On v0.1.18-alpha or later this should not occur: check that **Haptic 1 / Haptic 
 point at your **USB dongle** (not "Speakers"), that **Scene audio** is a *different*
 device, then reselect and **Refresh devices** — and please report it if it persists.
 
+**Sound plays but there's no picture.**
+Open **Setup → Graphics** and tick **Use the default graphics adapter**, then
+press **Launch Players** again.
+
+ForgePlayer pins video to an NVIDIA GPU when it detects one, because mpv's
+teardown hits a confirmed, unfixed crash in AMD's D3D11 driver. Detection reads
+the Windows display-adapter list, which reports an NVIDIA GPU whether or not it
+is actually usable — and pinning the choice also removes the player's fallback
+to a different one. When that happens, video output never starts and audio
+carries on alone. The checkbox restores the fallback.
+
+If that doesn't do it, check **Setup → Playback screens**: a ticked monitor
+that is switched off or unplugged still gets the video window, and you will
+never see it.
+
 **HDR video looks washed-out or over-bright.**
 HDR passthrough is disabled in v0.1.17-alpha for stability. Turn **Windows HDR off**
 for the playback monitor (Settings → Display → HDR) while testing.

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import html
 import os
+import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -2315,9 +2316,64 @@ class ControlWindow(QMainWindow):
         ).setChecked(True)
         ml.addLayout(crop_row)
 
+        # ── Graphics escape hatch (Windows only) ────────────────────────────
+        # The "sound plays but there's no picture" fix. ForgePlayer pins mpv's
+        # D3D11 context to an NVIDIA adapter when it detects one, to dodge a
+        # confirmed AMD driver crash on teardown — but detection reads the
+        # Windows display-adapter list, which reports an NVIDIA GPU whether or
+        # not it is usable, and pinning the context also disables mpv's
+        # fallback. When the pick doesn't resolve, video never initialises and
+        # only audio plays.
+        #
+        # This has to be a visible checkbox. The people who hit it are beta
+        # testers; asking them to set an environment variable or send a
+        # debug-log file is not a fix they can act on.
+        if sys.platform.startswith("win"):
+            gfx_label = QLabel("Graphics")
+            glf = gfx_label.font(); glf.setBold(True); gfx_label.setFont(glf)
+            ml.addWidget(gfx_label)
+
+            self._setup_default_gpu_cb = QCheckBox(
+                "Use the default graphics adapter"
+            )
+            self._setup_default_gpu_cb.setStyleSheet(_CHECKBOX_ON_DARK_STYLE)
+            self._setup_default_gpu_cb.setChecked(self._prefs.force_default_gpu)
+            self._setup_default_gpu_cb.setToolTip(
+                "Tick this if you hear sound but see no picture.\n\n"
+                "ForgePlayer normally picks your NVIDIA GPU to avoid a known "
+                "AMD driver crash. On some machines that choice can't be "
+                "resolved, and video silently fails to start while audio "
+                "keeps playing. This hands the choice back to the player.\n\n"
+                "Takes effect the next time you press Launch Players."
+            )
+            self._setup_default_gpu_cb.toggled.connect(
+                self._on_force_default_gpu_changed
+            )
+            ml.addWidget(self._setup_default_gpu_cb)
+
+            gfx_helper = QLabel(
+                "Sound plays but no video? Tick this, then press Launch "
+                "Players again."
+            )
+            gfx_helper.setStyleSheet("color: #6b7280; font-size: 11px;")
+            gfx_helper.setWordWrap(True)
+            ml.addWidget(gfx_helper)
+
         root.addWidget(monitor_box)
         root.addStretch()
         return page
+
+    def _on_force_default_gpu_changed(self, checked: bool) -> None:
+        """Persist the graphics escape hatch. Applies on the next launch —
+        the adapter is chosen when an mpv instance is built, so an open player
+        keeps whatever it started with."""
+        self._prefs.force_default_gpu = bool(checked)
+        self._prefs.save()
+        DebugLog.record("setup.force_default_gpu", value=bool(checked))
+        self._setup_status.setText(
+            "Saved — press Launch Players again to apply"
+        )
+        QTimer.singleShot(4000, lambda: self._setup_status.setText(""))
 
     def _on_crop_align_changed(self, value: str) -> None:
         """Persist the global crop position and apply it to any open players
@@ -5206,6 +5262,7 @@ class ControlWindow(QMainWindow):
             self._engine.init_player(
                 i, pw.native_wid(), audio_device, fill=fill,
                 crop_align=self._prefs.crop_align,
+                force_default_gpu=self._prefs.force_default_gpu,
                 # Double-click the video = Escape (tear all players down). mpv
                 # owns the video surface's input, so this binds inside mpv;
                 # emitting the signal queues the teardown onto the GUI thread.

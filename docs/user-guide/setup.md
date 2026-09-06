@@ -61,6 +61,22 @@ your scene audio can't be sent to the same port by accident.
     different thing again: those speak their own wireless protocol rather than
     taking an audio signal, and ForgePlayer does not drive them at all.
 
+## Graphics (Windows)
+
+**Use the default graphics adapter** — tick this if you hear sound but see no
+picture.
+
+ForgePlayer normally steers video onto an NVIDIA GPU when it detects one,
+because mpv's video teardown hits a confirmed, unfixed access violation in
+AMD's D3D11 driver. That detection reads Windows' display-adapter list, which
+reports an NVIDIA GPU whether or not it is usable — and naming the adapter also
+removes the player's ability to fall back to a different one. On a machine
+where the pick can't be resolved, video output never initialises and playback
+continues as audio only.
+
+Ticking the box hands the choice back to the player, fallback included. It
+applies the next time you press **Launch Players**.
+
 ## Test device buttons
 
 Each row has a **🔊 Test** button that plays a short sample through the picked

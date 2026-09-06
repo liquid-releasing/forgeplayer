@@ -140,6 +140,19 @@ class Preferences:
     # Live; the v0.0.4 redesign moves it to Setup so Live stays read-only.
     # Empty list = no screens fill (today's default).
     fill_screen_indices: List[int] = field(default_factory=list)
+    # Windows only. ForgePlayer normally pins mpv's D3D11 context to an
+    # NVIDIA adapter when it detects one, to dodge a confirmed, unfixed
+    # access violation in AMD's D3D11 driver on teardown (mpv#14601). But
+    # detection reads Windows' *display adapter* list, which reports an
+    # NVIDIA GPU whether or not it is usable — and pinning the context also
+    # disables mpv's fallback to another one. When that pick doesn't resolve,
+    # video output never initialises and mpv plays AUDIO WITH NO PICTURE.
+    #
+    # This is the user-facing escape hatch for exactly that: tick it in Setup
+    # and mpv chooses its own adapter, fallback intact. Surfaced as a
+    # checkbox rather than a debug-log dive or an environment variable,
+    # because the people who hit it are beta testers, not developers.
+    force_default_gpu: bool = False
     # Vertical crop position for cropped screens — see CropAlign above.
     # One global choice (the rig's monitors share an aspect mismatch
     # pattern); default center matches the pre-v0.0.5 behavior.

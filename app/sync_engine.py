@@ -86,6 +86,7 @@ def apply_d3d11_adapter_kwargs(
     platform: str = sys.platform,
     env=None,
     has_nvidia: bool | None = None,
+    force_default: bool = False,
 ) -> str | None:
     """Decide mpv's D3D11 adapter on Windows. Returns the adapter forced, or
     None. Mutates *kwargs*.
@@ -116,6 +117,12 @@ def apply_d3d11_adapter_kwargs(
     if not platform.startswith("win"):
         return None
 
+    # The user's explicit Setup choice outranks our detection — they are
+    # looking at whether a picture appeared, which is better evidence than
+    # anything we can enumerate.
+    if force_default:
+        return None
+
     override = (env.get("FORGEPLAYER_D3D11_ADAPTER") or "").strip()
     if override:
         if override.lower() in ("auto", "none", "default"):
@@ -142,6 +149,7 @@ def apply_platform_video_kwargs(
     platform: str = sys.platform,
     env=None,
     has_nvidia: bool | None = None,
+    force_default_gpu: bool = False,
 ) -> dict:
     """Platform-adjust an embedded-video player's mpv kwargs. Mutates and
     returns *kwargs*.
@@ -181,6 +189,7 @@ def apply_platform_video_kwargs(
 
     apply_d3d11_adapter_kwargs(
         kwargs, platform=platform, env=env, has_nvidia=has_nvidia,
+        force_default=force_default_gpu,
     )
 
     if not platform.startswith("darwin"):
@@ -244,6 +253,7 @@ class SyncEngine:
         *,
         fill: bool = False,
         crop_align: str = "center",
+        force_default_gpu: bool = False,
         on_double_click: Optional[Callable[[], None]] = None,
         on_single_click: Optional[Callable[[], None]] = None,
     ) -> mpv.MPV:
@@ -349,7 +359,9 @@ class SyncEngine:
                     )
             kwargs["log_handler"] = _gpu_log_handler
             kwargs["msg_level"] = "vo=v"
-            apply_platform_video_kwargs(kwargs, wid)
+            apply_platform_video_kwargs(
+                kwargs, wid, force_default_gpu=force_default_gpu,
+            )
 
             # Fine-grained construction trace. The macOS hang (2026-09-05,
             # M1 + M3 Max) stopped dead after `player.gpu_adapter` and never

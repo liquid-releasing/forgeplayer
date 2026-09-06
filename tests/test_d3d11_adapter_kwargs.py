@@ -102,3 +102,60 @@ def test_blank_override_is_ignored():
         has_nvidia=True,
     )
     assert got == "NVIDIA"
+
+
+# ── The user-facing escape hatch ─────────────────────────────────────────────
+#
+# Beta testers can't be asked to set environment variables or extract JSONL
+# debug logs. Setup carries a "Use the default graphics adapter" checkbox that
+# maps to Preferences.force_default_gpu, so "sound but no picture" is one tick
+# and a relaunch away.
+
+from app.preferences import Preferences
+from app.sync_engine import apply_platform_video_kwargs
+
+
+def test_preference_defaults_to_off():
+    """The NVIDIA pin stays the default — it exists to dodge a real AMD
+    teardown crash, so it must not be disabled for everyone."""
+    assert Preferences().force_default_gpu is False
+
+
+def test_setup_checkbox_stops_the_pinning():
+    k = _k()
+    assert apply_d3d11_adapter_kwargs(
+        k, platform="win32", env={}, has_nvidia=True, force_default=True,
+    ) is None
+    assert "gpu_context" not in k
+    assert "d3d11_adapter" not in k
+
+
+def test_user_choice_outranks_the_env_override():
+    """Someone looking at a black screen has better evidence than our
+    detection or a stale env var."""
+    k = _k()
+    assert apply_d3d11_adapter_kwargs(
+        k, platform="win32",
+        env={"FORGEPLAYER_D3D11_ADAPTER": "NVIDIA"},
+        has_nvidia=True, force_default=True,
+    ) is None
+    assert "d3d11_adapter" not in k
+
+
+def test_flag_reaches_the_adapter_choice_through_the_top_level_helper():
+    """Guards the wiring, not just the leaf — init_player passes the pref
+    down through apply_platform_video_kwargs."""
+    k = {"vo": "gpu"}
+    apply_platform_video_kwargs(
+        k, 42, platform="win32", env={}, has_nvidia=True,
+        force_default_gpu=True,
+    )
+    assert "d3d11_adapter" not in k
+    assert k["wid"] == "42"          # embedding is unaffected
+
+    k = {"vo": "gpu"}
+    apply_platform_video_kwargs(
+        k, 42, platform="win32", env={}, has_nvidia=True,
+        force_default_gpu=False,
+    )
+    assert k["d3d11_adapter"] == "NVIDIA"

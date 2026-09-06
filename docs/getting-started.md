@@ -252,6 +252,15 @@ Off by default; zero overhead when off.
   device resolves — ForgePlayer will not route e-stim to your speakers. Still
   silent with a valid device? Try **Calibrate H1** to isolate wiring vs
   playback.
+- **Sound plays but there's no picture** — go to **Setup → Graphics** and tick
+  **Use the default graphics adapter**, then press **Launch Players** again.
+  ForgePlayer normally steers video onto an NVIDIA GPU when it finds one, to
+  avoid a known AMD driver crash; on some machines that choice can't be
+  resolved and video silently fails to start while audio keeps going. That
+  checkbox hands the decision back to the player.
+  Also worth checking: if you ticked a monitor under **Setup → Playback
+  screens** that is switched off or unplugged, the video window opens on it
+  and you'll never see it.
 - **I hear e-stim through my computer speakers, monitor or TV** — fixed in
   v0.1.18-alpha, which was the release that closed it: stim now opens **only**
   on a device assigned to **Haptic 1** or **Haptic 2**, and stays silent if
