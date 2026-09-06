@@ -132,3 +132,40 @@ def test_two_checked_screens_still_drive_a_mirror():
     assert _screen_index_for_slot(0, [0, 1], 2) == 0
     assert _screen_index_for_slot(2, [0, 1], 2) == 1
     assert len([0, 1]) >= 2
+
+
+# ── First run resolves the PRIMARY monitor, not index 0 ──────────────────────
+#
+# "The laptop display is the correct default, if we can figure out which one
+# that is." Qt does not guarantee screens() lists the primary first, so index 0
+# is only a proxy. Matching the primary by NAME is the honest answer.
+
+from app.preferences import default_playback_screen_indices
+
+
+def test_primary_is_found_wherever_it_sits_in_the_list():
+    assert default_playback_screen_indices(["A", "B", "C"], "C") == [2]
+    assert default_playback_screen_indices(["A", "B", "C"], "B") == [1]
+    assert default_playback_screen_indices(["A", "B", "C"], "A") == [0]
+
+
+def test_falls_back_to_first_screen_when_primary_is_unidentifiable():
+    """A name that matches nothing, or no name at all, still yields a usable
+    selection rather than an empty one."""
+    assert default_playback_screen_indices(["A", "B"], "not-a-screen") == [0]
+    assert default_playback_screen_indices(["A", "B"], "") == [0]
+
+
+def test_no_screens_yields_any_screen():
+    """Nothing to pick from — empty means "any screen", the safe reading."""
+    assert default_playback_screen_indices([], "A") == []
+
+
+def test_single_screen_machine():
+    assert default_playback_screen_indices(["Built-in"], "Built-in") == [1 - 1]
+
+
+def test_duplicate_screen_names_take_the_first_match():
+    """Two monitors of the same model can report the same name; picking the
+    first is deterministic, which beats picking arbitrarily."""
+    assert default_playback_screen_indices(["Dup", "Dup"], "Dup") == [0]

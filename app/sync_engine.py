@@ -80,12 +80,68 @@ def _detect_nvidia_adapter() -> bool:
 _HAS_NVIDIA_ADAPTER = _detect_nvidia_adapter()
 
 
+def apply_d3d11_adapter_kwargs(
+    kwargs: dict,
+    *,
+    platform: str = sys.platform,
+    env=None,
+    has_nvidia: bool | None = None,
+) -> str | None:
+    """Decide mpv's D3D11 adapter on Windows. Returns the adapter forced, or
+    None. Mutates *kwargs*.
+
+    On a hybrid-graphics laptop we steer mpv's D3D11 context onto the NVIDIA
+    adapter, because mpv's `vo=gpu` teardown hits a confirmed, unfixed access
+    violation in AMD's D3D11 driver (mpv-player/mpv#14601). mpv's own adapter
+    selection ignores Windows' per-app GPU-preference registry setting, so
+    naming the adapter is the only lever that moves it.
+
+    **The risk this indirection exists to manage.** `_detect_nvidia_adapter()`
+    enumerates *display adapters* through `EnumDisplayDevicesW` and returns
+    True if any DeviceString contains "NVIDIA" — whether or not that GPU is
+    usable, enabled, or driving anything. Setting `gpu_context` explicitly
+    ALSO disables mpv's automatic fallback to another context. So if DXGI
+    exposes no adapter whose description matches "NVIDIA" (a muxed-off or
+    disabled dGPU, or leftover driver registry entries on a machine with no
+    NVIDIA card at all), D3D11 context creation fails, `vo=gpu` fails to
+    initialise, and mpv carries on playing **audio with no video** — a user
+    report we have seen on Windows.
+
+    ``FORGEPLAYER_D3D11_ADAPTER`` overrides the choice without a rebuild:
+    a name is forced verbatim; ``auto`` / ``none`` / ``default`` (or an empty
+    value) leaves mpv to pick, restoring its context fallback. That is the
+    first thing to try on a "sound but no picture" report.
+    """
+    env = os.environ if env is None else env
+    if not platform.startswith("win"):
+        return None
+
+    override = (env.get("FORGEPLAYER_D3D11_ADAPTER") or "").strip()
+    if override:
+        if override.lower() in ("auto", "none", "default"):
+            # Let mpv choose, and keep its context fallback available.
+            return None
+        kwargs["gpu_context"] = "d3d11"
+        kwargs["d3d11_adapter"] = override
+        return override
+
+    if has_nvidia is None:
+        has_nvidia = _HAS_NVIDIA_ADAPTER
+    if not has_nvidia:
+        return None
+
+    kwargs["gpu_context"] = "d3d11"
+    kwargs["d3d11_adapter"] = "NVIDIA"
+    return "NVIDIA"
+
+
 def apply_platform_video_kwargs(
     kwargs: dict,
     wid: int,
     *,
     platform: str = sys.platform,
     env=None,
+    has_nvidia: bool | None = None,
 ) -> dict:
     """Platform-adjust an embedded-video player's mpv kwargs. Mutates and
     returns *kwargs*.
@@ -122,6 +178,10 @@ def apply_platform_video_kwargs(
     hwdec_override = (env.get("FORGEPLAYER_HWDEC") or "").strip()
     if hwdec_override:
         kwargs["hwdec"] = hwdec_override
+
+    apply_d3d11_adapter_kwargs(
+        kwargs, platform=platform, env=env, has_nvidia=has_nvidia,
+    )
 
     if not platform.startswith("darwin"):
         kwargs["wid"] = str(wid)
@@ -260,18 +320,6 @@ class SyncEngine:
                 "tone_mapping": "bt.2390",
                 "hdr_compute_peak": "yes",
             }
-            if _HAS_NVIDIA_ADAPTER:
-                # Explicit GPU-context + adapter pick: mpv's own D3D11
-                # adapter selection ignores Windows' per-app GPU-preference
-                # registry setting (that mechanism is opt-in per graphics
-                # API, and mpv's d3d11 backend doesn't query it — confirmed
-                # by testing, not assumption). This is the one lever that
-                # actually moves mpv onto the NVIDIA adapter and away from
-                # the AMD one hitting the driver bug in _detect_nvidia_
-                # adapter's docstring. Substring-matched against the
-                # adapter's DXGI description ("NVIDIA GeForce ...").
-                kwargs["gpu_context"] = "d3d11"
-                kwargs["d3d11_adapter"] = "NVIDIA"
             if audio_device:
                 kwargs["audio_device"] = audio_device
             if fill:
@@ -312,6 +360,12 @@ class SyncEngine:
                 "player.mpv_construct_begin",
                 slot=slot, embedded=("wid" in kwargs),
                 hwdec=kwargs.get("hwdec"), vo=kwargs.get("vo"),
+                # If a forced adapter is present here but no
+                # `player.gpu_adapter` follows, D3D11 context creation
+                # failed and mpv is about to play audio with no video.
+                gpu_context=kwargs.get("gpu_context"),
+                d3d11_adapter=kwargs.get("d3d11_adapter"),
+                detected_nvidia=_HAS_NVIDIA_ADAPTER,
             )
             p = mpv.MPV(**kwargs)
             DebugLog.record("player.mpv_construct_done", slot=slot)

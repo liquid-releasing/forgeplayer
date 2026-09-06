@@ -59,7 +59,10 @@ from app.debug_log import DebugLog
 from app.mpv_envelope import TICK_MS, MpvVolumeEnvelope
 from app.version import __version__
 from app.widgets import ClickableSlider
-from app.preferences import Preferences
+from app.preferences import (
+    Preferences,
+    default_playback_screen_indices,
+)
 from app.audio_test import play_tone_on_device
 from app.stim_preview import play_test_clip as play_haptic_test_clip
 
@@ -219,6 +222,26 @@ class ControlWindow(QMainWindow):
 
         # Load persisted device-role preferences (Scene / Haptic 1 / Haptic 2).
         self._prefs = Preferences.load()
+
+        # First run only: point playback at the PRIMARY monitor — on a laptop
+        # that's the built-in panel, which is where video should land by
+        # default. Preferences' static default is [0], but Qt doesn't promise
+        # screens() lists the primary first, so resolve it by name instead of
+        # trusting the index.
+        #
+        # Deliberately not saved here. Until the user touches Setup this
+        # re-derives each launch, so plugging in or removing a monitor doesn't
+        # strand playback on a screen that moved. Once they make a choice it
+        # persists, including an empty list meaning "any screen".
+        if not Preferences.path().exists():
+            from PySide6.QtGui import QGuiApplication  # noqa: PLC0415
+            primary = QGuiApplication.primaryScreen()
+            self._prefs.playback_screen_indices = (
+                default_playback_screen_indices(
+                    [s.name() for s in self._screens],
+                    primary.name() if primary is not None else "",
+                )
+            )
 
         # Slot data — per-mpv-player media + stream state. The 4-slot
         # grid UI is gone in v0.0.4; slots remain as the SyncEngine's

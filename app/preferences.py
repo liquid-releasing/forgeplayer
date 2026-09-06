@@ -53,6 +53,34 @@ ContentPreference = Literal["sound", "funscript"]
 # _CROP_ALIGN_Y for the mpv video-align-y mapping.
 CropAlign = Literal["top", "center", "bottom"]
 
+def default_playback_screen_indices(
+    screen_names: List[str], primary_name: str,
+) -> List[int]:
+    """First-run playback-screen selection: the PRIMARY monitor.
+
+    On a laptop the primary screen is the built-in panel, which is the right
+    place to send video by default — the user asked for exactly that. Index 0
+    is only a proxy for it: Qt does not guarantee `screens()` lists the
+    primary first, so matching by name is the honest way to "figure out which
+    one that is".
+
+    Falls back to `[0]` when the primary can't be identified (no name match,
+    empty name), and to `[]` when there are no screens at all — an empty list
+    still means "any screen", which is the safe reading with nothing to pick
+    from.
+
+    Pure and name-based so it is testable without a Qt display; the caller
+    passes `QGuiApplication.primaryScreen().name()`.
+    """
+    if not screen_names:
+        return []
+    if primary_name:
+        for idx, name in enumerate(screen_names):
+            if name == primary_name:
+                return [idx]
+    return [0]
+
+
 @dataclass
 class Preferences:
     """User-configurable cross-session preferences.
