@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - "v*"
+  # Manual, build-only runs. A dispatch builds all three platforms and leaves
+  # the artifacts attached to the run, but SKIPS the publish job (see the `if`
+  # on `release` below) — so a tester can be handed a real macOS/Windows build
+  # to try without a version being cut and pushed to the public releases repo.
+  # Added 2026-09-06: the macOS `--wid` fix needed dogfooding on a clean Mac,
+  # and the alternatives were both bad — publish a release nobody had verified,
+  # or talk a non-developer through installing a Python toolchain.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -260,6 +268,9 @@ jobs:
     name: Publish Release
     needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
+    # Tag pushes publish; manual dispatches only build. Without this guard a
+    # workflow_dispatch would cut a release from whatever ref it ran on.
+    if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
       - name: Download Windows artifact
