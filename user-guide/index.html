@@ -1027,6 +1027,18 @@ default output (which, once displays became selectable, could be a monitor or TV
 On v0.1.18-alpha or later this should not occur: check that <strong>Haptic 1 / Haptic 2</strong>
 point at your <strong>USB dongle</strong> (not "Speakers"), that <strong>Scene audio</strong> is a <em>different</em>
 device, then reselect and <strong>Refresh devices</strong> — and please report it if it persists.</p>
+<p><strong>Sound plays but there's no picture.</strong>
+Open <strong>Setup → Graphics</strong> and tick <strong>Use the default graphics adapter</strong>, then
+press <strong>Launch Players</strong> again.</p>
+<p>ForgePlayer pins video to an NVIDIA GPU when it detects one, because mpv's
+teardown hits a confirmed, unfixed crash in AMD's D3D11 driver. Detection reads
+the Windows display-adapter list, which reports an NVIDIA GPU whether or not it
+is actually usable — and pinning the choice also removes the player's fallback
+to a different one. When that happens, video output never starts and audio
+carries on alone. The checkbox restores the fallback.</p>
+<p>If that doesn't do it, check <strong>Setup → Playback screens</strong>: a ticked monitor
+that is switched off or unplugged still gets the video window, and you will
+never see it.</p>
 <p><strong>HDR video looks washed-out or over-bright.</strong>
 HDR passthrough is disabled in v0.1.17-alpha for stability. Turn <strong>Windows HDR off</strong>
 for the playback monitor (Settings → Display → HDR) while testing.</p>
