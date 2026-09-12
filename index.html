@@ -1116,8 +1116,14 @@ it. Two prompts, in order:</p>
    installer.</p>
 </li>
 </ol>
-<p>macOS/Linux builds aren't notarized either — on macOS, right-click the app and
-choose <strong>Open</strong> the first time to bypass Gatekeeper.</p>
+<p>macOS/Linux builds aren't notarized either. On macOS the first launch is
+blocked with only <em>Move to Trash</em> and <em>Done</em> — <strong>macOS 15 Sequoia removed the
+old right-click → Open bypass</strong>, so there is no button to click past it. Open
+<strong>Terminal</strong>, type <code>xattr -dr com.apple.quarantine</code> (with the trailing
+space), drag <code>ForgePlayer.app</code> into the window, and press Return; then open it
+normally. See
+<a href="getting-started/">Getting Started</a> for the alternative via System Settings →
+Privacy &amp; Security.</p>
 <p>Source on GitHub:
 <a href="https://github.com/liquid-releasing/forgeplayer">liquid-releasing/forgeplayer</a>.</p>
 <hr />

@@ -1169,7 +1169,7 @@ install — everything is bundled.</p>
 <tr>
 <td>macOS</td>
 <td><code>ForgePlayer-macos.zip</code></td>
-<td>Unzip, open <code>ForgePlayer.app</code> (right-click → Open the first time, since the app isn't notarized yet)</td>
+<td>Unzip, then see the macOS note below — the app isn't notarized yet, so Gatekeeper blocks the first launch</td>
 </tr>
 <tr>
 <td>Linux</td>
@@ -1178,6 +1178,31 @@ install — everything is bundled.</p>
 </tr>
 </tbody>
 </table>
+<div class="admonition warning">
+<p class="admonition-title">macOS: getting past Gatekeeper on the first launch</p>
+<p>ForgePlayer isn't notarized yet, so macOS blocks it the first time with
+<strong>"ForgePlayer.app not opened"</strong> and offers only <em>Move to Trash</em> and
+<em>Done</em>. There is no <strong>Open Anyway</strong> button on that dialog and no
+right-click bypass: <strong>macOS 15 Sequoia removed the old Control-click →
+Open shortcut</strong>, so any guide telling you to right-click is out of date.</p>
+<p><strong>The reliable way</strong> — open <strong>Terminal</strong> (⌘-Space, type <code>terminal</code>), type
+this including the trailing space:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>xattr -dr com.apple.quarantine 
+</span></code></pre></div>
+<p>…then <strong>drag <code>ForgePlayer.app</code> into the Terminal window</strong> to fill in its
+path, and press Return. Now open the app normally. This clears the
+download quarantine flag so Gatekeeper stops evaluating the app.</p>
+<p><strong>Apple's own route</strong>, if you'd rather not use Terminal: click <strong>Done</strong>,
+open <strong>System Settings → Privacy &amp; Security</strong>, scroll to the <strong>Security</strong>
+section at the bottom, and click <strong>Open Anyway</strong> next to ForgePlayer, then
+authenticate. This can re-prompt several times — a PyInstaller bundle
+contains many nested unsigned binaries and each one may be checked — which
+is why the Terminal command above is the smoother path.</p>
+<p>Also: <strong>Safari auto-expands downloads</strong>, so you may find <code>ForgePlayer.app</code>
+directly rather than a <code>.zip</code>. That's expected, not a failed download.</p>
+<p>Code-signing and notarization are on the beta punch list; once they land,
+none of this will be necessary.</p>
+</div>
 <div class="admonition note">
 <p class="admonition-title">Windows: keeping the download past SmartScreen</p>
 <p>ForgePlayer isn't code-signed yet, so Windows flags it as an unknown
@@ -1208,12 +1233,12 @@ order — <strong>Setup → Preferences → Library → Live</strong>.</p>
 <li><strong>Linux:</strong> <code>sudo apt-get install libmpv-dev</code> (Debian / Ubuntu) or
      equivalent.</li>
 <li>Clone and install Python deps:
-   <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git clone https://github.com/liquid-releasing/forgeplayer.git
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cd forgeplayer
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>python -m venv .venv
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>.venv/Scripts/activate           # Windows
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>source .venv/bin/activate        # macOS / Linux
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>pip install -r requirements.txt
+   <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git clone https://github.com/liquid-releasing/forgeplayer.git
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>cd forgeplayer
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>python -m venv .venv
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>.venv/Scripts/activate           # Windows
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>source .venv/bin/activate        # macOS / Linux
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>pip install -r requirements.txt
 </span></code></pre></div></li>
 <li>Run: <code>python main.py</code></li>
 </ol>
@@ -1222,14 +1247,14 @@ order — <strong>Setup → Preferences → Library → Live</strong>.</p>
 <p>A "scene" is one folder containing the video, optional sibling audio
 files, optional funscripts (one or many), and any pinned picks. Sample
 layout:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>my-scene/
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  my-scene.mp4                                    &lt;- main video
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  my-scene[E-Stim _Popper Edit].mp3               &lt;- pre-rendered stim audio (optional)
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  my-scene.funscript                              &lt;- main funscript (1D position track)
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  my-scene.alpha.funscript                        &lt;- explicit alpha axis (optional)
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  my-scene.beta.funscript                         &lt;- explicit beta axis (optional)
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  my-scene.alpha-prostate.funscript               &lt;- prostate channel for Haptic 2 (optional)
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  my-scene.prostate.wav                           &lt;- pre-rendered prostate audio (optional)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>my-scene/
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  my-scene.mp4                                    &lt;- main video
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  my-scene[E-Stim _Popper Edit].mp3               &lt;- pre-rendered stim audio (optional)
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  my-scene.funscript                              &lt;- main funscript (1D position track)
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  my-scene.alpha.funscript                        &lt;- explicit alpha axis (optional)
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  my-scene.beta.funscript                         &lt;- explicit beta axis (optional)
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  my-scene.alpha-prostate.funscript               &lt;- prostate channel for Haptic 2 (optional)
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  my-scene.prostate.wav                           &lt;- pre-rendered prostate audio (optional)
 </span></code></pre></div>
 <p>Drop the folder anywhere readable. ForgePlayer scans it on first
 Library refresh and remembers it after that.</p>
