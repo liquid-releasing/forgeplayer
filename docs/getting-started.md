@@ -38,8 +38,40 @@ install — everything is bundled.
 | Platform | File | How to run |
 |---|---|---|
 | Windows | `ForgePlayer-Setup.exe` (installer) or `ForgePlayer-windows.zip` (portable) | Run the installer (registers `.forge` double-click), or unzip and run `ForgePlayer.exe` |
-| macOS | `ForgePlayer-macos.zip` | Unzip, open `ForgePlayer.app` (right-click → Open the first time, since the app isn't notarized yet) |
+| macOS | `ForgePlayer-macos.zip` | Unzip, then see the macOS note below — the app isn't notarized yet, so Gatekeeper blocks the first launch |
 | Linux | `ForgePlayer-linux.tar.gz` | Extract, run `ForgePlayer/ForgePlayer` |
+
+!!! warning "macOS: getting past Gatekeeper on the first launch"
+
+    ForgePlayer isn't notarized yet, so macOS blocks it the first time with
+    **"ForgePlayer.app not opened"** and offers only *Move to Trash* and
+    *Done*. There is no **Open Anyway** button on that dialog and no
+    right-click bypass: **macOS 15 Sequoia removed the old Control-click →
+    Open shortcut**, so any guide telling you to right-click is out of date.
+
+    **The reliable way** — open **Terminal** (⌘-Space, type `terminal`), type
+    this including the trailing space:
+
+    ```
+    xattr -dr com.apple.quarantine 
+    ```
+
+    …then **drag `ForgePlayer.app` into the Terminal window** to fill in its
+    path, and press Return. Now open the app normally. This clears the
+    download quarantine flag so Gatekeeper stops evaluating the app.
+
+    **Apple's own route**, if you'd rather not use Terminal: click **Done**,
+    open **System Settings → Privacy & Security**, scroll to the **Security**
+    section at the bottom, and click **Open Anyway** next to ForgePlayer, then
+    authenticate. This can re-prompt several times — a PyInstaller bundle
+    contains many nested unsigned binaries and each one may be checked — which
+    is why the Terminal command above is the smoother path.
+
+    Also: **Safari auto-expands downloads**, so you may find `ForgePlayer.app`
+    directly rather than a `.zip`. That's expected, not a failed download.
+
+    Code-signing and notarization are on the beta punch list; once they land,
+    none of this will be necessary.
 
 !!! note "Windows: keeping the download past SmartScreen"
     ForgePlayer isn't code-signed yet, so Windows flags it as an unknown
