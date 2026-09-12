@@ -61,10 +61,29 @@ Four DebugLog records name the exact blocking call if it still hangs:
 `player.mpv_construct_begin` → `mpv_construct_done` → `colorspace_hint_done`
 → `key_bindings_done`.
 
+## Running from source on macOS
+
+```bash
+brew install mpv                      # provides libmpv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# REQUIRED on Apple Silicon, or `import mpv` raises OSError at startup.
+# python-mpv loads libmpv through ctypes.find_library, which honours
+# DYLD_FALLBACK_LIBRARY_PATH; dyld does NOT search Homebrew's /opt/homebrew/lib
+# on its own. The CI macOS job exports exactly this before running pytest.
+export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_FALLBACK_LIBRARY_PATH:-/usr/local/lib:/usr/lib}"
+
+python main.py
+```
+
+Worth adding that export to `~/.zshrc` so it survives new terminals. If
+startup fails with `OSError` mentioning libmpv, this is why — not a code bug.
+
 ## What to do
 
-1. Run from source: `python main.py` (venv + `pip install -r requirements.txt`;
-   `brew install mpv` provides libmpv).
+1. Run from source with the environment above.
 2. Load a scene, press **Launch Players**.
 3. Expected: a **detached window that plays**. If it hangs, whichever of the
    four records above is *missing* names the blocking call.
