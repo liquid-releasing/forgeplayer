@@ -37,31 +37,21 @@ import time
 from typing import Callable, Optional
 
 
-def _detect_nvidia_adapter() -> bool:
-    """Best-effort, once-per-process: True if an NVIDIA GPU is present.
+def _detect_display_adapter_vendors() -> "frozenset[str]":
+    """Best-effort, once-per-process: which GPU vendors this machine reports.
 
-    Used to steer mpv's D3D11 context onto the NVIDIA adapter on a hybrid-
-    graphics laptop (integrated + discrete) — mpv's `vo=gpu` teardown hits a
-    confirmed, currently-unfixed access violation in AMD's D3D11 driver
-    (mpv-player/mpv#14601 — "a driver bug, which we unfortunately are
-    unable to fix" per mpv upstream; also #11882 for the matching Windows
-    "dispose then create a new instance" crash). Routing around the AMD
-    adapter when a better-tested NVIDIA one is available sidesteps it
-    entirely for machines built this way — verified on this dev machine
-    (AMD Radeon 890M iGPU + NVIDIA RTX 5070 Ti dGPU) via mpv's own D3D11
-    log line ("Device Name: ...").
+    Returns a subset of {"nvidia", "amd", "intel"}. Empty off Windows, or if
+    enumeration fails — callers must treat empty as "don't assume anything".
 
-    This does NOT cover AMD-only or Intel-only machines — there's no
-    second adapter to route to. See `_teardown_mpv_instance` /
-    `terminate_player_async` for the fix that protects those too, by
-    minimizing how often the crash-prone teardown path runs at all.
-
-    Uses EnumDisplayDevicesW (no extra dependency — plain ctypes) rather
-    than WMI, which is slow enough to notice at startup. Cached at module
-    scope since the adapters present don't change mid-session.
+    Uses EnumDisplayDevicesW (plain ctypes, no extra dependency) rather than
+    WMI, which is slow enough to notice at startup. Cached at module scope
+    since the adapters present don't change mid-session. Note the same adapter
+    is reported once per attached output, so vendors are collected as a set
+    rather than counted.
     """
     if sys.platform != "win32":
-        return False
+        return frozenset()
+    found: set[str] = set()
     try:
         import ctypes
         from ctypes import wintypes
@@ -84,15 +74,64 @@ def _detect_nvidia_adapter() -> bool:
                 None, i, ctypes.byref(dd), 0,
             ):
                 break
-            if "NVIDIA" in dd.DeviceString.upper():
-                return True
+            desc = dd.DeviceString.upper()
+            if "NVIDIA" in desc:
+                found.add("nvidia")
+            if "AMD" in desc or "RADEON" in desc:
+                found.add("amd")
+            if "INTEL" in desc:
+                found.add("intel")
             i += 1
     except Exception:
         pass
-    return False
+    return frozenset(found)
 
 
-_HAS_NVIDIA_ADAPTER = _detect_nvidia_adapter()
+_ADAPTER_VENDORS = _detect_display_adapter_vendors()
+
+
+def should_pin_nvidia_adapter(vendors: "frozenset[str] | set[str]") -> bool:
+    """Whether to force mpv's D3D11 context onto the NVIDIA adapter.
+
+    **Only when an AMD adapter is ALSO present.** That is the entire reason
+    this pin exists: mpv's `vo=gpu` teardown hits a confirmed, unfixed access
+    violation in AMD's D3D11 driver (mpv-player/mpv#14601 — "a driver bug,
+    which we unfortunately are unable to fix" per mpv upstream; also #11882 for
+    the matching Windows "dispose then create a new instance" crash). On a
+    machine with both, routing to the better-tested NVIDIA adapter sidesteps it
+    — verified on the dev machine (AMD Radeon 890M iGPU + NVIDIA RTX 5070 Ti
+    dGPU) via mpv's own "Device Name:" D3D11 log line.
+
+    The bug this condition fixes: the check used to be "is any NVIDIA adapter
+    present", which fires on **Intel + NVIDIA** machines too — where there is
+    no AMD driver to dodge, so the pin is pure downside. Worse, pinning the
+    D3D11 device to a discrete NVIDIA GPU that is not driving the display means
+    mpv cannot get pixels into a window living on the Intel-driven output. The
+    result is a **black video surface with working audio, timeline and
+    transport** — mpv is alive and playing, it just presents nothing.
+
+    Confirmed across three machines (2026-09-13):
+
+    | adapters        | old behaviour     | correct |
+    |-----------------|-------------------|---------|
+    | AMD + NVIDIA    | pin → works       | pin     |
+    | Intel only      | no pin → works    | no pin  |
+    | Intel + NVIDIA  | pin → BLACK video | no pin  |
+
+    The reporting user's own workaround was to **disable the NVIDIA GPU in
+    Device Manager**, which worked precisely because it made the old detection
+    return False. Nobody should have to cripple their hardware to play a video.
+
+    Empty `vendors` (enumeration failed, or not Windows) means don't pin: mpv's
+    own adapter choice plus its context fallback is a better default than a
+    guess made on no information.
+    """
+    return "nvidia" in vendors and "amd" in vendors
+
+
+# Kept as a module-level constant for the same reason as before: enumeration
+# costs a syscall loop and the answer can't change mid-session.
+_HAS_NVIDIA_ADAPTER = should_pin_nvidia_adapter(_ADAPTER_VENDORS)
 
 
 def apply_d3d11_adapter_kwargs(

@@ -13,6 +13,7 @@ import mpv
 
 from app.debug_log import DebugLog
 from app.platform_video import (
+    _ADAPTER_VENDORS,
     _HAS_NVIDIA_ADAPTER,
     apply_d3d11_adapter_kwargs,
     apply_platform_video_kwargs,
@@ -202,6 +203,11 @@ class SyncEngine:
                 gpu_context=kwargs.get("gpu_context"),
                 d3d11_adapter=kwargs.get("d3d11_adapter"),
                 detected_nvidia=_HAS_NVIDIA_ADAPTER,
+                # The vendor set is what decides whether the pin fires, so log
+                # it: a "black video, audio fine" report is diagnosable from
+                # this line alone. nvidia+intel with a forced adapter was the
+                # 2026-09-13 bug.
+                adapter_vendors=sorted(_ADAPTER_VENDORS),
             )
             p = mpv.MPV(**kwargs)
             DebugLog.record("player.mpv_construct_done", slot=slot)

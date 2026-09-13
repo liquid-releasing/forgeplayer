@@ -159,3 +159,64 @@ def test_flag_reaches_the_adapter_choice_through_the_top_level_helper():
         force_default_gpu=False,
     )
     assert k["d3d11_adapter"] == "NVIDIA"
+
+
+# ── The pin only makes sense when there is an AMD adapter to avoid ───────────
+#
+# Reported 2026-09-13: "audio and stim play but the player screen remains black,
+# but the playback buttons and timeline all display and work" — mpv alive and
+# playing, presenting nothing. The user's own workaround was to DISABLE the
+# NVIDIA GPU in Device Manager, which worked only because it made the old
+# detection return False.
+#
+# Cause: the check was "is any NVIDIA adapter present", which also fires on
+# Intel + NVIDIA machines. There is no AMD driver bug to dodge there, so the pin
+# is pure downside — and pinning the D3D11 device to a discrete GPU that isn't
+# driving the display means mpv can't get pixels into a window on the
+# Intel-driven output.
+#
+# Confirmed across three real machines, which is why this is a table test.
+
+from app.platform_video import should_pin_nvidia_adapter
+
+
+@pytest.mark.parametrize("vendors,expected,why", [
+    ({"amd", "nvidia"}, True,
+     "dev box: AMD present, so route around its D3D11 teardown bug"),
+    ({"intel", "nvidia"}, False,
+     "THE BUG: no AMD to dodge, and pinning blacked out the video"),
+    ({"intel"}, False, "Intel-only laptop: verified working, nothing to pin"),
+    ({"amd"}, False, "AMD-only: no second adapter to route to"),
+    ({"nvidia"}, False, "NVIDIA-only: already the only adapter"),
+    ({"intel", "amd", "nvidia"}, True, "AMD present, so still worth avoiding"),
+    (set(), False,
+     "enumeration failed: mpv's own choice plus its fallback beats a guess"),
+])
+def test_pin_requires_both_nvidia_and_amd(vendors, expected, why):
+    assert should_pin_nvidia_adapter(vendors) is expected, why
+
+
+def test_the_reported_machine_no_longer_gets_a_forced_adapter():
+    """End to end for the reporter's configuration: Intel + NVIDIA must reach
+    mpv with no adapter pinned, so mpv keeps its own choice AND its context
+    fallback."""
+    k = _k()
+    got = apply_d3d11_adapter_kwargs(
+        k, platform="win32", env={},
+        has_nvidia=should_pin_nvidia_adapter({"intel", "nvidia"}),
+    )
+    assert got is None
+    assert "gpu_context" not in k
+    assert "d3d11_adapter" not in k
+
+
+def test_the_dev_machine_still_gets_the_pin():
+    """The AMD teardown crash is real and unfixed upstream — this must not
+    regress while fixing the black-screen case."""
+    k = _k()
+    got = apply_d3d11_adapter_kwargs(
+        k, platform="win32", env={},
+        has_nvidia=should_pin_nvidia_adapter({"amd", "nvidia"}),
+    )
+    assert got == "NVIDIA"
+    assert k["d3d11_adapter"] == "NVIDIA"
