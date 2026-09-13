@@ -18,45 +18,49 @@ routing on hybrid-graphics laptops).
 
 ## Beta quality gates (do these first)
 
-- [ ] **macOS video playback — `--wid` embedding is the wrong architecture.**
-      User report 2026-09-05: Launch Players hangs indefinitely on **both** an
-      M1 (macOS Tahoe 26.5) and an M3 Max (Sequoia 15.6.1) — black video
-      window, ~0.4% CPU, "Not Responding". Debug log stops dead after
-      `player.gpu_adapter` and never reaches `player.fill_mode`, which
-      `_on_launch` records the instant `init_player` returns — so the block is
-      *inside* `init_player`.
+- [x] **macOS video playback — DONE 2026-09-13, now on the libmpv render API.**
+      The open question this item carried — *had the macOS artifact ever
+      played video at all?* — is answered: **no, it never had**, and it does
+      now. Verified on Mac Neo (Tahoe 26, Apple Silicon): video in-window,
+      timeline scrubbing working across both the scene window and the control
+      panel.
 
-      Root cause is architectural, not a tunable. Upstream mpv does not
-      properly support `--wid` embedding on macOS with GPU rendering (it is an
-      X11/win32 feature); the Cocoa OpenGL backend is deprecated in favour of
-      the render API, and the documented symptom is **"audio with a black
-      video surface"**. The deadlock shape fits exactly: mpv's Cocoa VO needs
-      the **main queue** to touch an NSView while our Qt main thread is inside
-      a blocking libmpv call — python-mpv reads `mpv_version` at the end of its
-      constructor, then we set `target-colorspace-hint` and register
-      `on_key_press` bindings. Mutual wait, zero CPU. NOT a Vulkan/MoltenVK
-      GPU hang, which is what it superficially resembles.
+      Root cause, confirmed by sampling the hung process rather than inferred:
+      libmpv's macOS backend creates AND resizes its NSWindow on mpv's own
+      `vo` thread via `dispatch_sync` onto the **main queue**, which Qt's main
+      thread owns. Any moment the GUI thread is busy — or is itself inside a
+      blocking libmpv call — `vo` waits on the GUI thread, `core` waits on
+      `vo`, and the process wedges at ~0% CPU without recovering.
 
-      **Shipped as a stopgap (v0.1.19):** `apply_platform_video_kwargs()` drops
-      `wid` on darwin and lets mpv own a detached window. Costs the Qt chrome
-      overlay on macOS; mpv-level click bindings still work.
+      Three fixes were shipped on the way and none of them was sufficient,
+      because each dodged one instance of that collision rather than the
+      class: drop `wid` (hung in the constructor), `force_window` stopgap
+      (hung at VO creation), pump the main queue during construction (hung at
+      VO *reconfig*, where the poll timer's `time_pos` read met mpv's `vo`
+      thread mid-`dispatch_sync`). The fix that holds is the one this item
+      already predicted: **`vo=libmpv` + `mpv_render_context`** into a
+      `QOpenGLWidget`. No Cocoa VO, so nothing ever wants the main queue.
 
-      **The real fix for beta:** render API — `vo=libmpv` +
-      `mpv_render_context` drawing into an app-owned view. That is also what
-      unblocks proper embedding on macOS rather than a floating window.
+      Windows and Linux deliberately stay on `--wid`. libmpv's render API has
+      only OpenGL and software types — no D3D11 — so unifying would cost
+      Windows its D3D11 context and HDR passthrough with it.
 
-      Note for whoever picks this up: **libmpv does not read the user's
-      `~/.config/mpv/mpv.conf`** (the client API loads no config by default),
-      so the reporter's attempt to tune Vulkan options there was inert — and
-      any future "try setting X in mpv.conf" advice to a macOS user is wrong
-      for the same reason. Options must be passed as kwargs.
+      Also fixed on the way: the app could not even *start* on macOS, because
+      Qt's `QApplication` calls `setlocale(LC_ALL, "")` and libmpv refuses to
+      initialise under a non-C `LC_NUMERIC`. CI never caught it (runners leave
+      `LANG` unset); every real desktop reproduced it 100%.
 
-      ⚠️ **Open question worth answering before beta: has the macOS artifact
-      EVER played video?** CI builds and publishes `ForgePlayer-macos.zip`
-      every cut, and the docs walk macOS users through a Homebrew libmpv
-      install, but if `--wid` never worked there, every macOS download to date
-      has been broken on first Launch. Verify on the Mac Neo before shipping
-      another macOS artifact.
+      See `docs/macos_render_api.md` and ARCHITECTURE.md → "The video
+      surface". The note below still stands and is worth keeping:
+
+      **libmpv does not read the user's `~/.config/mpv/mpv.conf`** (the client
+      API loads no config by default), so any "try setting X in mpv.conf"
+      advice to a macOS user is wrong. Options must be passed as kwargs.
+
+      Remaining macOS follow-up: the Qt control-bar overlay is back (Qt owns
+      the surface again), so the macOS UI is at parity — but only the
+      single-monitor case has been exercised. Multi-monitor macOS playback is
+      untested.
 
 - [ ] **Beta output targets — FOC-Stim, subwoofer/bass-shaker, and the rest of
       what FunscriptForge emits. Target: before 2026-09-30.**
