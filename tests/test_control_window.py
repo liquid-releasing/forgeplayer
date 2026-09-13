@@ -660,3 +660,92 @@ def test_events_recorded_at_startup_reach_the_stream(control_window):
     DebugLog.record("test.probe", marker="startup-armed")
     text = Path(DebugLog.stream_path()).read_text(encoding="utf-8")
     assert "startup-armed" in text
+
+
+# ── Browse leaves a trace in the log (2026-09-13) ────────────────────────────
+#
+# The Browse path recorded nothing at all, so a browsed pick was invisible in a
+# debug log: you could see the launch and the stim synth, but not where the set
+# came from. Found while trying to verify the Browse fix from a log and failing.
+#
+# Worse, _on_stim_folder_scanned has three separate early returns, and "Browse
+# did nothing" is the exact user report this code path exists to answer. A silent
+# return leaves the user and the log equally uninformed.
+
+def _kinds(events):
+    return [e["kind"] for e in events]
+
+
+def _of_kind(events, kind):
+    return [e for e in events if e["kind"] == kind]
+
+
+class _FakeSet:
+    def __init__(self, stem="Browsed", channels=None, main=None):
+        self.base_stem = stem
+        self.channels = channels or {}
+        self.main_path = main
+
+
+def test_unresolvable_pick_is_logged_not_swallowed(control_window, debug_events):
+    """fset=None is exactly the old bug's symptom. It must say so."""
+    win = control_window
+    win._on_stim_folder_scanned(r"C:\somewhere\X.funscript", None)
+    got = _of_kind(debug_events, "browse.stim_unresolved")
+    assert got, f"nothing logged; saw {_kinds(debug_events)}"
+    assert got[0]["path"] == r"C:\somewhere\X.funscript"
+
+
+def test_a_scan_landing_after_close_is_logged(control_window, debug_events):
+    win = control_window
+    win._current_entry = None
+    win._on_stim_folder_scanned(r"C:\a\B.funscript", _FakeSet())
+    got = _of_kind(debug_events, "browse.stim_discarded")
+    assert got and "no scene loaded" in got[0]["reason"]
+
+
+def test_a_scan_landing_after_a_scene_switch_is_logged(control_window, debug_events):
+    """The guard that already existed, now visible."""
+    win = control_window
+    win._current_entry = _scene("Scene A")
+    win._current_choices = object()
+    win._stim_scan_target_entry = _scene("Scene B")   # user moved on
+    win._on_stim_folder_scanned(r"C:\a\B.funscript", _FakeSet())
+    got = _of_kind(debug_events, "browse.stim_discarded")
+    assert got and "scene changed" in got[0]["reason"]
+
+
+def test_a_resolved_set_logs_its_folder_and_channels(control_window, debug_events):
+    """THE field that was missing. A browsed set and the scene's own set can
+    share a base stem, so the stem alone cannot tell them apart in a log - which
+    is precisely what went wrong when verifying this fix."""
+    from dataclasses import dataclass, field as dc_field
+
+    @dataclass
+    class _Choices:
+        funscript_set: object = None
+        audio: object = None
+        video: object = None
+        subtitle: object = None
+
+    win = control_window
+    entry = _scene("Scene A")
+    entry.funscript_sets = []
+    win._current_entry = entry
+    win._current_choices = _Choices()
+    win._stim_scan_target_entry = entry
+
+    fset = _FakeSet(
+        stem="Victoriaoaks - Wet Dreams 1080p 30fps",
+        channels={"alpha": r"C:\out\s.alpha.funscript",
+                  "beta": r"C:\out\s.beta.funscript"},
+    )
+    win._on_stim_folder_scanned(r"C:\my_scripts_elsewhere\s.alpha.funscript", fset)
+
+    got = _of_kind(debug_events, "browse.stim_resolved")
+    assert got, f"nothing logged; saw {_kinds(debug_events)}"
+    e = got[0]
+    assert e["folder"] == r"C:\my_scripts_elsewhere"
+    assert e["channels"] == ["alpha", "beta"]
+    assert e["has_main_track"] is False
+    assert e["base_stem"] == "Victoriaoaks - Wet Dreams 1080p 30fps"

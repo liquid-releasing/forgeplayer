@@ -1821,6 +1821,18 @@ class ControlWindow(QMainWindow):
         if not path:
             return
         path = os.path.normpath(path)
+        DebugLog.record(
+            "browse.stim_picked",
+            path=path,
+            kind="funscript" if path.lower().endswith(".funscript") else "audio",
+            scene_folder=getattr(self._current_entry, "folder_path", ""),
+            outside_scene_folder=(
+                os.path.normpath(os.path.dirname(path))
+                != os.path.normpath(
+                    getattr(self._current_entry, "folder_path", "") or "."
+                )
+            ),
+        )
         if path.lower().endswith(".funscript"):
             # _funscript_set_from_path scans the file's folder (channel
             # siblings) — same scan_scene_folder call the Library root scan
@@ -1852,19 +1864,51 @@ class ControlWindow(QMainWindow):
 
     @Slot(str, object)
     def _on_stim_folder_scanned(self, path: str, fset: object) -> None:
+        """Apply a browsed funscript once its folder scan returns.
+
+        Every early return here is logged. "Browse did nothing" was the
+        original user report behind this code path, and three separate
+        conditions can still legitimately produce no visible change — a
+        resolution failure, a Close that landed mid-scan, and a scene switch
+        that landed mid-scan. Silently returning on any of them leaves the user
+        and the log equally uninformed.
+        """
         self._stim_browse_btn.setEnabled(True)
         if fset is None:
+            DebugLog.record(
+                "browse.stim_unresolved", path=path,
+                reason="no funscript set could be built from this file",
+            )
             return
         if self._current_entry is None or self._current_choices is None:
-            return  # Close landed while the scan was in flight
+            DebugLog.record(
+                "browse.stim_discarded", path=path,
+                reason="no scene loaded when the scan returned (Close?)",
+            )
+            return
         if self._current_entry is not self._stim_scan_target_entry:
-            return  # user picked a different scene before this scan returned
+            DebugLog.record(
+                "browse.stim_discarded", path=path,
+                reason="scene changed while the scan was in flight",
+            )
+            return
         from dataclasses import replace  # noqa: PLC0415
         if not any(f.base_stem == fset.base_stem
                    for f in self._current_entry.funscript_sets):
             self._current_entry.funscript_sets.append(fset)
         self._current_choices = replace(
             self._current_choices, funscript_set=fset, audio=None,
+        )
+        DebugLog.record(
+            "browse.stim_resolved",
+            path=path,
+            base_stem=fset.base_stem,
+            # The folder is the diagnostic part: a browsed set and the scene's
+            # own set can share a base stem, so the stem alone cannot tell them
+            # apart in a log. Found while trying to verify this very fix.
+            folder=os.path.dirname(path),
+            channels=sorted(fset.channels),
+            has_main_track=bool(fset.main_path),
         )
         self._reload_current_scene()
 
@@ -3367,6 +3411,12 @@ class ControlWindow(QMainWindow):
                 slot=1,
                 source="funscript_set",
                 base_stem=choices.funscript_set.base_stem,
+                # The audio branch above logs `path`; this one logged only the
+                # stem, so a report could never say WHERE the stim came from.
+                # That asymmetry is why a browsed set was indistinguishable
+                # from the scene's own in the log (2026-09-13).
+                source_path=self._current_stim_source_path(),
+                channel_count=len(choices.funscript_set.channels),
                 pulse_based=any(
                     ch.startswith("pulse_") for ch in choices.funscript_set.channels
                 ),
