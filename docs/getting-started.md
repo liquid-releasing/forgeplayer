@@ -31,7 +31,8 @@ Pick a build for your platform and run it. No Python install, no libmpv
 install — everything is bundled.
 
 - **[forgeplayer.app](https://forgeplayer.app/)** — direct download buttons
-  for Windows / macOS / Linux on the landing page.
+  for Windows / macOS on the landing page. (A Linux build exists but is
+  untested — see below.)
 - **[GitHub Releases](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest)** —
   same builds, plus older versions and changelogs.
 
@@ -39,7 +40,19 @@ install — everything is bundled.
 |---|---|---|
 | Windows | `ForgePlayer-Setup.exe` (installer) or `ForgePlayer-windows.zip` (portable) | Run the installer (registers `.forge` double-click), or unzip and run `ForgePlayer.exe` |
 | macOS | `ForgePlayer-macos.zip` | Unzip — nothing else to install. Then see the macOS note below: the app isn't notarized yet, so Gatekeeper blocks the first launch |
-| Linux | `ForgePlayer-linux.tar.gz` | Extract, run `ForgePlayer/ForgePlayer` |
+| Linux *(untested)* | `ForgePlayer-linux.tar.gz` | Extract, run `ForgePlayer/ForgePlayer`. Builds on every release but has never been dogfooded, so it isn't listed on the website and isn't supported yet — see the note below. |
+
+!!! info "Linux: builds, but untested"
+
+    A Linux tarball is produced on every release and attached to the GitHub
+    release page, so you can try it. It is **not** offered on the website and
+    we don't call it supported, for one honest reason: nobody has run a Linux
+    build end to end yet. Video, audio routing and e-stim output have all been
+    dogfooded on Windows and macOS; none of it has been on Linux.
+
+    If you do try it, reports are genuinely welcome — that's what would move it
+    to supported. Linux is planned to be a first-class platform for the 1.0
+    release.
 
 !!! warning "macOS: getting past Gatekeeper on the first launch"
 
