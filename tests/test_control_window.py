@@ -621,3 +621,42 @@ def test_haptic2_device_also_counts_as_a_haptic_port(
 
     assert win._launch_stim_synth(1, {}, _FakeFunscriptSet(), "dongle2") is False
     assert not _refusals(debug_events)
+
+
+# ── Debug capture is armed at startup (2026-09-13) ───────────────────────────
+#
+# The Debug cluster's own comment and tooltip both said "on by default in beta",
+# but nothing ever called setChecked — so capture was OFF for every tester who
+# didn't notice the control, and bug reports arrived without logs. Found when the
+# newest stream log on the dev machine turned out to be two weeks old.
+#
+# The ordering matters and is the thing to protect: the toggled handler is what
+# calls DebugLog.set_enabled(), which opens the on-disk stream. Checking the box
+# before connecting the signal would tick the UI and arm nothing.
+
+def test_debug_capture_is_on_at_startup(control_window):
+    from app.debug_log import DebugLog
+    win = control_window
+    assert win._debug_toggle.isChecked() is True, "the UI must show Debug on"
+    assert DebugLog.enabled is True, (
+        "the box being ticked is not enough - the handler must have run and "
+        "actually enabled capture"
+    )
+
+
+def test_debug_stream_file_is_opened_at_startup(control_window):
+    """Armed means a stream on disk, not just a boolean. A force-quit has to
+    leave a recoverable log behind - which is the whole point of streaming
+    rather than only exporting on demand."""
+    from app.debug_log import DebugLog
+    path = DebugLog.stream_path()
+    assert path, "no stream path - set_enabled never opened one"
+    assert Path(path).exists(), f"stream path {path} was never created"
+
+
+def test_events_recorded_at_startup_reach_the_stream(control_window):
+    """End to end: record an event and confirm it lands in the file."""
+    from app.debug_log import DebugLog
+    DebugLog.record("test.probe", marker="startup-armed")
+    text = Path(DebugLog.stream_path()).read_text(encoding="utf-8")
+    assert "startup-armed" in text

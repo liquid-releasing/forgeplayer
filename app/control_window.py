@@ -3441,6 +3441,18 @@ class ControlWindow(QMainWindow):
         )
         self._debug_toggle.setStyleSheet("color: #9ba3c4;")
         self._debug_toggle.toggled.connect(self._on_debug_toggled)
+        # Actually turn it on. The comment above and the tooltip have both
+        # claimed "on by default in beta" since the cluster was added, but
+        # nothing ever checked the box — so debug capture was OFF for every
+        # beta tester who didn't happen to notice the control. The newest
+        # stream log on the dev machine was two weeks old when this was found
+        # (2026-09-13), and bug reports had been arriving without logs.
+        #
+        # setChecked AFTER the connect on purpose: the handler is what calls
+        # DebugLog.set_enabled(), which opens the on-disk stream. Checking the
+        # box before connecting would tick the UI and arm nothing — the exact
+        # failure this replaces.
+        self._debug_toggle.setChecked(True)
         h.addWidget(self._debug_toggle)
 
         self._btn_mark = QPushButton("⚑ Mark")
