@@ -1169,7 +1169,7 @@ install — everything is bundled.</p>
 <tr>
 <td>macOS</td>
 <td><code>ForgePlayer-macos.zip</code></td>
-<td>Unzip, then see the macOS note below — the app isn't notarized yet, so Gatekeeper blocks the first launch</td>
+<td>Unzip — nothing else to install. Then see the macOS note below: the app isn't notarized yet, so Gatekeeper blocks the first launch</td>
 </tr>
 <tr>
 <td>Linux</td>
@@ -1202,6 +1202,26 @@ is why the Terminal command above is the smoother path.</p>
 directly rather than a <code>.zip</code>. That's expected, not a failed download.</p>
 <p>Code-signing and notarization are on the beta punch list; once they land,
 none of this will be necessary.</p>
+</div>
+<div class="admonition success">
+<p class="admonition-title">macOS: no Homebrew, and it actually plays now (v0.1.19-alpha)</p>
+<p><strong>Don't install Homebrew or run <code>brew install mpv</code>.</strong> Older guides — ours
+included — told you to, because the app loaded a system copy of the video
+engine instead of the one inside the download. It now uses its own. Unzip,
+clear Gatekeeper once as described above, and open it. That's the whole
+install.</p>
+<p>Worth being straight with you if you tried an earlier build: <strong>every macOS
+release before v0.1.19-alpha was broken.</strong> The app quit on launch, and on
+machines where it got that far, <strong>Launch Players</strong> hung with a black window
+and a spinning cursor. It wasn't your setup. Both causes are fixed and
+macOS is now verified end to end on Apple Silicon — video, scene audio,
+e-stim on a USB dongle, thumbnails, seeking and Close.</p>
+<p>Video plays <strong>inside the ForgePlayer window</strong>, so the on-video control bar
+behaves the same as on Windows: click the video once for the bar,
+double-click to close all players.</p>
+<p>Not yet verified on macOS: <strong>multi-monitor playback</strong>. Single-display is
+what's been tested. If you run ForgePlayer across two or more displays on a
+Mac, we'd like to hear how it goes.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Windows: keeping the download past SmartScreen</p>
@@ -1406,7 +1426,7 @@ scene — it's a signal-path check, not a content preview.</p>
   v0.1.18-alpha or later, please report it — confirm first that <strong>Haptic 1 / 2</strong>
   point at your <strong>USB dongle</strong> and that <strong>Scene audio</strong> is a <em>different</em> device.</li>
 <li><strong>HDR video looks washed-out / over-bright</strong> — HDR passthrough is disabled
-  in v0.1.17-alpha for stability; turn <strong>Windows HDR off</strong> for the playback monitor.</li>
+  for stability; turn <strong>Windows HDR off</strong> for the playback monitor.</li>
 <li><strong>Bluetooth output is glitchy</strong> — Bluetooth plays fine for scene audio, but
   use wired / USB for stim: A2DP re-encodes the waveform that <em>is</em> the stim
   drive signal, and its latency drifts.</li>

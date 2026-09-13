@@ -1047,8 +1047,8 @@ handling, GPU color path.</p>
 <li>
 <p><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 17H3V5h18m0-2H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5v2h8v-2h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2"/></svg></span> <strong><a href="hdr-content/">HDR Content</a></strong></p>
 <p>Producing HDR10 content (Topaz Video AI workflows). Note: HDR
-<em>passthrough</em> in the player is temporarily disabled in v0.1.17-alpha for
-stability — see the page for details.</p>
+<em>passthrough</em> in the player is still disabled for stability as of
+v0.1.19-alpha — see the page for details.</p>
 </li>
 </ul>
 </div>
@@ -1097,8 +1097,21 @@ matches them by name and shows one Library tile. A folder can hold:</p>
 double-click a <code>.forge</code>.</p>
 <hr />
 <h2 id="download">Download<a class="headerlink" href="#download" title="Permanent link">&para;</a></h2>
-<p><strong>v0.1.17-alpha — released 2026-08-30.</strong></p>
-<p><a class="md-button md-button--primary" href="https://github.com/liquid-releasing/forgeplayer-releases/releases/latest"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 20h14v-2H5m14-9h-4V3H9v6H5l7 7z"/></svg></span> Download v0.1.17-alpha (Windows / macOS / Linux)</a></p>
+<p><strong>v0.1.19-alpha — released 2026-09-13.</strong></p>
+<p><a class="md-button md-button--primary" href="https://github.com/liquid-releasing/forgeplayer-releases/releases/latest"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 20h14v-2H5m14-9h-4V3H9v6H5l7 7z"/></svg></span> Download v0.1.19-alpha (Windows / macOS / Linux)</a></p>
+<div class="admonition success">
+<p class="admonition-title">macOS: this is the first build that works</p>
+<p>Every macOS release before v0.1.19-alpha was broken before it reached your
+library — the app quit at launch, and on machines that got past that,
+<strong>Launch Players</strong> froze with a black window. Both causes are fixed, and
+macOS playback is now verified end to end on Apple Silicon: video, scene
+audio, e-stim on a USB dongle, thumbnails, seeking and Close.</p>
+<p><strong>Earlier instructions told you to install Homebrew and run
+<code>brew install mpv</code>. You no longer need to.</strong> The download has always
+contained the video engine it needs; it just wasn't using it. Unzip and
+open — that's the whole install. (Running ForgePlayer <em>from source</em> still
+needs libmpv; see the README.)</p>
+</div>
 <h3 id="windows-keeping-the-download">Windows: keeping the download<a class="headerlink" href="#windows-keeping-the-download" title="Permanent link">&para;</a></h3>
 <p>ForgePlayer isn't code-signed yet, so Windows treats it as an unknown
 publisher. The file is safe — you just have to tell Windows to keep it and run
