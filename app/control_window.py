@@ -1889,18 +1889,38 @@ class ControlWindow(QMainWindow):
     def _funscript_set_from_path(path: str) -> FunscriptSet | None:
         """Build a FunscriptSet for a browsed `.funscript` by scanning its
         folder — so its channel siblings (alpha/beta/pulse_* / -prostate) come
-        along, not just the bare main track. Falls back to the folder's first
-        set, then None if the folder has no funscripts."""
-        from app.library.scanner import scan_scene_folder  # noqa: PLC0415
-        entry = scan_scene_folder(os.path.dirname(path))
-        if entry is None or not entry.funscript_sets:
-            return None
+        along, not just the bare main track.
+
+        Uses `funscript_sets_in_folder`, NOT `scan_scene_folder`. That
+        distinction is the fix for a reported bug: `scan_scene_folder` answers
+        "is this folder a library scene?" and returns None unless the folder
+        holds a video, an audio track or an export bundle. A user who keeps
+        funscripts in their own directory, separate from the video, therefore
+        could not load one *even by picking it explicitly in the file dialog* —
+        Browse appeared to do nothing (user report, 2026-09-13). Browse is not
+        asking whether the folder is a scene. It is asking what sits next to
+        the file the user chose.
+
+        An explicit pick is always honoured: if the folder scan somehow doesn't
+        include the chosen file, a set is built from that file alone rather than
+        returning None. Browse must load what the user pointed at.
+        """
+        from app.library.scanner import (  # noqa: PLC0415
+            funscript_sets_in_folder,
+            group_funscript_sets,
+        )
+        sets = funscript_sets_in_folder(os.path.dirname(path))
         npath = os.path.normpath(path)
-        for s in entry.funscript_sets:
+        for s in sets:
             members = [s.main_path, *s.channels.values()]
             if any(p and os.path.normpath(p) == npath for p in members):
                 return s
-        return entry.funscript_sets[0]
+        if os.path.isfile(path):
+            from pathlib import Path as _Path  # noqa: PLC0415
+            solo = group_funscript_sets([_Path(path)])
+            if solo:
+                return solo[0]
+        return sets[0] if sets else None
 
     def _refresh_source_combos(self) -> None:
         """Repopulate the Sources dropdowns from the active scene + choices.

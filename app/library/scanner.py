@@ -200,6 +200,78 @@ def _audio_descriptor(audio_stem: str, video_base_stems: set[str]) -> tuple[str,
 
 # ── Core scanner ──────────────────────────────────────────────────────────────
 
+def group_funscript_sets(
+    funscript_files: "list[Path]",
+    *,
+    video_base_stems: "set[str] | None" = None,
+) -> "list[FunscriptSet]":
+    """Group `.funscript` paths into sets by base stem, channels and all.
+
+    Deliberately has NO notion of whether the folder is "playable" — that is
+    `scan_scene_folder`'s concern, and conflating the two was a bug. A user who
+    browses to a funscript has told us exactly which file they want; whether a
+    video happens to sit beside it is irrelevant to gathering that file's
+    channel siblings. See `funscript_sets_in_folder`.
+
+    Sorting: the set whose base stem matches a video base stem wins, then
+    shorter stems, then alphabetical — so a plain "Magik" set sorts before
+    "Magik [E-Stim & Popper Edit]", making the scanner's default pick the
+    original rather than an edit. `video_base_stems` is optional precisely
+    because the browse path has no videos to match against.
+    """
+    stems = {v.lower() for v in (video_base_stems or set())}
+    sets_by_stem: dict[str, FunscriptSet] = {}
+    for path in funscript_files:
+        info = classify_funscript_channel(path.name)
+        fset = sets_by_stem.get(info.base_stem)
+        if fset is None:
+            fset = FunscriptSet(base_stem=info.base_stem)
+            sets_by_stem[info.base_stem] = fset
+        if info.channel == "":
+            fset.main_path = str(path)
+        else:
+            fset.channels[info.channel] = str(path)
+
+    def _set_sort_key(fset: FunscriptSet) -> tuple:
+        return (
+            0 if fset.base_stem.lower() in stems else 1,
+            len(fset.base_stem),
+            fset.base_stem.lower(),
+        )
+
+    return sorted(sets_by_stem.values(), key=_set_sort_key)
+
+
+def funscript_sets_in_folder(folder: str | os.PathLike) -> "list[FunscriptSet]":
+    """Every funscript set in *folder*, regardless of what else is there.
+
+    This is the Browse path's scanner. `scan_scene_folder` cannot serve it:
+    that function answers "is this folder a library scene?", and returns None
+    unless the folder holds a video, an audio track or an export bundle
+    (`SceneCatalogEntry.is_playable`). A folder of bare scripts fails that gate
+    by design — it is not a scene tile.
+
+    Reusing it for Browse meant a user who kept funscripts in their own
+    directory, apart from the video, could not load one even by picking it
+    explicitly in the file dialog: the pick succeeded and then silently
+    resolved to nothing (user report, 2026-09-13). Browse asks a different
+    question and needs a different function.
+
+    Returns [] for a missing folder or one with no funscripts.
+    """
+    folder_path = Path(folder)
+    if not folder_path.is_dir():
+        return []
+    try:
+        files = sorted(
+            p for p in folder_path.iterdir()
+            if p.is_file() and p.suffix.lower() == FUNSCRIPT_EXT
+        )
+    except OSError:
+        return []
+    return group_funscript_sets(files)
+
+
 def scan_scene_folder(folder: str | os.PathLike) -> SceneCatalogEntry | None:
     """Scan one folder as a scene and return its catalog entry.
 
@@ -310,36 +382,9 @@ def scan_scene_folder(folder: str | os.PathLike) -> SceneCatalogEntry | None:
     # Sort audio: stem-matched first, then alphabetical within each group
     entry.audio_tracks.sort(key=lambda a: (0 if a.stem_matches_main_video else 1, a.filename.lower()))
 
-    # Group funscripts into sets by base stem
-    sets_by_stem: dict[str, FunscriptSet] = {}
-    for path in funscript_files:
-        info = classify_funscript_channel(path.name)
-        fset = sets_by_stem.get(info.base_stem)
-        if fset is None:
-            fset = FunscriptSet(base_stem=info.base_stem)
-            sets_by_stem[info.base_stem] = fset
-
-        if info.channel == "":
-            fset.main_path = str(path)
-        else:
-            fset.channels[info.channel] = str(path)
-
-    # Sort sets: the set whose base stem best matches a video base stem wins;
-    # ties break alphabetically. This way the "plain" Magik set sorts before
-    # the "Magik [E-Stim & Popper Edit]" set — the scanner's default-pick is
-    # the shorter / original-name one.
-    def _set_sort_key(fset: FunscriptSet) -> tuple:
-        stem_lower = fset.base_stem.lower()
-        matches_video = any(stem_lower == v for v in (vs.lower() for vs in video_base_stems))
-        # Shorter stems first (usually the non-edit original), then matches-video,
-        # then alphabetical.
-        return (
-            0 if matches_video else 1,
-            len(fset.base_stem),
-            fset.base_stem.lower(),
-        )
-
-    entry.funscript_sets = sorted(sets_by_stem.values(), key=_set_sort_key)
+    entry.funscript_sets = group_funscript_sets(
+        funscript_files, video_base_stems=video_base_stems,
+    )
 
     # Drop empty scenes
     if not entry.is_playable:

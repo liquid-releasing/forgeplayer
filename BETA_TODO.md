@@ -266,6 +266,29 @@ routing on hybrid-graphics laptops).
 
 ## Missing features (verified absent in v0.0.12)
 
+- [ ] **Find funscripts outside the video's folder.** User report 2026-09-13:
+      "funscript files must be in the same directory or a subdirectory
+      somewhere below the one where the video file is stored to be found... I
+      have organized my directory structure mostly this way." He keeps scripts
+      in a parallel tree, not beside the media.
+
+      The *Browse* half of that report was a bug and is fixed — Browse now
+      loads whatever file you point it at (`funscript_sets_in_folder`). What
+      remains is auto-discovery, which is folder-scoped by design:
+      `scan_library_root` walks level-2 folders and `scan_scene_folder` treats
+      one folder as one scene, so a script in a sibling tree is never seen.
+
+      Shape of the feature: a user-configurable list of additional funscript
+      search roots, matched to videos by the existing `_work_key` /
+      `_name_word_set` logic that already pairs assets by name rather than
+      location. The matcher exists; what's missing is looking anywhere else.
+
+      Worth doing — "my library is organised the other way" is not an unusual
+      way to keep a collection, and the alternative we currently offer him is
+      to reorganise thousands of files around our assumption. Note the risk:
+      matching across trees by name alone will produce false pairs on generic
+      stems, so it needs the same confidence gate the recognizer already uses.
+
 - [ ] **Shaker support** — consume a beat-driven shaker track as another haptic
       channel and route it to a shaker device (audio-channel output). Pipeline:
       forgegen produces the shaker `.funscript` from the audio beat track;
