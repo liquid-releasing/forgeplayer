@@ -207,6 +207,78 @@ def apply_platform_video_kwargs(
     return kwargs
 
 
+def register_video_click_bindings(
+    player,
+    on_double_click: Optional[Callable[[], None]],
+    on_single_click: Optional[Callable[[], None]],
+    *,
+    platform: str = sys.platform,
+) -> Optional[threading.Thread]:
+    """Bind single/double left-click on the video surface. Returns the worker
+    thread the registration ran on, or None if it ran inline.
+
+    mpv owns the video's native child window, so a Qt mouse event on the
+    PlayerWindow never sees clicks over the video — the bindings have to be
+    made at the mpv level. Double-click is the Escape teardown; single-click
+    toggles the on-screen control bar (a double-click fires MBTN_LEFT then
+    MBTN_LEFT_DBL, and the stray single-toggle is invisible because the
+    double-click tears the window down immediately after). Both callbacks run
+    on mpv's event thread and only emit a queued Qt signal, so they are safe
+    to tear down from.
+
+    **macOS registers on a worker thread, and that is the whole point.**
+    `on_key_press` is a synchronous libmpv call (`define-section` +
+    `enable_section`). On macOS, mpv's Cocoa VO needs the **main queue** to
+    build and service its NSWindow — so making that call from the GUI thread,
+    which owns the main queue, deadlocks both sides at ~0% CPU. Measured
+    2026-09-13 on Tahoe 26 (Apple Silicon): with the Qt event loop running,
+    `init_player` blocked here forever, between the `colorspace_hint_done` and
+    `key_bindings_done` DebugLog records. Moving exactly this call off the GUI
+    thread let the same launch reach playback — gpu-next + videotoolbox,
+    30fps, zero frame drops.
+
+    Note this is the SECOND half of the macOS hang. Dropping `wid`
+    (`apply_platform_video_kwargs`) fixed the deadlock inside the mpv
+    constructor; it did not fix this one, it just moved the block one call
+    later. A probe that skips these two registrations plays video fine.
+
+    Windows and Linux keep registering inline, unchanged — neither has a
+    main-queue VO, and a worker thread there would only add a race between
+    registration and the first click for no benefit.
+
+    The registration is fire-and-forget: we deliberately do NOT join the
+    thread, because waiting on the GUI thread would reintroduce the very
+    block this avoids. The bindings only need to exist before the user's
+    first click on the video, which is many frames away.
+
+    *platform* is a parameter so the tests run from any host.
+    """
+
+    def _register() -> None:
+        # python-mpv without on_key_press (older builds) falls back to the
+        # Qt-level handlers on the chrome — hence the per-binding guards.
+        if on_double_click is not None:
+            try:
+                player.on_key_press("MBTN_LEFT_DBL")(on_double_click)
+            except Exception:
+                pass
+        if on_single_click is not None:
+            try:
+                player.on_key_press("MBTN_LEFT")(on_single_click)
+            except Exception:
+                pass
+
+    if platform == "darwin":
+        t = threading.Thread(
+            target=_register, name="fp-mpv-keybind", daemon=True,
+        )
+        t.start()
+        return t
+
+    _register()
+    return None
+
+
 class SyncEngine:
     """Manages up to 3 mpv instances.
 
@@ -390,34 +462,7 @@ class SyncEngine:
             except Exception:
                 pass
             DebugLog.record("player.colorspace_hint_done", slot=slot)
-            # Double-click the video surface = the Escape teardown. mpv owns the
-            # video's native child window, so a Qt mouseDoubleClickEvent on the
-            # PlayerWindow never sees clicks over the video — bind it at the mpv
-            # level instead. on_key_press fires once on the press transition.
-            # The callback runs on mpv's event thread; it just emits a Qt signal
-            # (queued to the GUI thread), so it's safe to tear down from here.
-            if on_double_click is not None:
-                try:
-                    @p.on_key_press("MBTN_LEFT_DBL")
-                    def _on_video_double_click() -> None:
-                        on_double_click()
-                except Exception:
-                    # python-mpv without on_key_press — fall back to the
-                    # Qt-level handler (control bar / chrome only).
-                    pass
-            # Single-click the video surface = toggle the on-screen control
-            # bar (hidden by default). Same rationale as the double-click
-            # binding: mpv owns the video child window, so Qt mousePressEvent
-            # never sees clicks over the video. A double-click fires MBTN_LEFT
-            # then MBTN_LEFT_DBL — the stray single-toggle is invisible because
-            # the double-click tears the window down immediately after.
-            if on_single_click is not None:
-                try:
-                    @p.on_key_press("MBTN_LEFT")
-                    def _on_video_single_click() -> None:
-                        on_single_click()
-                except Exception:
-                    pass
+            register_video_click_bindings(p, on_double_click, on_single_click)
             DebugLog.record("player.key_bindings_done", slot=slot)
             self._players[slot] = p
             return p
