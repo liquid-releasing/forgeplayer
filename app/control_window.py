@@ -35,6 +35,7 @@ from app.player_window import (
 )
 from app.sync_engine import (
     SyncEngine,
+    canonical_device_name,
     is_bluetooth_audio,
     is_display_audio,
 )
@@ -2613,6 +2614,14 @@ class ControlWindow(QMainWindow):
             (self._setup_haptic2_combo, self._prefs.haptic2_audio_device,
              self._haptic_audio_devices),
         ):
+            # A saved id can name a driver the picker no longer lists — mpv
+            # enumerates the same hardware under coreaudio/ AND avfoundation/
+            # on macOS, and the pickers now show one of each pair. Without
+            # this the combo matches nothing, quietly reads "— not set —",
+            # and the user's haptic routing looks forgotten.
+            saved = canonical_device_name(
+                saved, [{"name": name} for name, _ in devices],
+            )
             blocker = combo.blockSignals(True)
             combo.clear()
             combo.addItem("— not set —", "")

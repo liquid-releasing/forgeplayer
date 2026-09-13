@@ -773,8 +773,13 @@ class SyncEngine:
         except Exception:
             return []
         if include_hdmi:
+            # RAW — resolve_audio_device matches saved mpv ids against this,
+            # so nothing may be dropped, duplicates included.
             return devices
-        return [d for d in devices if not _is_display_audio(d)]
+        # Picker list: collapse the same hardware seen through two drivers.
+        return dedupe_driver_duplicates(
+            [d for d in devices if not _is_display_audio(d)]
+        )
 
     @staticmethod
     def list_output_devices() -> list[dict]:
@@ -788,10 +793,105 @@ class SyncEngine:
         (dogfood 2026-09-05). The Setup picker labels them so a genuinely
         speakerless display is still recognizable before it's chosen.
         """
-        return [
+        return dedupe_driver_duplicates([
             d for d in SyncEngine.list_audio_devices(include_hdmi=True)
             if not _is_meta_device(d)
-        ]
+        ])
+
+
+# Audio-output drivers mpv may enumerate the SAME hardware under, best first.
+#
+# macOS is why this exists: mpv lists every physical device twice, once under
+# `coreaudio/` and once under `avfoundation/`, with identical descriptions —
+# so a single USB stim dongle appears as two entries a user has to choose
+# between with nothing to tell them apart. `coreaudio` wins because it is
+# mpv's default and native macOS output; `avfoundation` is the alternative.
+#
+# Linux duplicates the same way (pulse/pipewire/alsa/jack all enumerate the
+# same cards) and is ordered to match mpv's own default preference rather than
+# to re-litigate Linux audio. Windows has only `wasapi/`, which is why this was
+# never seen there.
+_AO_DRIVER_PRIORITY = (
+    "wasapi", "coreaudio", "pulse", "pipewire", "alsa", "jack",
+    "avfoundation", "sndio", "oss",
+)
+
+
+def _split_ao_name(name: str) -> tuple[str, str]:
+    """('coreaudio/BuiltInSpeakerDevice') -> ('coreaudio', 'BuiltInSpeakerDevice')."""
+    driver, sep, device_id = (name or "").partition("/")
+    return (driver, device_id) if sep else ("", name or "")
+
+
+def dedupe_driver_duplicates(
+    devices: list[dict], *, priority: tuple[str, ...] = _AO_DRIVER_PRIORITY,
+) -> list[dict]:
+    """Collapse entries that are the same hardware seen through different
+    mpv audio drivers, keeping the highest-priority driver for each.
+
+    **Keyed on the device id after the driver prefix, never on the
+    description.** Two identical USB dongles — exactly the setup ForgePlayer
+    supports for Haptic 1 + Haptic 2 — both describe themselves as e.g.
+    "USB Advanced Audio Device", so collapsing by description would silently
+    merge two distinct physical boxes into one and make the second
+    unroutable. The id carries the USB location (`…:110000:2,1`) and stays
+    distinct.
+
+    Order is preserved by first appearance, so the list doesn't reshuffle
+    under the user when a device is plugged in. Entries with no `driver/`
+    prefix are passed through untouched.
+
+    For the PICKERS only. The raw list must keep every entry, because
+    `resolve_audio_device` matches saved mpv ids against it and a saved id
+    naming a dropped driver still has to resolve.
+    """
+    def rank(driver: str) -> int:
+        try:
+            return priority.index(driver)
+        except ValueError:
+            return len(priority)
+
+    best: dict[str, dict] = {}
+    order: list[str] = []
+    for device in devices:
+        driver, device_id = _split_ao_name(device.get("name", "") or "")
+        if not driver:
+            key = f"\x00raw\x00{device_id}"
+        else:
+            key = device_id
+        if key not in best:
+            best[key] = device
+            order.append(key)
+            continue
+        incumbent_driver, _ = _split_ao_name(best[key].get("name", "") or "")
+        if rank(driver) < rank(incumbent_driver):
+            best[key] = device
+    return [best[k] for k in order]
+
+
+def canonical_device_name(name: str, devices: list[dict]) -> str:
+    """Map a saved device id onto the equivalent entry present in *devices*.
+
+    A preference saved before deduplication (or on another machine) can name
+    a driver the pickers no longer offer — `avfoundation/X` when the list now
+    shows `coreaudio/X`. Without this the combo finds no match, silently
+    shows "not set", and the user's haptic routing looks forgotten. Matching
+    on the driver-independent device id restores it.
+
+    Returns *name* unchanged when it is already present or has no equivalent.
+    """
+    if not name:
+        return name
+    names = {d.get("name") for d in devices}
+    if name in names:
+        return name
+    _, device_id = _split_ao_name(name)
+    if not device_id:
+        return name
+    for device in devices:
+        if _split_ao_name(device.get("name", "") or "")[1] == device_id:
+            return device.get("name", "") or name
+    return name
 
 
 def _is_meta_device(device: dict) -> bool:
