@@ -43,7 +43,7 @@ every play, pause, and scrub.
 
     Producing HDR10 content (Topaz Video AI workflows). Note: HDR
     *passthrough* in the player is still disabled for stability as of
-    v0.1.20-alpha — see the page for details.
+    v0.1.21-alpha — see the page for details.
 
 </div>
 
@@ -108,9 +108,9 @@ double-click a `.forge`.
 
 ## Download
 
-**v0.1.20-alpha — released 2026-09-13.**
+**v0.1.21-alpha — released 2026-09-13.**
 
-[:material-download: Download v0.1.20-alpha (Windows / macOS)](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest){ .md-button .md-button--primary }
+[:material-download: Download v0.1.21-alpha (Windows / macOS)](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest){ .md-button .md-button--primary }
 
 !!! success "macOS: this is the first build that works"
 

@@ -835,6 +835,7 @@ class ControlWindow(QMainWindow):
             "Funscript or audio file that drives the haptics. "
             "Choose None for silent stim.",
             store_as="_stim_browse_btn",
+            path_attr="_stim_source_path_label",
         ))
 
         # Haptic 1 carries the full e-stim channel set (FOC_STIM scenes can run
@@ -976,7 +977,11 @@ class ControlWindow(QMainWindow):
         slot0 = self._slots[0]
         video_path: str = slot0.get("video_path", "")
         if video_path:
-            self._video_file_label.setText(os.path.basename(video_path))
+            # Elided full path, not just the basename. The filename alone
+            # doesn't say WHERE a source came from, and since Browse can pull a
+            # file from any folder on disk that's the question users actually
+            # have (request 2026-09-13). Full path still on hover.
+            self._video_file_label.setText(self._elide_path(video_path))
             self._video_file_label.setToolTip(video_path)
         else:
             self._video_file_label.setText("(no scene loaded)")
@@ -1612,6 +1617,7 @@ class ControlWindow(QMainWindow):
     def _labeled_row_with_browse(
         self, label_text: str, combo: QComboBox, on_browse, help_text: str = "",
         store_as: str | None = None,
+        path_attr: str | None = None,
     ) -> QVBoxLayout:
         """Source-picker row: bold label, then [combo | Browse…], then help.
         Browse opens the native picker at the current scene folder so the user
@@ -1636,12 +1642,55 @@ class ControlWindow(QMainWindow):
             setattr(self, store_as, btn)
         h.addWidget(btn)
         row.addLayout(h)
+        # Where the selected file actually came from. The combo shows a name —
+        # a base stem for funscript sets, a variant label for video — which
+        # says nothing about location. That was fine while every source lived
+        # in the scene folder, but Browse can now load a funscript from any
+        # directory on disk, so "which one is selected?" became a real question
+        # (user request 2026-09-13). One muted line, kept to a single row so
+        # the control panel still fits its 720px height budget; the full path
+        # is in the tooltip.
+        if path_attr:
+            plabel = QLabel("")
+            plabel.setStyleSheet("color: #7c8497; font-size: 10px;")
+            plabel.setWordWrap(False)
+            plabel.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            setattr(self, path_attr, plabel)
+            row.addWidget(plabel)
         if help_text:
             helper = QLabel(help_text)
             helper.setStyleSheet("color: #6b7280; font-size: 11px;")
             helper.setWordWrap(True)
             row.addWidget(helper)
         return row
+
+    @staticmethod
+    def _elide_path(path: str, limit: int = 72) -> str:
+        """Shorten a long path from the MIDDLE, keeping the tail.
+
+        The end of a path — the folder and filename — is what identifies a
+        file; the drive and intermediate directories rarely do. So keep a short
+        head for orientation and as much tail as fits.
+        """
+        if len(path) <= limit:
+            return path
+        head = path[:12]
+        tail = path[-(limit - len(head) - 1):]
+        return f"{head}…{tail}"
+
+    def _set_source_path_label(self, attr: str, path: str | None) -> None:
+        """Show the folder a selected source came from, full path on hover."""
+        label = getattr(self, attr, None)
+        if label is None:
+            return
+        if not path:
+            label.setText("—")
+            label.setToolTip("")
+            return
+        label.setText(self._elide_path(path))
+        label.setToolTip(path)
 
     def _browse_start_dir(self) -> str:
         """Folder the source-Browse dialogs open at — the active scene's folder
@@ -1981,6 +2030,34 @@ class ControlWindow(QMainWindow):
                     sc.setCurrentIndex(i)
                     break
         sc.blockSignals(False)
+        self._set_source_path_label(
+            "_stim_source_path_label", self._current_stim_source_path(),
+        )
+
+    def _current_stim_source_path(self) -> str | None:
+        """A representative file path for whatever is driving the haptics.
+
+        An audio pick is one file. A funscript SET is several — main track plus
+        channels — so report `main_path` when there is one, else any channel:
+        they share a folder, which is the part that tells the user where this
+        came from. A set browsed in from outside the scene folder often has no
+        main track at all (an e-stim export is all channels), so falling back to
+        a channel is the normal case, not an edge case.
+        """
+        choices = self._current_choices
+        if choices is None:
+            return None
+        if choices.audio is not None:
+            return choices.audio.path
+        fset = choices.funscript_set
+        if fset is None:
+            return None
+        if fset.main_path:
+            return fset.main_path
+        for ch in sorted(fset.channels):
+            if fset.channels[ch]:
+                return fset.channels[ch]
+        return None
 
     @staticmethod
     def _video_variant_label(v) -> str:
