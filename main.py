@@ -152,6 +152,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon, QPalette, QColor
 from PySide6.QtCore import QTimer
 from app.control_window import ControlWindow
+from app.locale_guard import force_c_numeric_locale
 
 # Branding directory siblings main.py at runtime (dev) and ships next
 # to the executable in PyInstaller bundles. Look for the multi-res ICO
@@ -200,6 +201,12 @@ def _first_path_arg(args: list[str]) -> str | None:
 
 def main() -> None:
     app = QApplication(sys.argv)
+    # MUST come after QApplication, which calls setlocale(LC_ALL, "") on Unix
+    # and thereby undoes the LC_NUMERIC="C" that importing python-mpv set.
+    # libmpv aborts handle creation under a non-C LC_NUMERIC, so without this
+    # the app quits at launch on any machine with a real LANG — i.e. every Mac
+    # and Linux desktop, while CI (LANG unset) stayed green. See app/locale_guard.py.
+    force_c_numeric_locale()
     app.setStyle("Fusion")
     app.setPalette(_dark_palette())
     icon = _resolve_icon()
