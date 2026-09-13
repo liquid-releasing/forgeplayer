@@ -771,10 +771,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#integration-plan" class="md-nav__link">
+  <a href="#how-it-was-integrated" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Integration plan
+        How it was integrated
       
     </span>
   </a>
@@ -793,10 +793,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#correction-to-macos_session_handoffmd" class="md-nav__link">
+  <a href="#two-things-the-old-handoff-note-got-wrong" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Correction to MACOS_SESSION_HANDOFF.md
+        Two things the old handoff note got wrong
       
     </span>
   </a>
@@ -824,7 +824,11 @@
 
 
 <h1 id="macos-video-moving-to-the-libmpv-render-api">macOS video: moving to the libmpv render API<a class="headerlink" href="#macos-video-moving-to-the-libmpv-render-api" title="Permanent link">&para;</a></h1>
-<p>Status: <strong>spike validated 2026-09-13, integration not started.</strong></p>
+<p>Status: <strong>shipped 2026-09-13.</strong> Integrated, and verified playing on Mac Neo
+(Tahoe 26, Apple Silicon) — video in-window, timeline scrubbing working from
+both the scene window and the control panel. This file is now the reference
+for <em>why</em> the macOS path looks the way it does; <code>ARCHITECTURE.md</code> → "The video
+surface" is the shorter overview.</p>
 <p>This is the design note for replacing the macOS video path with
 <code>vo=libmpv</code> + <code>mpv_render_context</code>. It exists because the spike that proved
 the approach cost several wrong turns, and none of that is obvious from the
@@ -838,8 +842,8 @@ mpv's <code>core</code> thread waits on <code>vo</code>, and everything wedges a
 never recovers. Three separate fixes (drop <code>wid</code>, register key bindings off
 the GUI thread, pump the main queue during VO creation) each removed one
 instance of that collision and each only revealed the next. They are all
-still in <code>app/platform_video.py</code> and all still necessary for the current
-path, but they treat instances of a class. <code>vo=libmpv</code> removes the class:
+still in <code>app/platform_video.py</code>, now gated to the legacy <code>wid</code>/<code>force_window</code>
+paths, but they treat instances of a class. <code>vo=libmpv</code> removes the class:
 there is no Cocoa VO, so nothing ever needs the main queue, and ordinary
 GUI-thread property reads become safe again.</p>
 <h2 id="what-the-spike-measured">What the spike measured<a class="headerlink" href="#what-the-spike-measured" title="Permanent link">&para;</a></h2>
@@ -911,34 +915,54 @@ libmpv's requirement.</p>
 </ol>
 <p><code>update_cb</code> fires on mpv's render thread and must hop to the GUI thread
 before touching any widget — a queued Qt signal is the cheap way.</p>
-<h2 id="integration-plan">Integration plan<a class="headerlink" href="#integration-plan" title="Permanent link">&para;</a></h2>
+<h2 id="how-it-was-integrated">How it was integrated<a class="headerlink" href="#how-it-was-integrated" title="Permanent link">&para;</a></h2>
 <p><strong>macOS only. Windows and Linux stay on <code>wid</code>.</strong> They work today and <code>wid</code>
 embedding is well-trodden there; two render paths is a real maintenance
 cost, but far cheaper than destabilising the platform that currently ships.
 The split belongs behind one seam, not sprinkled through <code>PlayerWindow</code>.</p>
 <ol>
-<li><code>app/video_surface.py</code> — a <code>QOpenGLWidget</code> owning the render context,
-   with the three rules above encoded and commented. Exposes create /
-   render / free and nothing else.</li>
-<li><code>PlayerWindow</code> gains a video-surface seam: on darwin it embeds the
-   widget; elsewhere it keeps handing <code>native_wid()</code> to <code>init_player</code>.</li>
-<li><code>SyncEngine.init_player</code> learns a render-context mode that sets
-   <code>vo=libmpv</code> and skips the <code>wid</code> path.</li>
-<li>Teardown ordering: free the render context on the GUI thread first, then
-   the existing off-thread <code>terminate_player_async</code> dance.</li>
+<li><code>app/video_surface.py</code> — one interface (<code>widget</code> / <code>native_wid</code> /
+   <code>attach</code> / <code>detach</code>), two implementations: <code>NativeWindowSurface</code> for
+   <code>--wid</code>, <code>RenderSurface</code> for the render API, with the three rules above
+   encoded and commented.</li>
+<li><code>PlayerWindow</code> holds a surface instead of a bare widget and never
+   branches on platform; <code>attach_player</code> / <code>detach_player</code> are the seam.</li>
+<li><code>apply_platform_video_kwargs</code> sets <code>vo=libmpv</code> on darwin and drops both
+   <code>wid</code> and <code>force_window</code>. Callers detect the path with
+   <code>kwargs.get("vo") == "libmpv"</code>.</li>
+<li>Teardown: <code>detach_player()</code> on the GUI thread first, while the player is
+   still alive, then the existing off-thread <code>terminate_player_async</code>.</li>
+<li>The two Cocoa-VO workarounds in <code>platform_video.py</code> are gated off the
+   render path, including the mpv click bindings — Qt owns the surface now,
+   so PlayerWindow's own mouse handlers cover the video.</li>
 </ol>
+<p>Both earlier attempts remain reachable for A/B without a rebuild:
+<code>FORGEPLAYER_MACOS_EMBED=wid</code> (original) and <code>=window</code> (the <code>force_window</code>
+stopgap). They are controls, not fallbacks — both still hang.</p>
 <h2 id="what-this-buys-back">What this buys back<a class="headerlink" href="#what-this-buys-back" title="Permanent link">&para;</a></h2>
 <p>The <code>force_window</code> stopgap cost macOS the Qt chrome overlay — the control
 bar — because mpv owned a detached window. With the render API <strong>Qt owns
 the surface</strong>, so the overlay returns and clicks can be handled as ordinary
 Qt mouse events. That retires <code>register_video_click_bindings</code> on the render
 path (keep it for Windows/Linux, which still use <code>wid</code>).</p>
-<h2 id="correction-to-macos_session_handoffmd">Correction to MACOS_SESSION_HANDOFF.md<a class="headerlink" href="#correction-to-macos_session_handoffmd" title="Permanent link">&para;</a></h2>
-<p>That doc tells the next session <strong>not</strong> to chase Vulkan/MoltenVK, calling it
-the wrong layer. The sampled stack from the real hang goes straight through
-<code>mac_vk_init</code>, so the original reporter's instinct about the layer was
-closer than that note allows. The doc's own closing suggestion — that the
-render API is the real fix — is the part that held up.</p>
+<h2 id="two-things-the-old-handoff-note-got-wrong">Two things the old handoff note got wrong<a class="headerlink" href="#two-things-the-old-handoff-note-got-wrong" title="Permanent link">&para;</a></h2>
+<p><code>MACOS_SESSION_HANDOFF.md</code> was deleted with this change, as it asked to be
+once macOS playback was settled. Two of its conclusions are worth preserving
+as corrections, because both cost time:</p>
+<ul>
+<li>It told the next session <strong>not</strong> to chase Vulkan/MoltenVK, calling it the
+  wrong layer. The sampled stack from the real hang goes straight through
+  <code>mac_vk_init</code>. The original reporter's instinct about the layer was closer
+  than that note allowed.</li>
+<li>It presented the <code>force_window</code> stopgap as very likely the fix, pending
+  verification. It was not — it moved the deadlock rather than removing it.
+  Its closing suggestion, that the render API is the real fix, is the part
+  that held up.</li>
+</ul>
+<p>The general lesson, which is the one worth carrying: on macOS this failure
+mode <strong>moves</strong> under partial fixes instead of disappearing, so "it got
+further this time" is not evidence of progress toward a fix. Sample the hung
+process and read the actual stacks.</p>
 
 
 
