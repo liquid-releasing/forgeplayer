@@ -14,6 +14,12 @@ fixable from inside the process.
 
 Everything here is injected, so the behaviour is verified from Windows and
 Linux CI too, with no bundle and no dylib on disk.
+
+Expected paths are run through `os.path.normpath` rather than written as
+literals. The helper normalises what it returns, and normpath is itself
+platform-dependent — it rewrites "/" as "\\" on Windows — so hardcoding the
+POSIX form passed on a Mac and failed the Windows runner, which is exactly
+the split these tests exist to cover.
 """
 
 from __future__ import annotations
@@ -43,8 +49,9 @@ def test_points_dyld_at_the_bundle_when_frozen_on_macos():
         isfile=_isfile_for("/App.app/Contents/Frameworks/libmpv.2.dylib"),
     )
 
-    assert got == "/App.app/Contents/Frameworks"
-    assert env["DYLD_LIBRARY_PATH"] == "/App.app/Contents/Frameworks"
+    expected = os.path.normpath("/App.app/Contents/Frameworks")
+    assert got == expected
+    assert env["DYLD_LIBRARY_PATH"] == expected
 
 
 @pytest.mark.parametrize("platform", ["win32", "linux"])
@@ -94,7 +101,7 @@ def test_finds_the_dylib_in_a_sibling_layout():
         isfile=_isfile_for("/App.app/Contents/Frameworks/libmpv.2.dylib"),
     )
 
-    assert got == "/App.app/Contents/Frameworks"
+    assert got == os.path.normpath("/App.app/Contents/Frameworks")
 
 
 def test_existing_dyld_path_is_kept_after_ours():
@@ -107,6 +114,5 @@ def test_existing_dyld_path_is_kept_after_ours():
         isfile=_isfile_for("/App.app/Contents/Frameworks/libmpv.dylib"),
     )
 
-    assert env["DYLD_LIBRARY_PATH"] == (
-        f"/App.app/Contents/Frameworks{os.pathsep}/my/custom/libs"
-    )
+    expected = os.path.normpath("/App.app/Contents/Frameworks")
+    assert env["DYLD_LIBRARY_PATH"] == f"{expected}{os.pathsep}/my/custom/libs"
