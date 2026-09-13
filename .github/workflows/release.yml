@@ -35,10 +35,38 @@ jobs:
 
       - name: Fetch libmpv-2.dll from shinchiro mpv-dev release
         shell: pwsh
+        env:
+          # AUTHENTICATE the API call. Unauthenticated api.github.com allows 60
+          # requests per hour PER IP, and Actions runners share their egress
+          # IPs with every other job on the fleet — so this step failed with
+          # "API rate limit exceeded for <ip>" purely by luck of timing. It
+          # succeeded for v0.1.21-alpha and failed twelve minutes later for
+          # v0.1.22-alpha with no change to the workflow. GITHUB_TOKEN raises
+          # the limit to 1000/hr for this repository and removes the dependency
+          # on a stranger's traffic; reading another repo's public releases
+          # needs no extra scope.
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ProgressPreference = "SilentlyContinue"
-          $release = Invoke-RestMethod `
-            -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+          $headers = @{
+            "Authorization" = "Bearer $env:GH_API_TOKEN"
+            "Accept"        = "application/vnd.github+json"
+            "User-Agent"    = "forgeplayer-ci"
+          }
+          # Retry anyway: an authenticated limit is still a limit, and a
+          # transient 5xx from the API should not fail a release build.
+          $release = $null
+          foreach ($attempt in 1..4) {
+            try {
+              $release = Invoke-RestMethod -Headers $headers `
+                -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+              break
+            } catch {
+              Write-Host "API attempt $attempt failed: $($_.Exception.Message)"
+              if ($attempt -eq 4) { throw }
+              Start-Sleep -Seconds (5 * $attempt)
+            }
+          }
           $asset = $release.assets |
             Where-Object { $_.name -like "mpv-dev-x86_64-2*" } |
             Select-Object -First 1
@@ -52,7 +80,7 @@ jobs:
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmp
           7z e $tmp -o"$env:GITHUB_WORKSPACE" "libmpv-2.dll" -y
           if (-not (Test-Path "$env:GITHUB_WORKSPACE\libmpv-2.dll")) {
-            Write-Error "libmpv-2.dll not extracted"
+            Write-Error "libmpv-2.dll not extracted from $($asset.name) — the asset layout may have changed upstream"
             exit 1
           }
 

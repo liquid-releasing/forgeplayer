@@ -25,6 +25,7 @@ collector reclaim.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -690,16 +691,17 @@ class _FakeSet:
 def test_unresolvable_pick_is_logged_not_swallowed(control_window, debug_events):
     """fset=None is exactly the old bug's symptom. It must say so."""
     win = control_window
-    win._on_stim_folder_scanned(r"C:\somewhere\X.funscript", None)
+    picked = os.path.join("somewhere", "X.funscript")
+    win._on_stim_folder_scanned(picked, None)
     got = _of_kind(debug_events, "browse.stim_unresolved")
     assert got, f"nothing logged; saw {_kinds(debug_events)}"
-    assert got[0]["path"] == r"C:\somewhere\X.funscript"
+    assert got[0]["path"] == picked
 
 
 def test_a_scan_landing_after_close_is_logged(control_window, debug_events):
     win = control_window
     win._current_entry = None
-    win._on_stim_folder_scanned(r"C:\a\B.funscript", _FakeSet())
+    win._on_stim_folder_scanned(os.path.join("a", "B.funscript"), _FakeSet())
     got = _of_kind(debug_events, "browse.stim_discarded")
     assert got and "no scene loaded" in got[0]["reason"]
 
@@ -710,7 +712,7 @@ def test_a_scan_landing_after_a_scene_switch_is_logged(control_window, debug_eve
     win._current_entry = _scene("Scene A")
     win._current_choices = object()
     win._stim_scan_target_entry = _scene("Scene B")   # user moved on
-    win._on_stim_folder_scanned(r"C:\a\B.funscript", _FakeSet())
+    win._on_stim_folder_scanned(os.path.join("a", "B.funscript"), _FakeSet())
     got = _of_kind(debug_events, "browse.stim_discarded")
     assert got and "scene changed" in got[0]["reason"]
 
@@ -737,15 +739,20 @@ def test_a_resolved_set_logs_its_folder_and_channels(control_window, debug_event
 
     fset = _FakeSet(
         stem="Victoriaoaks - Wet Dreams 1080p 30fps",
-        channels={"alpha": r"C:\out\s.alpha.funscript",
-                  "beta": r"C:\out\s.beta.funscript"},
+        channels={"alpha": os.path.join("out", "s.alpha.funscript"),
+                  "beta": os.path.join("out", "s.beta.funscript")},
     )
-    win._on_stim_folder_scanned(r"C:\my_scripts_elsewhere\s.alpha.funscript", fset)
+    # os.path.join, not a hardcoded drive-letter literal: on POSIX a
+    # backslash is not a separator, so os.path.dirname returned "" and this
+    # assertion passed on Windows while failing on macOS and Linux.
+    folder = "my_scripts_elsewhere"
+    picked = os.path.join(folder, "s.alpha.funscript")
+    win._on_stim_folder_scanned(picked, fset)
 
     got = _of_kind(debug_events, "browse.stim_resolved")
     assert got, f"nothing logged; saw {_kinds(debug_events)}"
     e = got[0]
-    assert e["folder"] == r"C:\my_scripts_elsewhere"
+    assert e["folder"] == folder
     assert e["channels"] == ["alpha", "beta"]
     assert e["has_main_track"] is False
     assert e["base_stem"] == "Victoriaoaks - Wet Dreams 1080p 30fps"
