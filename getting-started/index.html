@@ -1148,7 +1148,8 @@ separately and want everything on one timeline, this is the path.</p>
 install — everything is bundled.</p>
 <ul>
 <li><strong><a href="https://forgeplayer.app/">forgeplayer.app</a></strong> — direct download buttons
-  for Windows / macOS / Linux on the landing page.</li>
+  for Windows / macOS on the landing page. (A Linux build exists but is
+  untested — see below.)</li>
 <li><strong><a href="https://github.com/liquid-releasing/forgeplayer-releases/releases/latest">GitHub Releases</a></strong> —
   same builds, plus older versions and changelogs.</li>
 </ul>
@@ -1172,12 +1173,23 @@ install — everything is bundled.</p>
 <td>Unzip — nothing else to install. Then see the macOS note below: the app isn't notarized yet, so Gatekeeper blocks the first launch</td>
 </tr>
 <tr>
-<td>Linux</td>
+<td>Linux <em>(untested)</em></td>
 <td><code>ForgePlayer-linux.tar.gz</code></td>
-<td>Extract, run <code>ForgePlayer/ForgePlayer</code></td>
+<td>Extract, run <code>ForgePlayer/ForgePlayer</code>. Builds on every release but has never been dogfooded, so it isn't listed on the website and isn't supported yet — see the note below.</td>
 </tr>
 </tbody>
 </table>
+<div class="admonition info">
+<p class="admonition-title">Linux: builds, but untested</p>
+<p>A Linux tarball is produced on every release and attached to the GitHub
+release page, so you can try it. It is <strong>not</strong> offered on the website and
+we don't call it supported, for one honest reason: nobody has run a Linux
+build end to end yet. Video, audio routing and e-stim output have all been
+dogfooded on Windows and macOS; none of it has been on Linux.</p>
+<p>If you do try it, reports are genuinely welcome — that's what would move it
+to supported. Linux is planned to be a first-class platform for the 1.0
+release.</p>
+</div>
 <div class="admonition warning">
 <p class="admonition-title">macOS: getting past Gatekeeper on the first launch</p>
 <p>ForgePlayer isn't notarized yet, so macOS blocks it the first time with
@@ -1409,8 +1421,13 @@ scene — it's a signal-path check, not a content preview.</p>
   device resolves — ForgePlayer will not route e-stim to your speakers. Still
   silent with a valid device? Try <strong>Calibrate H1</strong> to isolate wiring vs
   playback.</li>
-<li><strong>Sound plays but there's no picture</strong> — go to <strong>Setup → Graphics</strong> and tick
-  <strong>Use the default graphics adapter</strong>, then press <strong>Launch Players</strong> again.
+<li><strong>Sound plays but there's no picture</strong> — largely fixed in <strong>v0.1.20-alpha</strong>;
+  update first. The cause was ForgePlayer steering video onto an NVIDIA GPU on
+  machines that had no reason for it, which on an Intel + NVIDIA laptop meant
+  the video surface stayed black while audio, timeline and transport all worked
+  normally. If you still see it after updating, go to <strong>Setup → Graphics</strong> and
+  tick <strong>Use the default graphics adapter</strong>, then press <strong>Launch Players</strong>
+  again.
   ForgePlayer normally steers video onto an NVIDIA GPU when it finds one, to
   avoid a known AMD driver crash; on some machines that choice can't be
   resolved and video silently fails to start while audio keeps going. That
