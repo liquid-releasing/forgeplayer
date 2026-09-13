@@ -66,6 +66,13 @@ your scene audio can't be sent to the same port by accident.
 **Use the default graphics adapter** — tick this if you hear sound but see no
 picture.
 
+Since **v0.1.20-alpha** this should rarely be needed. ForgePlayer now steers
+video onto an NVIDIA GPU only on machines that also have an AMD adapter — the
+one case it was ever meant for. Before that it fired on any machine with an
+NVIDIA card, and on an Intel + NVIDIA laptop that produced a black video
+surface with working audio, timeline and transport. The checkbox remains for
+any machine that still fails in a way we can't predict.
+
 ForgePlayer normally steers video onto an NVIDIA GPU when it detects one,
 because mpv's video teardown hits a confirmed, unfixed access violation in
 AMD's D3D11 driver. That detection reads Windows' display-adapter list, which

@@ -156,8 +156,9 @@ point at your **USB dongle** (not "Speakers"), that **Scene audio** is a *differ
 device, then reselect and **Refresh devices** — and please report it if it persists.
 
 **Sound plays but there's no picture.**
-Open **Setup → Graphics** and tick **Use the default graphics adapter**, then
-press **Launch Players** again.
+Largely fixed in **v0.1.20-alpha** — update first. If it persists, open
+**Setup → Graphics**, tick **Use the default graphics adapter**, and press
+**Launch Players** again.
 
 ForgePlayer pins video to an NVIDIA GPU when it detects one, because mpv's
 teardown hits a confirmed, unfixed crash in AMD's D3D11 driver. Detection reads
