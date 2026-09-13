@@ -5231,9 +5231,31 @@ class ControlWindow(QMainWindow):
                 )
                 continue
             if screen_idx >= len(self._screens):
-                # Stale index — a monitor was unplugged, or Setup remembers a
-                # richer display setup than is attached. Falling back to the
-                # primary is right here: the slot IS meant to have a screen.
+                # The assigned screen isn't attached — Setup remembers more
+                # displays than are plugged in right now, which is the common
+                # state for a laptop that is sometimes docked.
+                #
+                # What to do depends on the slot's ROLE, and this is where the
+                # duplicate-window bug actually lived. A MIRROR exists only to
+                # put the same video on an ADDITIONAL screen; if that screen is
+                # gone there is nothing to mirror onto, and falling back to the
+                # primary stacks a second, identical window directly on top of
+                # the real player. Users saw two windows on a single monitor
+                # whenever Setup had two playback screens ticked and only one
+                # was attached — and the mirror is muted, so the top window was
+                # a silent duplicate covering the one they wanted.
+                if _SLOT_ROLES[i] == "mirror":
+                    DebugLog.record(
+                        "players.slot_skipped",
+                        slot=i,
+                        role="mirror",
+                        reason="assigned screen is not attached",
+                        wanted_screen_idx=screen_idx,
+                        screens_attached=len(self._screens),
+                    )
+                    continue
+                # The primary video slot must always play somewhere, so for it
+                # the fallback is right.
                 screen_idx = 0
                 fell_back_to_primary = True
             else:

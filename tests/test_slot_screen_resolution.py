@@ -71,12 +71,35 @@ def test_unchecked_playback_list_falls_back_to_slot_position():
     assert _resolve(2, [], 0) == 0
 
 
-def test_stale_index_is_left_for_the_caller_to_clamp():
+def test_stale_index_is_left_for_the_caller_to_decide():
     """A checked screen that no longer exists (monitor unplugged) resolves to
-    its remembered index, NOT None — the launch loop clamps that to the primary
-    on purpose, because this slot really is meant to have a screen. Keeping the
-    two cases distinguishable here is the whole fix."""
+    its remembered index, NOT None. The launch loop decides what to do with it
+    by role — clamp for the video slot, skip for a mirror — so the two cases
+    must stay distinguishable here."""
     got = _resolve(1, [2], 0)
 
     assert got == 2
     assert got is not None
+
+
+def test_two_screens_checked_but_one_attached_is_the_duplicate_window_case():
+    """THE reported bug, exactly.
+
+    Setup has two playback screens ticked; only one monitor is plugged in.
+    Library activation mirrors the video into slot 2 whenever two or more
+    screens are checked, so the mirror resolves to screen 1 — which does not
+    exist. Clamping that to the primary put a second, MUTED window directly on
+    top of the real player: users saw two windows on one monitor, the visible
+    one silent.
+
+    The resolver's job is to report 1 honestly. `_on_launch` skips mirrors
+    whose screen is not attached rather than clamping them.
+    """
+    assert _SLOT_ROLES[2] == "mirror"
+
+    mirror_screen = _resolve(1, [0, 1], 2)
+
+    assert mirror_screen == 1
+    assert mirror_screen >= 1  # i.e. >= len(screens): not attached
+    # The real video slot is unaffected and still plays on the one monitor.
+    assert _resolve(1, [0, 1], 0) == 0
