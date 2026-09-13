@@ -50,7 +50,13 @@ Everything runs in one process. Threads:
 - **mpv's own event/render thread(s)** — every `mpv.MPV()` instance owns its
   own internal threads (demux, decode, GPU-context/render). ForgePlayer never
   touches these directly; it only issues property sets and commands through
-  `python-mpv`.
+  `python-mpv`. **On macOS these threads are not passive:** mpv's `vo` thread
+  `dispatch_sync`s onto the main queue, so a blocking libmpv call made from
+  the GUI thread can deadlock against it. That is the reason macOS renders
+  through `vo=libmpv` rather than `--wid` — see "The video surface" below.
+  On the render path mpv's update callback also fires on mpv's render thread
+  and is marshalled to the GUI thread by a queued signal before any widget is
+  touched (`_RenderBridge`).
 - **sounddevice audio callback thread(s)** — `StimAudioStream` (see
   `docs/architecture/audio-routing.md`) opens a `sounddevice.OutputStream`
   per haptic destination; the audio callback pulls PCM from whatever
@@ -149,9 +155,13 @@ mpv's D3D11 context onto the NVIDIA adapter.
 ### `PlayerWindow` (`app/player_window.py`)
 
 One borderless `QWidget` per active video/mirror slot, sized to and placed
-on one `QScreen` (`place_on_screen`). mpv renders directly into the window's
+on one `QScreen` (`place_on_screen`). The video area is a **video surface**
+(`app/video_surface.py`) rather than a plain widget, because how mpv draws
+differs by platform: on Windows/Linux mpv renders directly into the surface's
 native handle (`native_wid()`), embedded after `show()` so the handle is
-valid. A hidden-by-default overlay control bar (48 px) has Prev-chapter /
+valid; on macOS the surface is a `QOpenGLWidget` that mpv renders into via
+`mpv_render_context`, bound by `attach()` after the player is constructed.
+See "The video surface" above. A hidden-by-default overlay control bar (48 px) has Prev-chapter /
 Play-Pause / Next-chapter plus a seek bar and time labels — added the same
 day as the crash-fix work. Escape or a double-click on the video surface (an
 mpv-level key binding, since mpv owns that native child window) asks
@@ -159,6 +169,53 @@ mpv-level key binding, since mpv owns that native child window) asks
 `QTimer.singleShot(0, …)` so the teardown never runs on the same call stack
 as the event handler that triggered it (a same-stack teardown was an
 intermittent use-after-free on close).
+
+### The video surface — two implementations behind one seam (`app/video_surface.py`)
+
+How mpv gets pixels onto a `PlayerWindow` **is not the same on every
+platform**, and that split is deliberate and load-bearing.
+
+| | Windows / Linux | macOS |
+| --- | --- | --- |
+| mechanism | `--wid` embedding | `vo=libmpv` + `mpv_render_context` |
+| who owns the surface | mpv | Qt (`QOpenGLWidget`) |
+| graphics API | **D3D11** (Win) / OpenGL (Linux) | OpenGL 4.1 core |
+| class | `NativeWindowSurface` | `RenderSurface` |
+
+**Why macOS is different.** libmpv's macOS backend creates and resizes its
+NSWindow on mpv's own `vo` thread using `dispatch_sync` onto the **main
+queue** — which Qt's main thread owns. Whenever the GUI thread is busy, or is
+itself inside a blocking libmpv call, `vo` waits on the GUI thread, `core`
+waits on `vo`, and the process wedges at ~0% CPU without recovering. Three
+successive fixes in `app/platform_video.py` each removed one instance of that
+collision and each only revealed the next one. `vo=libmpv` removes the
+*class*: there is no Cocoa VO, so nothing ever needs the main queue, and
+ordinary GUI-thread property reads (`_poll` reading `time_pos`) are safe
+again. Full measurements and the three non-obvious rules the spike paid for
+are in `docs/macos_render_api.md`.
+
+**Why the two paths are not unified.** libmpv's render API supports only
+`MPV_RENDER_API_TYPE_OPENGL` and `..._SW` — there is no D3D11 render type. So
+adopting it everywhere would move Windows off D3D11 onto OpenGL, and take
+**HDR passthrough** (`target-colorspace-hint`, `hdr_compute_peak`,
+`tone_mapping=bt.2390`) with it, on the platform with the most users and the
+weaker GL driver stack. Two paths is the cheaper of the two costs. The price
+is that `RenderSurface` is exercised on one platform only, which is why the
+module's decisions take `platform` as a parameter — Windows and Linux CI run
+its logic even though they never run its GL.
+
+If mpv's D3D11 teardown crash (see "The crash-fix architecture") ever proves
+genuinely unfixable, the move is **not** a global unify but an opt-in OpenGL
+render path for AMD Windows machines specifically, behind this same seam.
+
+`PlayerWindow` holds one surface and never branches on platform:
+`widget()`, `native_wid()` (None on the render path), `attach(player)`,
+`detach()`. Two ordering rules are mandatory and both are enforced here:
+`configure_surface_format()` must run **before** `QApplication` exists (Qt
+otherwise hands out a legacy 2.1 context libmpv cannot use), and `detach()`
+must free the render context **on the GL thread with the context current**,
+because `mpv_render_context_free` calls `glDeleteFramebuffers` — freeing it
+from a worker thread segfaults inside libmpv.
 
 ### Library (`app/library/`, `app/library_panel.py`)
 
