@@ -148,12 +148,21 @@ def _prefer_high_performance_gpu() -> None:
 if sys.platform == "win32":
     _prefer_high_performance_gpu()
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QIcon, QPalette, QColor
-from PySide6.QtCore import QTimer
-from app.control_window import ControlWindow
-from app.locale_guard import force_c_numeric_locale
-from app.video_surface import configure_surface_format
+# BEFORE any import that reaches `mpv` — python-mpv opens libmpv at import
+# time and the first import wins for the process. `app.control_window` below
+# pulls in `app.sync_engine` and therefore `mpv`, so this has to sit above it:
+# without it the frozen macOS app ignores the libmpv it ships with and loads
+# Homebrew's, making `brew install mpv` a requirement for no reason.
+from app.bundled_libmpv import prefer_bundled_libmpv
+
+prefer_bundled_libmpv()
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtGui import QIcon, QPalette, QColor  # noqa: E402
+from PySide6.QtCore import QTimer  # noqa: E402
+from app.control_window import ControlWindow  # noqa: E402
+from app.locale_guard import force_c_numeric_locale  # noqa: E402
+from app.video_surface import configure_surface_format  # noqa: E402
 
 # Branding directory siblings main.py at runtime (dev) and ships next
 # to the executable in PyInstaller bundles. Look for the multi-res ICO

@@ -18,27 +18,27 @@ routing on hybrid-graphics laptops).
 
 ## Beta quality gates (do these first)
 
-- [ ] **macOS still needs `brew install mpv`, even though the bundle already
-      contains libmpv.** `ForgePlayer.spec` bundles `libmpv.2.dylib` AND its
-      dependencies (ffmpeg, libass, libplacebo) into the .app — verified
-      present — but the running app loads Homebrew's copy instead:
+- [x] **macOS no longer needs `brew install mpv` — DONE 2026-09-13.**
+      The .app always bundled libmpv and its dependencies, but python-mpv's
+      POSIX loader is `ctypes.util.find_library('mpv')`, which searched the
+      system and loaded Homebrew's copy instead. Confirmed with `lsof` against
+      a live process: Homebrew's dylibs open, the bundled ones sit unused.
 
-          lsof on a running ForgePlayer.app:
-            /opt/homebrew/Cellar/mpv/0.41.0_9/lib/libmpv.2.dylib
-            /opt/homebrew/Cellar/ffmpeg/9.0.1_1/lib/libavcodec.63.1.101.dylib
+      Fixed in `app/bundled_libmpv.py`, called from `main` before anything
+      imports `mpv`. On macOS `find_library` is CPython's own
+      `ctypes.macholib.dyld`, which reads `DYLD_LIBRARY_PATH` from
+      `os.environ` at CALL time — unlike the real dyld, which snapshots its
+      environment at process start — so pointing it at the bundle from inside
+      the process works, with no python-mpv patch and no launcher script.
 
-      python-mpv resolves libmpv through `ctypes`, which searches dyld's paths
-      before the bundle, so the bundled copy is dead weight and a Mac without
-      Homebrew probably cannot start the app at all. Unverified — this dev Mac
-      has Homebrew, and testing the negative needs a clean machine or a
-      container.
+      Verified: a rebuilt .app loads libmpv, ffmpeg, libass and libplacebo
+      entirely from `Contents/Frameworks`, with **zero** `/opt/homebrew`
+      libraries open. "Unzip and open" is now the whole macOS install, which
+      removes a hard stop for any user who isn't a developer.
 
-      Worth fixing before macOS is advertised properly: "install Homebrew, then
-      run a terminal command" is a hard stop for a non-developer, and it is the
-      difference between a download that works and one that doesn't. The fix is
-      to make python-mpv load the bundled dylib explicitly (point it at
-      `sys._MEIPASS`) rather than leaving it to `find_library`. Release notes
-      keep telling macOS users to install it until this is done.
+      Building the .app and running from source still need libmpv installed —
+      that is what PyInstaller collects — so the README/getting-started
+      instructions stay as they are.
 
 
 - [x] **macOS video playback — DONE 2026-09-13, now on the libmpv render API.**
