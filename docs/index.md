@@ -42,8 +42,8 @@ every play, pause, and scrub.
 -   :material-television: **[HDR Content](hdr-content.md)**
 
     Producing HDR10 content (Topaz Video AI workflows). Note: HDR
-    *passthrough* in the player is temporarily disabled in v0.1.17-alpha for
-    stability — see the page for details.
+    *passthrough* in the player is still disabled for stability as of
+    v0.1.19-alpha — see the page for details.
 
 </div>
 
@@ -108,9 +108,23 @@ double-click a `.forge`.
 
 ## Download
 
-**v0.1.17-alpha — released 2026-08-30.**
+**v0.1.19-alpha — released 2026-09-13.**
 
-[:material-download: Download v0.1.17-alpha (Windows / macOS / Linux)](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest){ .md-button .md-button--primary }
+[:material-download: Download v0.1.19-alpha (Windows / macOS / Linux)](https://github.com/liquid-releasing/forgeplayer-releases/releases/latest){ .md-button .md-button--primary }
+
+!!! success "macOS: this is the first build that works"
+
+    Every macOS release before v0.1.19-alpha was broken before it reached your
+    library — the app quit at launch, and on machines that got past that,
+    **Launch Players** froze with a black window. Both causes are fixed, and
+    macOS playback is now verified end to end on Apple Silicon: video, scene
+    audio, e-stim on a USB dongle, thumbnails, seeking and Close.
+
+    **Earlier instructions told you to install Homebrew and run
+    `brew install mpv`. You no longer need to.** The download has always
+    contained the video engine it needs; it just wasn't using it. Unzip and
+    open — that's the whole install. (Running ForgePlayer *from source* still
+    needs libmpv; see the README.)
 
 ### Windows: keeping the download
 

@@ -76,10 +76,10 @@ If you want that sharper upscaling, mpv supports it natively (`scale=ewa_lanczos
 
 ## HDR
 
-!!! warning "HDR passthrough is disabled in v0.1.17-alpha"
+!!! warning "HDR passthrough is disabled (still true in v0.1.19-alpha)"
     The HDR-on-Windows renderer (`gpu-next` / libplacebo) crashed on teardown,
-    so v0.1.17-alpha reverts to mpv's stable `gpu` renderer and **does not pass HDR
-    through to the display**. HDR10 content plays tone-mapped to SDR; on an
+    so since v0.1.17-alpha ForgePlayer uses mpv's stable `gpu` renderer and
+    **does not pass HDR through to the display**. HDR10 content plays tone-mapped to SDR; on an
     **HDR-ON** display it can look over-bright — turn Windows HDR **off** while
     testing. Passthrough returns once libplacebo's Windows teardown is fixed
     upstream. The rest of this section describes the intended (future) behavior.

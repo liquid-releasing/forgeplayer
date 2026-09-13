@@ -38,7 +38,7 @@ install — everything is bundled.
 | Platform | File | How to run |
 |---|---|---|
 | Windows | `ForgePlayer-Setup.exe` (installer) or `ForgePlayer-windows.zip` (portable) | Run the installer (registers `.forge` double-click), or unzip and run `ForgePlayer.exe` |
-| macOS | `ForgePlayer-macos.zip` | Unzip, then see the macOS note below — the app isn't notarized yet, so Gatekeeper blocks the first launch |
+| macOS | `ForgePlayer-macos.zip` | Unzip — nothing else to install. Then see the macOS note below: the app isn't notarized yet, so Gatekeeper blocks the first launch |
 | Linux | `ForgePlayer-linux.tar.gz` | Extract, run `ForgePlayer/ForgePlayer` |
 
 !!! warning "macOS: getting past Gatekeeper on the first launch"
@@ -72,6 +72,29 @@ install — everything is bundled.
 
     Code-signing and notarization are on the beta punch list; once they land,
     none of this will be necessary.
+
+!!! success "macOS: no Homebrew, and it actually plays now (v0.1.19-alpha)"
+
+    **Don't install Homebrew or run `brew install mpv`.** Older guides — ours
+    included — told you to, because the app loaded a system copy of the video
+    engine instead of the one inside the download. It now uses its own. Unzip,
+    clear Gatekeeper once as described above, and open it. That's the whole
+    install.
+
+    Worth being straight with you if you tried an earlier build: **every macOS
+    release before v0.1.19-alpha was broken.** The app quit on launch, and on
+    machines where it got that far, **Launch Players** hung with a black window
+    and a spinning cursor. It wasn't your setup. Both causes are fixed and
+    macOS is now verified end to end on Apple Silicon — video, scene audio,
+    e-stim on a USB dongle, thumbnails, seeking and Close.
+
+    Video plays **inside the ForgePlayer window**, so the on-video control bar
+    behaves the same as on Windows: click the video once for the bar,
+    double-click to close all players.
+
+    Not yet verified on macOS: **multi-monitor playback**. Single-display is
+    what's been tested. If you run ForgePlayer across two or more displays on a
+    Mac, we'd like to hear how it goes.
 
 !!! note "Windows: keeping the download past SmartScreen"
     ForgePlayer isn't code-signed yet, so Windows flags it as an unknown
@@ -301,7 +324,7 @@ Off by default; zero overhead when off.
   v0.1.18-alpha or later, please report it — confirm first that **Haptic 1 / 2**
   point at your **USB dongle** and that **Scene audio** is a *different* device.
 - **HDR video looks washed-out / over-bright** — HDR passthrough is disabled
-  in v0.1.17-alpha for stability; turn **Windows HDR off** for the playback monitor.
+  for stability; turn **Windows HDR off** for the playback monitor.
 - **Bluetooth output is glitchy** — Bluetooth plays fine for scene audio, but
   use wired / USB for stim: A2DP re-encodes the waveform that *is* the stim
   drive signal, and its latency drifts.

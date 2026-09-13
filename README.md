@@ -26,10 +26,12 @@ play, pause, seek, and skip. No mouse required once you're watching.
 
 ## Status
 
-**v0.1.17-alpha — alpha.** Windows is the most-tested platform; macOS and
-Linux builds ship from the same CI pipeline but are less battle-tested,
-and Bluetooth audio devices are untested on any platform (use wired /
-USB). Not code-signed yet, so Windows SmartScreen and macOS Gatekeeper
+**v0.1.19-alpha — alpha.** Windows is the most-tested platform. **macOS
+works as of v0.1.19-alpha** — every earlier macOS build was broken on first
+launch, and the download no longer needs Homebrew; single-display playback is
+verified on Apple Silicon, multi-monitor is not yet. Linux ships from the same
+CI pipeline but is less battle-tested, and Bluetooth audio devices are
+untested on any platform (use wired / USB). Not code-signed yet, so Windows SmartScreen and macOS Gatekeeper
 both need a one-time "trust this anyway" click — see
 [docs/getting-started.md](./docs/getting-started.md).
 
@@ -163,7 +165,7 @@ Powered by diglet48/restim: https://github.com/diglet48/restim
 
 ## HDR video
 
-HDR10 files play, but HDR **passthrough** is disabled in v0.1.17-alpha —
+HDR10 files play, but HDR **passthrough** is disabled —
 mpv's HDR renderer (`gpu-next`) crashed on teardown, so this build uses
 the stable `gpu` renderer, which tone-maps HDR down to SDR instead of
 passing it through. On a display with Windows/macOS HDR turned **on**

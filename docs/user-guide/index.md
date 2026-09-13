@@ -1,6 +1,6 @@
 # ForgePlayer User Guide
 
-Feature-by-feature reference for v0.1.17-alpha. If you're brand new, start at
+Feature-by-feature reference for v0.1.19-alpha. If you're brand new, start at
 [Getting Started](../getting-started.md) and come back here when you
 need detail.
 
@@ -109,7 +109,7 @@ session unless you explicitly start a new one via the Library scan.
 
 ---
 
-## Known limitations (v0.1.17-alpha)
+## Known limitations (v0.1.19-alpha)
 
 - **Control panel sizing on monitor change** — moving the control
   window to a smaller secondary screen can leave it taller than
@@ -121,7 +121,12 @@ session unless you explicitly start a new one via the Library scan.
 - **Single-decoder for video walls** — currently three independent
   decoders synced via mpv time-pos. Frame-perfect single-decoder
   rendering is a future feature for true video-wall use cases.
-- **HDR passthrough disabled (v0.1.17-alpha)** — the HDR-on-Windows renderer
+- **macOS multi-monitor is unverified** — macOS playback was rebuilt in
+  v0.1.19-alpha on libmpv's render API, and single-display use is verified
+  end to end on Apple Silicon. Two or more displays on a Mac has not been
+  tested; the mirror path is exactly what it exercises, so report anything
+  odd there.
+- **HDR passthrough disabled** — the HDR-on-Windows renderer
   (`gpu-next` / libplacebo) crashed on teardown, so playback uses the stable
   `gpu` renderer. HDR10 content can look over-bright on an **HDR-ON** display;
   turn Windows HDR **off** for now. Re-enabling awaits an upstream fix.
@@ -166,7 +171,7 @@ that is switched off or unplugged still gets the video window, and you will
 never see it.
 
 **HDR video looks washed-out or over-bright.**
-HDR passthrough is disabled in v0.1.17-alpha for stability. Turn **Windows HDR off**
+HDR passthrough is disabled for stability. Turn **Windows HDR off**
 for the playback monitor (Settings → Display → HDR) while testing.
 
 **Bluetooth output is glitchy / laggy.** Bluetooth outputs are selectable and
