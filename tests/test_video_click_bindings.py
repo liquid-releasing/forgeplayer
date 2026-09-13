@@ -17,7 +17,7 @@ import threading
 
 import pytest
 
-from app.sync_engine import register_video_click_bindings
+from app.platform_video import register_video_click_bindings
 
 
 class _FakePlayer:

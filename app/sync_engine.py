@@ -12,6 +12,13 @@ from typing import Callable, Optional
 import mpv
 
 from app.debug_log import DebugLog
+from app.platform_video import (
+    _HAS_NVIDIA_ADAPTER,
+    apply_d3d11_adapter_kwargs,
+    apply_platform_video_kwargs,
+    pump_until_video_output_ready,
+    register_video_click_bindings,
+)
 
 
 # Crop position → mpv video-align-y. -1 = flush top, +1 = flush bottom.
@@ -22,261 +29,6 @@ from app.debug_log import DebugLog
 _CROP_ALIGN_Y = {"top": -0.75, "center": 0.0, "bottom": 0.75}
 
 
-def _detect_nvidia_adapter() -> bool:
-    """Best-effort, once-per-process: True if an NVIDIA GPU is present.
-
-    Used to steer mpv's D3D11 context onto the NVIDIA adapter on a hybrid-
-    graphics laptop (integrated + discrete) — mpv's `vo=gpu` teardown hits a
-    confirmed, currently-unfixed access violation in AMD's D3D11 driver
-    (mpv-player/mpv#14601 — "a driver bug, which we unfortunately are
-    unable to fix" per mpv upstream; also #11882 for the matching Windows
-    "dispose then create a new instance" crash). Routing around the AMD
-    adapter when a better-tested NVIDIA one is available sidesteps it
-    entirely for machines built this way — verified on this dev machine
-    (AMD Radeon 890M iGPU + NVIDIA RTX 5070 Ti dGPU) via mpv's own D3D11
-    log line ("Device Name: ...").
-
-    This does NOT cover AMD-only or Intel-only machines — there's no
-    second adapter to route to. See `_teardown_mpv_instance` /
-    `terminate_player_async` for the fix that protects those too, by
-    minimizing how often the crash-prone teardown path runs at all.
-
-    Uses EnumDisplayDevicesW (no extra dependency — plain ctypes) rather
-    than WMI, which is slow enough to notice at startup. Cached at module
-    scope since the adapters present don't change mid-session.
-    """
-    if sys.platform != "win32":
-        return False
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        class _DisplayDeviceW(ctypes.Structure):
-            _fields_ = [
-                ("cb", wintypes.DWORD),
-                ("DeviceName", wintypes.WCHAR * 32),
-                ("DeviceString", wintypes.WCHAR * 128),
-                ("StateFlags", wintypes.DWORD),
-                ("DeviceID", wintypes.WCHAR * 128),
-                ("DeviceKey", wintypes.WCHAR * 128),
-            ]
-
-        i = 0
-        while i < 16:  # bounded — a real machine never has this many adapters
-            dd = _DisplayDeviceW()
-            dd.cb = ctypes.sizeof(_DisplayDeviceW)
-            if not ctypes.windll.user32.EnumDisplayDevicesW(
-                None, i, ctypes.byref(dd), 0,
-            ):
-                break
-            if "NVIDIA" in dd.DeviceString.upper():
-                return True
-            i += 1
-    except Exception:
-        pass
-    return False
-
-
-_HAS_NVIDIA_ADAPTER = _detect_nvidia_adapter()
-
-
-def apply_d3d11_adapter_kwargs(
-    kwargs: dict,
-    *,
-    platform: str = sys.platform,
-    env=None,
-    has_nvidia: bool | None = None,
-    force_default: bool = False,
-) -> str | None:
-    """Decide mpv's D3D11 adapter on Windows. Returns the adapter forced, or
-    None. Mutates *kwargs*.
-
-    On a hybrid-graphics laptop we steer mpv's D3D11 context onto the NVIDIA
-    adapter, because mpv's `vo=gpu` teardown hits a confirmed, unfixed access
-    violation in AMD's D3D11 driver (mpv-player/mpv#14601). mpv's own adapter
-    selection ignores Windows' per-app GPU-preference registry setting, so
-    naming the adapter is the only lever that moves it.
-
-    **The risk this indirection exists to manage.** `_detect_nvidia_adapter()`
-    enumerates *display adapters* through `EnumDisplayDevicesW` and returns
-    True if any DeviceString contains "NVIDIA" — whether or not that GPU is
-    usable, enabled, or driving anything. Setting `gpu_context` explicitly
-    ALSO disables mpv's automatic fallback to another context. So if DXGI
-    exposes no adapter whose description matches "NVIDIA" (a muxed-off or
-    disabled dGPU, or leftover driver registry entries on a machine with no
-    NVIDIA card at all), D3D11 context creation fails, `vo=gpu` fails to
-    initialise, and mpv carries on playing **audio with no video** — a user
-    report we have seen on Windows.
-
-    ``FORGEPLAYER_D3D11_ADAPTER`` overrides the choice without a rebuild:
-    a name is forced verbatim; ``auto`` / ``none`` / ``default`` (or an empty
-    value) leaves mpv to pick, restoring its context fallback. That is the
-    first thing to try on a "sound but no picture" report.
-    """
-    env = os.environ if env is None else env
-    if not platform.startswith("win"):
-        return None
-
-    # The user's explicit Setup choice outranks our detection — they are
-    # looking at whether a picture appeared, which is better evidence than
-    # anything we can enumerate.
-    if force_default:
-        return None
-
-    override = (env.get("FORGEPLAYER_D3D11_ADAPTER") or "").strip()
-    if override:
-        if override.lower() in ("auto", "none", "default"):
-            # Let mpv choose, and keep its context fallback available.
-            return None
-        kwargs["gpu_context"] = "d3d11"
-        kwargs["d3d11_adapter"] = override
-        return override
-
-    if has_nvidia is None:
-        has_nvidia = _HAS_NVIDIA_ADAPTER
-    if not has_nvidia:
-        return None
-
-    kwargs["gpu_context"] = "d3d11"
-    kwargs["d3d11_adapter"] = "NVIDIA"
-    return "NVIDIA"
-
-
-def apply_platform_video_kwargs(
-    kwargs: dict,
-    wid: int,
-    *,
-    platform: str = sys.platform,
-    env=None,
-    has_nvidia: bool | None = None,
-    force_default_gpu: bool = False,
-) -> dict:
-    """Platform-adjust an embedded-video player's mpv kwargs. Mutates and
-    returns *kwargs*.
-
-    **macOS: `--wid` embedding does not work.** Upstream mpv is explicit that
-    window embedding via `--wid` is an X11/win32 feature, not properly
-    supported on macOS with GPU rendering; the Cocoa OpenGL backend is
-    deprecated in favour of the render API (`vo=libmpv` +
-    `mpv_render_context`). The documented failure mode is *audio with a black
-    video surface* — exactly the user report this branch exists for: on both
-    an M1 and an M3 Max the window opened black and the app deadlocked at
-    ~0.4% CPU, never reaching the log line that follows `init_player`.
-
-    The deadlock shape fits. mpv's Cocoa VO needs the **main queue** to touch
-    an NSView, while our Qt main thread sits inside a synchronous libmpv call
-    — python-mpv reads `mpv_version` (an `mpv_get_property`) at the end of its
-    constructor, and we then set `target-colorspace-hint` and register
-    `on_key_press` bindings, all blocking. Each side waits on the other, so
-    nothing burns CPU.
-
-    So on macOS we drop `wid` and let mpv own a normal window. That costs the
-    Qt chrome overlay on that platform — the on-video click bindings still
-    work, being mpv-level — but a detached window that plays beats an embedded
-    one that hangs. The real fix is the render API; see BETA_TODO.
-
-    Overrides, both for A/B testing on a real Mac without a rebuild:
-
-    - ``FORGEPLAYER_MACOS_EMBED=wid`` forces the old embedding path back on.
-    - ``FORGEPLAYER_HWDEC=<value>`` replaces ``hwdec`` on any platform
-      (``no`` disables hardware decode, to rule VideoToolbox in or out as a
-      secondary suspect).
-    """
-    env = os.environ if env is None else env
-    hwdec_override = (env.get("FORGEPLAYER_HWDEC") or "").strip()
-    if hwdec_override:
-        kwargs["hwdec"] = hwdec_override
-
-    apply_d3d11_adapter_kwargs(
-        kwargs, platform=platform, env=env, has_nvidia=has_nvidia,
-        force_default=force_default_gpu,
-    )
-
-    if not platform.startswith("darwin"):
-        kwargs["wid"] = str(wid)
-        return kwargs
-
-    if (env.get("FORGEPLAYER_MACOS_EMBED") or "").strip().lower() == "wid":
-        kwargs["wid"] = str(wid)
-        return kwargs
-
-    # Detached window: mpv creates and owns its NSWindow, so it never needs
-    # our main thread to hand it an NSView mid-initialization.
-    kwargs.pop("wid", None)
-    kwargs["force_window"] = "yes"
-    return kwargs
-
-
-def register_video_click_bindings(
-    player,
-    on_double_click: Optional[Callable[[], None]],
-    on_single_click: Optional[Callable[[], None]],
-    *,
-    platform: str = sys.platform,
-) -> Optional[threading.Thread]:
-    """Bind single/double left-click on the video surface. Returns the worker
-    thread the registration ran on, or None if it ran inline.
-
-    mpv owns the video's native child window, so a Qt mouse event on the
-    PlayerWindow never sees clicks over the video — the bindings have to be
-    made at the mpv level. Double-click is the Escape teardown; single-click
-    toggles the on-screen control bar (a double-click fires MBTN_LEFT then
-    MBTN_LEFT_DBL, and the stray single-toggle is invisible because the
-    double-click tears the window down immediately after). Both callbacks run
-    on mpv's event thread and only emit a queued Qt signal, so they are safe
-    to tear down from.
-
-    **macOS registers on a worker thread, and that is the whole point.**
-    `on_key_press` is a synchronous libmpv call (`define-section` +
-    `enable_section`). On macOS, mpv's Cocoa VO needs the **main queue** to
-    build and service its NSWindow — so making that call from the GUI thread,
-    which owns the main queue, deadlocks both sides at ~0% CPU. Measured
-    2026-09-13 on Tahoe 26 (Apple Silicon): with the Qt event loop running,
-    `init_player` blocked here forever, between the `colorspace_hint_done` and
-    `key_bindings_done` DebugLog records. Moving exactly this call off the GUI
-    thread let the same launch reach playback — gpu-next + videotoolbox,
-    30fps, zero frame drops.
-
-    Note this is the SECOND half of the macOS hang. Dropping `wid`
-    (`apply_platform_video_kwargs`) fixed the deadlock inside the mpv
-    constructor; it did not fix this one, it just moved the block one call
-    later. A probe that skips these two registrations plays video fine.
-
-    Windows and Linux keep registering inline, unchanged — neither has a
-    main-queue VO, and a worker thread there would only add a race between
-    registration and the first click for no benefit.
-
-    The registration is fire-and-forget: we deliberately do NOT join the
-    thread, because waiting on the GUI thread would reintroduce the very
-    block this avoids. The bindings only need to exist before the user's
-    first click on the video, which is many frames away.
-
-    *platform* is a parameter so the tests run from any host.
-    """
-
-    def _register() -> None:
-        # python-mpv without on_key_press (older builds) falls back to the
-        # Qt-level handlers on the chrome — hence the per-binding guards.
-        if on_double_click is not None:
-            try:
-                player.on_key_press("MBTN_LEFT_DBL")(on_double_click)
-            except Exception:
-                pass
-        if on_single_click is not None:
-            try:
-                player.on_key_press("MBTN_LEFT")(on_single_click)
-            except Exception:
-                pass
-
-    if platform == "darwin":
-        t = threading.Thread(
-            target=_register, name="fp-mpv-keybind", daemon=True,
-        )
-        t.start()
-        return t
-
-    _register()
-    return None
 
 
 class SyncEngine:
@@ -453,6 +205,14 @@ class SyncEngine:
             )
             p = mpv.MPV(**kwargs)
             DebugLog.record("player.mpv_construct_done", slot=slot)
+            # macOS only: let mpv's VO finish claiming the main queue before we
+            # make ANY further blocking libmpv call from this (GUI) thread —
+            # the colorspace hint below is one. See
+            # pump_until_video_output_ready for the deadlock this closes; it
+            # must come first, because once the core wedges every call after
+            # it wedges too.
+            vo_ready = pump_until_video_output_ready(p)
+            DebugLog.record("player.vo_ready", slot=slot, ready=vo_ready)
             # Hint the display colorspace so a Windows-HDR-ON desktop composits
             # the mpv surface correctly (HDR passthrough) instead of blowing it
             # out to white. Newer libmpv option — set best-effort so an older
