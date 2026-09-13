@@ -18,6 +18,29 @@ routing on hybrid-graphics laptops).
 
 ## Beta quality gates (do these first)
 
+- [ ] **macOS still needs `brew install mpv`, even though the bundle already
+      contains libmpv.** `ForgePlayer.spec` bundles `libmpv.2.dylib` AND its
+      dependencies (ffmpeg, libass, libplacebo) into the .app — verified
+      present — but the running app loads Homebrew's copy instead:
+
+          lsof on a running ForgePlayer.app:
+            /opt/homebrew/Cellar/mpv/0.41.0_9/lib/libmpv.2.dylib
+            /opt/homebrew/Cellar/ffmpeg/9.0.1_1/lib/libavcodec.63.1.101.dylib
+
+      python-mpv resolves libmpv through `ctypes`, which searches dyld's paths
+      before the bundle, so the bundled copy is dead weight and a Mac without
+      Homebrew probably cannot start the app at all. Unverified — this dev Mac
+      has Homebrew, and testing the negative needs a clean machine or a
+      container.
+
+      Worth fixing before macOS is advertised properly: "install Homebrew, then
+      run a terminal command" is a hard stop for a non-developer, and it is the
+      difference between a download that works and one that doesn't. The fix is
+      to make python-mpv load the bundled dylib explicitly (point it at
+      `sys._MEIPASS`) rather than leaving it to `find_library`. Release notes
+      keep telling macOS users to install it until this is done.
+
+
 - [x] **macOS video playback — DONE 2026-09-13, now on the libmpv render API.**
       The open question this item carried — *had the macOS artifact ever
       played video at all?* — is answered: **no, it never had**, and it does
