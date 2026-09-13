@@ -5079,7 +5079,13 @@ class ControlWindow(QMainWindow):
             if pw is None:
                 continue  # nothing open here to reuse
             screen_idx = self._screen_index_for_slot(i)
-            if screen_idx is None or screen_idx >= len(self._screens):
+            if screen_idx is None:
+                # No screen belongs to this slot, so the launch loop below will
+                # skip it entirely. Nothing to reuse — and treating it as
+                # screen 0 here would mark the real player's window reusable
+                # for a slot that is never going to use it.
+                continue
+            if screen_idx >= len(self._screens):
                 screen_idx = 0
             target_screen = self._screens[screen_idx]
             handle = pw.windowHandle()
@@ -5199,7 +5205,35 @@ class ControlWindow(QMainWindow):
                 continue
 
             screen_idx = self._screen_index_for_slot(i)
-            if screen_idx is None or screen_idx >= len(self._screens):
+            if screen_idx is None:
+                # NO SCREEN BELONGS TO THIS SLOT — which is not the same thing
+                # as "its screen index is stale", and conflating the two is
+                # what put a second player window on top of the first on a
+                # single-monitor machine. `None` means the slot's role has no
+                # screen at all (the stim slot never does) or no playback
+                # screen was checked for this mirror position. Opening a window
+                # "on screen 0" for those is always wrong: on one monitor it
+                # stacks on the real player, on several it lands on the wrong
+                # one.
+                #
+                # Skip rather than reroute. Sending this slot's audio somewhere
+                # of our choosing would walk straight into the e-stim
+                # membership rule — with no haptic device set, `audio_device`
+                # here is "" and mpv would open the DEFAULT output, i.e. e-stim
+                # through the speakers. Silence is the safe failure.
+                DebugLog.record(
+                    "players.slot_skipped",
+                    slot=i,
+                    role=_SLOT_ROLES[i],
+                    reason="no screen assigned to this slot",
+                    has_video=bool(video_path),
+                    has_audio=bool(audio_path),
+                )
+                continue
+            if screen_idx >= len(self._screens):
+                # Stale index — a monitor was unplugged, or Setup remembers a
+                # richer display setup than is attached. Falling back to the
+                # primary is right here: the slot IS meant to have a screen.
                 screen_idx = 0
                 fell_back_to_primary = True
             else:
