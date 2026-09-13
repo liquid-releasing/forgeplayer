@@ -3860,6 +3860,14 @@ class ControlWindow(QMainWindow):
                 # Mark the window so its closeEvent doesn't re-enter our
                 # close-all signal path — this close is the teardown itself.
                 w._teardown_in_progress = True
+                # Release the render context FIRST, here on the GUI thread,
+                # while the player is still alive. mpv_render_context_free
+                # deletes GL objects, so it must run on the thread holding the
+                # GL context with that context current — the async dance below
+                # satisfies neither. Freeing it after the player is terminated
+                # would also be a use-after-free of the handle it holds. No-op
+                # on the `--wid` path, which has no render context.
+                w.detach_player()
         teardown_futures = [
             None if i in keep_slots else
             self._engine.terminate_player_async(i, self._teardown_pool)
@@ -5272,6 +5280,12 @@ class ControlWindow(QMainWindow):
                 # signal queues the toggle onto the GUI thread.
                 on_single_click=pw.toggle_controls_requested.emit,
             )
+            # Bind the player to the video surface. No-op on the `--wid` path
+            # (mpv already has the handle); on the macOS render path this is
+            # what creates the mpv_render_context, so without it the window
+            # stays black.
+            attached = pw.attach_player(self._engine._players[i])
+            DebugLog.record("player.surface_attached", slot=i, attached=attached)
             DebugLog.record(
                 "player.fill_mode",
                 slot=i,

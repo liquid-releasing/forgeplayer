@@ -185,17 +185,29 @@ def apply_platform_video_kwargs(
     `on_key_press` bindings, all blocking. Each side waits on the other, so
     nothing burns CPU.
 
-    So on macOS we drop `wid` and let mpv own a normal window. That costs the
-    Qt chrome overlay on that platform — the on-video click bindings still
-    work, being mpv-level — but a detached window that plays beats an embedded
-    one that hangs. The real fix is the render API; see BETA_TODO.
+    **macOS now uses the render API** (`vo=libmpv` + `mpv_render_context`,
+    see `app/video_surface.py`): we drop `wid` and set `vo=libmpv`, and Qt's
+    `QOpenGLWidget` owns the surface. That removes the Cocoa VO entirely, so
+    nothing ever needs the main queue and the deadlock class above is gone —
+    rather than dodged one call at a time, which is what the two earlier
+    macOS attempts did.
 
-    Overrides, both for A/B testing on a real Mac without a rebuild:
+    Both earlier attempts survive as env overrides, because A/B-ing them on a
+    real Mac without a rebuild is exactly how this was diagnosed:
 
-    - ``FORGEPLAYER_MACOS_EMBED=wid`` forces the old embedding path back on.
+    - ``FORGEPLAYER_MACOS_EMBED=wid`` — the ORIGINAL embedding path. Expect a
+      hang inside mpv's constructor; it is the control, not a fallback.
+    - ``FORGEPLAYER_MACOS_EMBED=window`` — the `force_window` stopgap: mpv
+      owns a detached NSWindow. Plays, but hangs on a busy GUI thread and
+      costs the Qt control-bar overlay.
     - ``FORGEPLAYER_HWDEC=<value>`` replaces ``hwdec`` on any platform
       (``no`` disables hardware decode, to rule VideoToolbox in or out as a
       secondary suspect).
+
+    Callers tell the two macOS shapes apart by testing
+    ``kwargs.get("vo") == "libmpv"``: on that path the player needs a surface
+    attached, and must NOT be given the main-queue workarounds, which exist
+    only for the Cocoa VO it no longer has.
     """
     env = os.environ if env is None else env
     hwdec_override = (env.get("FORGEPLAYER_HWDEC") or "").strip()
@@ -211,14 +223,24 @@ def apply_platform_video_kwargs(
         kwargs["wid"] = str(wid)
         return kwargs
 
-    if (env.get("FORGEPLAYER_MACOS_EMBED") or "").strip().lower() == "wid":
+    embed = (env.get("FORGEPLAYER_MACOS_EMBED") or "").strip().lower()
+
+    if embed == "wid":
         kwargs["wid"] = str(wid)
         return kwargs
 
-    # Detached window: mpv creates and owns its NSWindow, so it never needs
-    # our main thread to hand it an NSView mid-initialization.
+    if embed == "window":
+        # Detached window: mpv creates and owns its NSWindow, so it never needs
+        # our main thread to hand it an NSView mid-initialization.
+        kwargs.pop("wid", None)
+        kwargs["force_window"] = "yes"
+        return kwargs
+
+    # Render API. mpv renders into a framebuffer our QOpenGLWidget owns, so it
+    # creates no window of its own — hence no `wid` and no `force_window`.
     kwargs.pop("wid", None)
-    kwargs["force_window"] = "yes"
+    kwargs.pop("force_window", None)
+    kwargs["vo"] = "libmpv"
     return kwargs
 
 

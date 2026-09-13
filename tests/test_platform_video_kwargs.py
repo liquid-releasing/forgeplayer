@@ -1,12 +1,18 @@
 # Copyright (c) 2026 Liquid Releasing. Licensed under the MIT License.
 """Platform adjustment of the embedded-video player's mpv kwargs.
 
-Guards the macOS branch added 2026-09-05 after a user report: Launch Players
-hung indefinitely on both an Apple M1 and an M3 Max, at ~0.4% CPU (a deadlock,
-not a busy loop), with a black video window. Upstream mpv does not properly
-support `--wid` embedding on macOS with GPU rendering — the documented symptom
-is "audio with a black video surface" — so on darwin we drop `wid` and let mpv
-own its window.
+Guards the macOS branch, which has now been through three shapes. Launch
+Players hung indefinitely on an M1, an M3 Max and this dev Mac at ~0.4% CPU —
+a deadlock, not a busy loop — because libmpv's macOS backend builds and
+resizes its NSWindow on mpv's `vo` thread via `dispatch_sync` onto the main
+queue that Qt's main thread owns. `--wid` embedding hung in mpv's constructor;
+the `force_window` stopgap hung slightly later, whenever the GUI thread was
+busy. Neither is the default any more: darwin now sets `vo=libmpv` and renders
+through `mpv_render_context`, so mpv has no window and needs no main queue.
+Both older shapes survive as env overrides for A/B testing on a real Mac.
+
+Windows and Linux keep `--wid`, which is what preserves D3D11 and HDR
+passthrough on Windows — see `docs/macos_render_api.md`.
 
 Pure-function tests: `apply_platform_video_kwargs` takes platform and env as
 parameters precisely so this can be verified from Windows/Linux CI without a
@@ -29,32 +35,58 @@ def _kwargs(**over):
 
 # ── macOS: embedding is dropped ──────────────────────────────────────────────
 
-def test_macos_drops_wid_and_forces_its_own_window():
-    """THE fix. `wid` on darwin is what deadlocks the main thread."""
+def test_macos_defaults_to_the_render_api():
+    """The fix that actually holds: `vo=libmpv` means mpv has no window of its
+    own, so there is no Cocoa VO to want the main queue. No `wid`, and no
+    `force_window` either — either one would give mpv a window back."""
     out = apply_platform_video_kwargs(
         _kwargs(), 12345, platform="darwin", env={},
     )
+    assert out["vo"] == "libmpv"
     assert "wid" not in out
-    assert out["force_window"] == "yes"
+    assert "force_window" not in out
+
+
+def test_macos_render_path_overrides_the_default_vo():
+    """Callers pass vo=gpu in their base kwargs; darwin must win, or mpv opens
+    a Cocoa window and the deadlock class comes straight back."""
+    out = apply_platform_video_kwargs(
+        _kwargs(vo="gpu"), 1, platform="darwin", env={},
+    )
+    assert out["vo"] == "libmpv"
 
 
 def test_macos_embed_override_restores_wid():
-    """A/B switch so the old path can be compared on a real Mac without a
-    rebuild."""
+    """A/B switch so the ORIGINAL embedding path can be compared on a real Mac
+    without a rebuild. Expected to hang — it is the control, not a fallback."""
     out = apply_platform_video_kwargs(
         _kwargs(), 12345,
         platform="darwin", env={"FORGEPLAYER_MACOS_EMBED": "wid"},
     )
     assert out["wid"] == "12345"
+    assert out["vo"] != "libmpv"
 
 
-@pytest.mark.parametrize("value", ["window", "", "WID_NOT", "0"])
-def test_macos_only_the_exact_wid_value_re_enables_embedding(value):
-    """Anything but the exact opt-in keeps the safe detached path."""
+def test_macos_window_override_restores_the_force_window_stopgap():
+    """The second attempt, kept for A/B: mpv owns a detached NSWindow. Plays,
+    but wedges on a busy GUI thread and has no Qt overlay."""
+    out = apply_platform_video_kwargs(
+        _kwargs(), 12345,
+        platform="darwin", env={"FORGEPLAYER_MACOS_EMBED": "window"},
+    )
+    assert "wid" not in out
+    assert out["force_window"] == "yes"
+    assert out["vo"] != "libmpv"
+
+
+@pytest.mark.parametrize("value", ["", "WID_NOT", "0", "render"])
+def test_macos_unrecognised_override_keeps_the_render_api(value):
+    """Anything but an exact opt-in stays on the path that works."""
     out = apply_platform_video_kwargs(
         _kwargs(), 12345,
         platform="darwin", env={"FORGEPLAYER_MACOS_EMBED": value},
     )
+    assert out["vo"] == "libmpv"
     assert "wid" not in out
 
 

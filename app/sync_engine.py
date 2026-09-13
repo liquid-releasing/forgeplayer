@@ -205,14 +205,20 @@ class SyncEngine:
             )
             p = mpv.MPV(**kwargs)
             DebugLog.record("player.mpv_construct_done", slot=slot)
-            # macOS only: let mpv's VO finish claiming the main queue before we
-            # make ANY further blocking libmpv call from this (GUI) thread —
-            # the colorspace hint below is one. See
-            # pump_until_video_output_ready for the deadlock this closes; it
-            # must come first, because once the core wedges every call after
-            # it wedges too.
-            vo_ready = pump_until_video_output_ready(p)
-            DebugLog.record("player.vo_ready", slot=slot, ready=vo_ready)
+            # `vo=libmpv` means the render API: mpv has no window and no Cocoa
+            # VO, so none of the main-queue workarounds below apply — and the
+            # pump in particular would just burn its full timeout waiting for a
+            # `current-vo` that is already what it is going to be.
+            render_api = kwargs.get("vo") == "libmpv"
+            if not render_api:
+                # macOS Cocoa-VO path only: let mpv's VO finish claiming the
+                # main queue before we make ANY further blocking libmpv call
+                # from this (GUI) thread — the colorspace hint below is one.
+                # See pump_until_video_output_ready for the deadlock this
+                # closes; it must come first, because once the core wedges
+                # every call after it wedges too.
+                vo_ready = pump_until_video_output_ready(p)
+                DebugLog.record("player.vo_ready", slot=slot, ready=vo_ready)
             # Hint the display colorspace so a Windows-HDR-ON desktop composits
             # the mpv surface correctly (HDR passthrough) instead of blowing it
             # out to white. Newer libmpv option — set best-effort so an older
@@ -222,8 +228,16 @@ class SyncEngine:
             except Exception:
                 pass
             DebugLog.record("player.colorspace_hint_done", slot=slot)
-            register_video_click_bindings(p, on_double_click, on_single_click)
-            DebugLog.record("player.key_bindings_done", slot=slot)
+            # mpv-level click bindings exist because mpv owns the native child
+            # window on the `wid` path, so Qt never sees clicks over the video.
+            # On the render API Qt owns the surface, so PlayerWindow's ordinary
+            # mouse events cover it — and registering these would only add a
+            # blocking libmpv call for handlers that would then fire twice.
+            if not render_api:
+                register_video_click_bindings(p, on_double_click, on_single_click)
+            DebugLog.record(
+                "player.key_bindings_done", slot=slot, render_api=render_api,
+            )
             self._players[slot] = p
             return p
 

@@ -11,6 +11,7 @@ from PySide6.QtGui import QScreen
 
 from app.debug_log import DebugLog
 from app.sync_engine import SyncEngine
+from app.video_surface import create_video_surface
 from app.widgets import ClickableSlider
 
 _CTRL_HEIGHT = 48
@@ -98,10 +99,12 @@ class PlayerWindow(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Video area — mpv embeds here ──────────────────────────────────────
-        self._video_widget = QWidget()
-        self._video_widget.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
-        self._video_widget.setStyleSheet("background-color: black;")
+        # ── Video area ────────────────────────────────────────────────────────
+        # How mpv draws here is platform-dependent — `--wid` embedding on
+        # Windows/Linux (which keeps D3D11 and HDR), the render API on macOS.
+        # The surface hides that split; this window never branches on platform.
+        self._surface = create_video_surface()
+        self._video_widget = self._surface.widget()
         root.addWidget(self._video_widget, stretch=1)
 
         # ── Control bar ───────────────────────────────────────────────────────
@@ -123,8 +126,28 @@ class PlayerWindow(QWidget):
     # ── mpv handle ────────────────────────────────────────────────────────────
 
     def native_wid(self) -> int:
-        """Native handle for the video area (must be called after show())."""
-        return int(self._video_widget.winId())
+        """Native handle for the video area (must be called after show()).
+
+        Returns 0 on the render-API path, where mpv is given no window at all —
+        `init_player` ignores the value there.
+        """
+        wid = self._surface.native_wid()
+        return 0 if wid is None else wid
+
+    def attach_player(self, player) -> bool:
+        """Bind the constructed mpv instance to the video surface.
+
+        Only the render path does anything with this; `--wid` embedding was
+        already wired at construction. Called by ControlWindow right after
+        `init_player`, which is before the widget's first paint — the surface
+        handles that ordering itself.
+        """
+        return self._surface.attach(player)
+
+    def detach_player(self) -> None:
+        """Release the render context. GUI thread only, and BEFORE the player
+        is terminated — see RenderSurface.detach for why the order matters."""
+        self._surface.detach()
 
     # ── UI ─────────────────────────────────────────────────────────────────────
 
@@ -366,21 +389,31 @@ class PlayerWindow(QWidget):
         )
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        """Single-click on the non-mpv chrome (letterbox bars, window
-        background) toggles the control bar — mirrors the mpv MBTN_LEFT
-        binding that covers clicks over the video surface itself. Clicks on
-        the control bar's own buttons/slider are consumed by those child
-        widgets and never reach here, so interacting with the bar doesn't
-        hide it."""
+        """Single-click toggles the control bar.
+
+        What reaches here depends on the video surface. On the `--wid` path
+        mpv owns a native child window and swallows clicks over the video, so
+        this only sees the chrome (letterbox bars, window background) and the
+        mpv MBTN_LEFT binding covers the rest. On the render path the surface
+        is an ordinary child widget that ignores mouse events, so they
+        propagate up and this handler covers the video too — which is why
+        `init_player` skips the mpv bindings there.
+
+        Clicks on the control bar's own buttons/slider are consumed by those
+        child widgets and never reach here, so using the bar doesn't hide it.
+        """
         if event.button() == Qt.MouseButton.LeftButton:
             self._toggle_controls()
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
-        """Double-click = Escape — tear all players down together. mpv owns the
-        video surface (handled by an mpv MBTN_LEFT_DBL binding in
-        SyncEngine.init_player); this Qt handler covers double-clicks on the
-        non-mpv chrome (control bar, window frame, letterbox edges)."""
+        """Double-click = Escape — tear all players down together.
+
+        Same split as mousePressEvent: on the `--wid` path mpv owns the video
+        surface and an MBTN_LEFT_DBL binding in SyncEngine.init_player covers
+        it, leaving this for the chrome (control bar, window frame, letterbox
+        edges); on the render path this handler covers everything.
+        """
         DebugLog.record("mouse.double_click", slot=self.slot_index)
         self._request_close_all()
         event.accept()

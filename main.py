@@ -153,6 +153,7 @@ from PySide6.QtGui import QIcon, QPalette, QColor
 from PySide6.QtCore import QTimer
 from app.control_window import ControlWindow
 from app.locale_guard import force_c_numeric_locale
+from app.video_surface import configure_surface_format
 
 # Branding directory siblings main.py at runtime (dev) and ships next
 # to the executable in PyInstaller bundles. Look for the multi-res ICO
@@ -200,6 +201,11 @@ def _first_path_arg(args: list[str]) -> str | None:
 
 
 def main() -> None:
+    # MUST precede QApplication. Qt reads the default surface format when it
+    # creates its first GL context; asking afterwards silently does nothing and
+    # macOS gets a legacy 2.1 context that libmpv's renderer cannot use. No-op
+    # off macOS, which embeds via --wid and needs no GL context of its own.
+    configure_surface_format()
     app = QApplication(sys.argv)
     # MUST come after QApplication, which calls setlocale(LC_ALL, "") on Unix
     # and thereby undoes the LC_NUMERIC="C" that importing python-mpv set.
