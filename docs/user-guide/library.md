@@ -108,27 +108,29 @@ dialog** opens:
 Defaults are sensible: highest-numbered set, original video, first
 matched stim audio, no subtitle. Click **OK**.
 
-Your picks are saved as a `<scene>.forgeplayer.json` pin in the scene
-folder. Next time you single-click the tile, ForgePlayer skips the picker
-and re-uses the pinned choices.
+Your picks are saved as a **pin**. Next time you single-click the tile,
+ForgePlayer skips the picker and re-uses the pinned choices.
 
-!!! note "Pin files live beside your media — and can accumulate"
+!!! note "Pins live in ForgePlayer's own folder, not in your media"
 
-    These pins are small (a few hundred bytes) and they are **your data**,
-    not debug output — deleting one just means the picker asks again for
-    that scene. They sit next to the media on purpose, so moving a scene
-    folder somewhere else carries its remembered picks along with it.
+    Pins are stored in `~/.forgeplayer/pins/` (on Windows,
+    `C:\Users\<you>\.forgeplayer\pins\`). ForgePlayer does not write anything
+    into your video folders.
 
-    One wrinkle to be aware of: a pin's **filename** is derived from the
-    scene's name *as the Library sees it*, which depends on your library
-    root, while the file itself is written into the scene folder. So if you
-    point **📁 Root…** at a different folder, the same scene picks up a
-    second pin under a different name, and the earlier one is left behind
-    unread. Nothing breaks and nothing is lost — but if you have moved your
-    root around, expect a few stale `.forgeplayer.json` files in your media
-    folders. They are safe to delete.
+    They are small and they are **your data**, not debug output — deleting
+    one just means the picker asks again for that scene.
 
-    Consolidating pins into a single application folder is planned for beta.
+    **Changed in v0.1.23.** Earlier versions wrote a
+    `<scene>.forgeplayer.json` file next to each video instead. Those are
+    read once and moved into `~/.forgeplayer/pins/` automatically the next
+    time you open the scene, so you keep your remembered picks and your
+    media folders get tidied up as you go. Any left over in folders you
+    haven't revisited are safe to delete by hand.
+
+    One consequence worth knowing: because a pin is now keyed to the
+    scene's **location**, moving a scene folder to a different path starts
+    it fresh rather than carrying its picks along. That costs one re-pick,
+    and in exchange nothing gets written into your library.
 
 ## Re-opening the picker
 

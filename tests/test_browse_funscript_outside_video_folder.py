@@ -190,3 +190,113 @@ def test_browse_honours_an_explicit_pick_even_if_the_scan_misses_it(tmp_path):
 def test_browse_on_a_nonexistent_path_returns_none(tmp_path):
     from app.control_window import ControlWindow
     assert ControlWindow._funscript_set_from_path(str(tmp_path / "ghost.funscript")) is None
+
+
+# ── The handler that applies the result ──────────────────────────────────────
+#
+# Coverage used to stop at `_funscript_set_from_path`, so the half that decides
+# whether the pick is KEPT was untested — and that is where it was being lost:
+# the pick was applied to the live session and then never persisted, so the next
+# activation replayed the old pin and the funscript silently disappeared. From
+# the user's side that is indistinguishable from Browse not working at all.
+
+class _Btn:
+    def __init__(self):
+        self.enabled = True
+
+    def setEnabled(self, on):
+        self.enabled = on
+
+
+class _Window:
+    """Carries only what `_on_stim_folder_scanned` touches."""
+
+    def __init__(self, entry, choices):
+        self._stim_browse_btn = _Btn()
+        self._current_entry = entry
+        self._current_choices = choices
+        self._stim_scan_target_entry = entry
+        self.reloads = 0
+        self.persisted = []
+
+    def _reload_current_scene(self):
+        self.reloads += 1
+
+    def _persist_current_pin(self, reason):
+        self.persisted.append(reason)
+
+
+def _video_only_scene(tmp_path):
+    """The reporter's case: a video whose folder holds no funscripts at all."""
+    from app.library.catalog import SceneCatalogEntry, VideoVariant
+    folder = tmp_path / "Media" / "SomeScene"
+    folder.mkdir(parents=True)
+    (folder / "SomeScene.mp4").write_bytes(b"\x00")
+    entry = SceneCatalogEntry(folder_path=str(folder), name="SomeScene")
+    entry.videos.append(VideoVariant(path=str(folder / "SomeScene.mp4")))
+    return entry
+
+
+def _choices_for(entry):
+    from app.select_picker import SelectionChoices
+    return SelectionChoices(
+        video=entry.videos[0], audio=None, funscript_set=None, subtitle=None,
+    )
+
+
+def test_the_handler_applies_a_browsed_set_to_a_scene_with_no_funscripts(tmp_path):
+    from app.control_window import ControlWindow
+
+    entry = _video_only_scene(tmp_path)
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    picked = _fs(scripts / "SomeScene.funscript")
+    _fs(scripts / "SomeScene.alpha.funscript")
+
+    win = _Window(entry, _choices_for(entry))
+    fset = ControlWindow._funscript_set_from_path(str(picked))
+    ControlWindow._on_stim_folder_scanned(win, str(picked), fset)
+
+    assert win._current_choices.funscript_set is not None
+    assert win._current_choices.funscript_set.base_stem == "SomeScene"
+    # It joins the scene so the Stim source combo can show it.
+    assert [f.base_stem for f in entry.funscript_sets] == ["SomeScene"]
+    assert win.reloads == 1
+    assert win._stim_browse_btn.enabled, "the button must be usable again"
+
+
+def test_a_browsed_pick_is_persisted(tmp_path):
+    """The regression that made Browse look broken across activations."""
+    from app.control_window import ControlWindow
+
+    entry = _video_only_scene(tmp_path)
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    picked = _fs(scripts / "SomeScene.funscript")
+
+    win = _Window(entry, _choices_for(entry))
+    ControlWindow._on_stim_folder_scanned(
+        win, str(picked), ControlWindow._funscript_set_from_path(str(picked)),
+    )
+
+    assert win.persisted == ["browse_stim_funscript"]
+
+
+def test_nothing_is_persisted_when_the_scan_is_discarded(tmp_path):
+    """A Close or a scene switch landing mid-scan must not write a pin for a
+    scene the user has already left."""
+    from app.control_window import ControlWindow
+
+    entry = _video_only_scene(tmp_path)
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    picked = _fs(scripts / "SomeScene.funscript")
+    fset = ControlWindow._funscript_set_from_path(str(picked))
+
+    win = _Window(entry, _choices_for(entry))
+    win._stim_scan_target_entry = object()          # user moved to another scene
+    ControlWindow._on_stim_folder_scanned(win, str(picked), fset)
+
+    assert win.persisted == []
+    assert win.reloads == 0
+    assert win._current_choices.funscript_set is None

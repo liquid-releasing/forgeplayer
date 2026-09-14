@@ -156,7 +156,7 @@ class SceneCatalogEntry:
 
     This is the library's source of truth for one scene until the user pins
     choices via the select picker, at which point the pinned choices are
-    written to `{base_stem}.forgeplayer.json` in the scene folder.
+    written to `~/.forgeplayer/pins/` (see `app.library.pins`).
     """
     folder_path: str
     """Absolute path to the scene folder."""
@@ -184,8 +184,10 @@ class SceneCatalogEntry:
     UI can offer a one-click extract."""
 
     preset_path: str | None = None
-    """Path to `{base_stem}.forgeplayer.json` if present in the folder.
-    When loaded, its pinned choices override the scanner's defaults."""
+    """Path to a legacy `{base_stem}.forgeplayer.json` sidecar if one is still
+    present in the folder. Detection only — nothing writes these any more
+    (pins moved to `~/.forgeplayer/pins/`); recording it keeps the scanner from
+    mistaking a leftover sidecar for media."""
 
     bundle_path: str | None = None
     """Path to a FunscriptForge export bundle (`<stem>.forge` zip / dir, or

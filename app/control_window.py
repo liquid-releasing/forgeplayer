@@ -1778,6 +1778,38 @@ class ControlWindow(QMainWindow):
         except NativeDialogUnavailable:
             return QFileDialog.getExistingDirectory(self, title, start) or None
 
+    def _persist_current_pin(self, reason: str) -> None:
+        """Remember the currently-selected sources for this scene.
+
+        Scene activation saves a pin; **Browse did not**, so a browsed source
+        survived only until the scene was next activated, at which point the
+        pin replayed the old picks and the user's choice was silently gone
+        (user report 2026-09-14: Browse "doesn't get loaded/accepted"). Any
+        path that changes what is selected has to persist it, or the change
+        isn't really a choice.
+
+        Best-effort: a pin that fails to save costs a re-pick, and must never
+        take down the pick the user just made.
+        """
+        entry = self._current_entry
+        choices = self._current_choices
+        if entry is None or choices is None:
+            return
+        try:
+            save_pin(
+                entry,
+                video=choices.video,
+                audio=choices.audio,
+                funscript_set=choices.funscript_set,
+                subtitle=choices.subtitle,
+            )
+            DebugLog.record("library.pin_saved", scene=entry.name, reason=reason)
+        except Exception as exc:
+            DebugLog.record(
+                "library.pin_save_failed", scene=entry.name, reason=reason,
+                error=repr(exc),
+            )
+
     def _on_browse_video(self) -> None:
         """Pick any video file as the scene's video → route the live scene to
         it (one video, all monitors). Added to the scene so it shows in the
@@ -1803,6 +1835,7 @@ class ControlWindow(QMainWindow):
             self._current_entry.videos.append(var)
         from dataclasses import replace  # noqa: PLC0415
         self._current_choices = replace(self._current_choices, video=var)
+        self._persist_current_pin("browse_video")
         self._reload_current_scene()
 
     def _on_browse_stim(self) -> None:
@@ -1860,6 +1893,7 @@ class ControlWindow(QMainWindow):
         self._current_choices = replace(
             self._current_choices, audio=track, funscript_set=None,
         )
+        self._persist_current_pin("browse_stim_audio")
         self._reload_current_scene()
 
     @Slot(str, object)
@@ -1910,6 +1944,7 @@ class ControlWindow(QMainWindow):
             channels=sorted(fset.channels),
             has_main_track=bool(fset.main_path),
         )
+        self._persist_current_pin("browse_stim_funscript")
         self._reload_current_scene()
 
     # ── Update check ──────────────────────────────────────────────────────────
@@ -1997,23 +2032,13 @@ class ControlWindow(QMainWindow):
         An explicit pick is always honoured: if the folder scan somehow doesn't
         include the chosen file, a set is built from that file alone rather than
         returning None. Browse must load what the user pointed at.
+
+        Delegates to `app.library.scanner.funscript_set_for_file`, which is
+        shared with pin replay — the two have to agree, or a browsed pick
+        loads once and then fails to come back.
         """
-        from app.library.scanner import (  # noqa: PLC0415
-            funscript_sets_in_folder,
-            group_funscript_sets,
-        )
-        sets = funscript_sets_in_folder(os.path.dirname(path))
-        npath = os.path.normpath(path)
-        for s in sets:
-            members = [s.main_path, *s.channels.values()]
-            if any(p and os.path.normpath(p) == npath for p in members):
-                return s
-        if os.path.isfile(path):
-            from pathlib import Path as _Path  # noqa: PLC0415
-            solo = group_funscript_sets([_Path(path)])
-            if solo:
-                return solo[0]
-        return sets[0] if sets else None
+        from app.library.scanner import funscript_set_for_file  # noqa: PLC0415
+        return funscript_set_for_file(path)
 
     def _refresh_source_combos(self) -> None:
         """Repopulate the Sources dropdowns from the active scene + choices.

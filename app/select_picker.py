@@ -8,8 +8,9 @@ that the player can decide automatically (resolution by wall config,
 aspect by wall type, etc.).
 
 Returns a `SelectionChoices` dataclass with the user's picks. The caller
-is responsible for persistence (writing `{stem}.forgeplayer.json`) and
-for handing the chosen files to the playback engine.
+is responsible for persistence (`app.library.pins.save_pin`, which writes
+into `~/.forgeplayer/pins/` — never into the user's media folders) and for
+handing the chosen files to the playback engine.
 
 Two buttons — `Play once` (doesn't persist) vs `Save & Play` (persists).
 """

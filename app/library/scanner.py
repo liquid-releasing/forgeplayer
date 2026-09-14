@@ -272,6 +272,38 @@ def funscript_sets_in_folder(folder: str | os.PathLike) -> "list[FunscriptSet]":
     return group_funscript_sets(files)
 
 
+def funscript_set_for_file(path: str | os.PathLike) -> "FunscriptSet | None":
+    """The funscript set that *path* belongs to, channel siblings included.
+
+    One implementation shared by the two callers that must agree:
+
+    - **Browse** (`ControlWindow._funscript_set_from_path`) — the user pointed
+      at this file and expects it loaded.
+    - **Pin replay** (`app.library.pins.resolve_pin`) — the same browsed pick,
+      being restored on a later activation.
+
+    They were separate, and the difference was the bug: Browse could load a
+    funscript from outside the scene folder, but the pin could only describe a
+    set by base stem and matched it against the scene folder's own sets, so the
+    pick silently vanished on the next activation.
+
+    An explicit pick is always honoured: if the folder scan somehow doesn't
+    include the chosen file, a set is built from that file alone rather than
+    returning None.
+    """
+    if not os.path.isfile(path):
+        return None
+    sets = funscript_sets_in_folder(os.path.dirname(str(path)))
+    npath = os.path.normcase(os.path.normpath(str(path)))
+    for s in sets:
+        members = [s.main_path, *s.channels.values()]
+        if any(m and os.path.normcase(os.path.normpath(m)) == npath
+               for m in members):
+            return s
+    solo = group_funscript_sets([Path(path)])
+    return solo[0] if solo else None
+
+
 def scan_scene_folder(folder: str | os.PathLike) -> SceneCatalogEntry | None:
     """Scan one folder as a scene and return its catalog entry.
 

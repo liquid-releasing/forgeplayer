@@ -197,7 +197,7 @@ then attach:
 
 ## Where files live
 
-- **Per-scene pin file** — `<scene-folder>/<stem>.forgeplayer.json`
+- **Per-scene pin files** — `~/.forgeplayer/pins/*.forgeplayer.json`
 - **Native crash log** — `~/.forgeplayer/faulthandler.log`
 - **Library catalog index** — `~/.forgeplayer/catalog.json`
 - **App preferences** — `~/.forgeplayer/preferences.json`

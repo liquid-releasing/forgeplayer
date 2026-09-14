@@ -201,21 +201,24 @@ routing on hybrid-graphics laptops).
 
 ## Alpha-polish bugs (non-blocking, but visible)
 
-- [ ] **Move pin files out of the user's media folders.** Every successful
-      scene activation writes `<scene>.forgeplayer.json` next to the media
-      (`app/library/pins.py`). They're tiny and they're real user data — the
-      remembered picker choices — so they stay for now, and the Library docs
-      page carries a note explaining them. The defect to fix for beta: the
-      pin's *filename* comes from `entry.name`, which is relative to the
-      **library root**, while its *location* is the scene folder. Repoint
-      **📁 Root…** and the same scene gains a second pin under a new name
-      while the old one is orphaned — unread, never cleaned. Observed on the
-      dogfood rig 2026-09-05: two `funscriptforge_complete.forgeplayer.json`
-      files in different folders, ten minutes apart. Consolidate into one
-      app-owned folder (`~/.forgeplayer/pins/`, keyed by scene folder path)
-      — `~/.forgeplayer/catalog.json` already maps folder path → last pin, so
-      the index exists. Keep or drop the travels-with-the-folder property
-      deliberately; that was the original reason for the sidecar.
+- [x] **Move pin files out of the user's media folders — DONE 2026-09-14.**
+      Pins now live in `~/.forgeplayer/pins/`, keyed by scene folder path
+      **and** scene name (the name is not optional: `scan_scene_titles` can
+      return several distinct works from one folder, and keying on the folder
+      alone would make them overwrite each other's picks). Legacy sidecars are
+      still read and are migrated on first use, then removed, so nobody loses
+      their picks and existing libraries tidy themselves up as they are
+      browsed.
+
+      Brought forward from beta by a second user report (2026-09-14): "I don't
+      want to get my media volume / directory structure filled with other
+      stuff." That also fixed the root-repointing defect described here
+      before — the key is the folder path now, not a root-relative name, so
+      repointing **📁 Root…** no longer strands a pin.
+
+      Deliberate trade-off: a pin no longer travels with its folder. Moving
+      media to a new path costs one re-pick, which is cheaper than writing
+      into someone's library.
 
 - [x] **A native picker can open on a different monitor and the app reads as
       hung** — FIXED in v0.1.17-alpha (owner window + a re-centring backstop);
