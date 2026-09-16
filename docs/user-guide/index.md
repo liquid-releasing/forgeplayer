@@ -1,6 +1,6 @@
 # ForgePlayer User Guide
 
-Feature-by-feature reference for v0.1.22-alpha. If you're brand new, start at
+Feature-by-feature reference for v0.1.23-alpha. If you're brand new, start at
 [Getting Started](../getting-started.md) and come back here when you
 need detail.
 
@@ -109,7 +109,7 @@ session unless you explicitly start a new one via the Library scan.
 
 ---
 
-## Known limitations (v0.1.22-alpha)
+## Known limitations (v0.1.23-alpha)
 
 - **Control panel sizing on monitor change** — moving the control
   window to a smaller secondary screen can leave it taller than
