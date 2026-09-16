@@ -113,16 +113,38 @@ class DebugLog:
             cls._close_stream()
         cls.enabled = on
 
+    # Keys the event envelope owns. A caller's field must never overwrite one
+    # of these or the event loses its own identity in the log.
+    _RESERVED = ("t", "wall", "kind")
+
     @classmethod
-    def record(cls, kind: str, **fields: Any) -> None:
+    def record(cls, kind: str, /, **fields: Any) -> None:
+        """Record one event. *kind* is positional-only on purpose.
+
+        It used to be an ordinary parameter, so a caller passing a field that
+        happened to be named `kind=` collided with it and the call raised
+        `TypeError: got multiple values for argument 'kind'` — at bind time,
+        before any code in here could run. Instrumentation that throws takes
+        down the feature it is watching: `_on_browse_stim` logged
+        `kind="funscript"`, so picking a stim source in Browse raised out of
+        the Qt slot and the file never loaded. The failure was invisible in the
+        debug log precisely because the logging call was what failed
+        (v0.1.22-alpha; user reports 2026-09-13 and 2026-09-16).
+
+        Positional-only makes that collision impossible: any `kind=` now lands
+        in **fields as an ordinary field. `_RESERVED` then keeps it from
+        shadowing the envelope, so a mistake costs a renamed key in the log
+        rather than a broken feature or a mislabelled event.
+        """
         if not cls.enabled:
             return
         event = {
             "t": round(time.time() - cls._started_at, 3),
             "wall": datetime.now().isoformat(timespec="milliseconds"),
             "kind": kind,
-            **fields,
         }
+        for key, value in fields.items():
+            event[f"field_{key}" if key in cls._RESERVED else key] = value
         cls._events.append(event)
         cls._stream_append(event)
 

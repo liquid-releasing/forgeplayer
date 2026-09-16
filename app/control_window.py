@@ -1857,7 +1857,9 @@ class ControlWindow(QMainWindow):
         DebugLog.record(
             "browse.stim_picked",
             path=path,
-            kind="funscript" if path.lower().endswith(".funscript") else "audio",
+            source_kind=(
+                "funscript" if path.lower().endswith(".funscript") else "audio"
+            ),
             scene_folder=getattr(self._current_entry, "folder_path", ""),
             outside_scene_folder=(
                 os.path.normpath(os.path.dirname(path))
