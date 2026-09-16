@@ -49,7 +49,15 @@ def test_rescan_dispatches_and_shows_scanning_state(qapp, tmp_path):
     # hold immediately after _rescan() returns, not just "usually".
     assert panel._pick_btn.isEnabled() is False
     assert panel._rescan_btn.isEnabled() is False
-    assert panel._count_label.text() == "Scanning…"
+    # Asserts the PROPERTY, not the exact wording: the label has to say a scan
+    # is under way AND name the folder. A bare "Scanning…" read as "nothing is
+    # happening" once a big external root pushed the walk past a few minutes
+    # (dogfood 2026-09-16), so the folder name and the "can take a few minutes"
+    # warning were added. Pinning the literal string just makes that kind of
+    # wording fix look like a regression.
+    label = panel._count_label.text()
+    assert "Scanning" in label
+    assert tmp_path.name in label
 
 
 def test_on_scan_done_applies_matching_root(qapp):

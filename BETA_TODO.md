@@ -118,6 +118,41 @@ routing on hybrid-graphics laptops).
       claim — this is exactly the pattern called out in
       `feedback_forge_docs_claims_need_code_proof`.
 
+- [ ] **Library scan: progressive reveal + don't walk what isn't a scene.**
+
+      Dogfood 2026-09-16. Pointed at `G:\Telegram Desktop` the scan took
+      MINUTES before a single card appeared. Root cause is not the media —
+      one non-media folder, `Keystroke 4.5/`, holds **13,931 files** against
+      **338** in the entire rest of the tree, so ~98% of the walk is spent
+      somewhere that can never be a scene. A second root the tester uses has
+      **849 videos**, so this is their normal scale, not an outlier.
+
+      Instrumentation landed 2026-09-16 (`library.scan_started` /
+      `scan_done` with entries + seconds + with_funscripts / `scan_failed` /
+      `scan_dropped`), and the "Scanning…" label now names the folder and
+      warns it can take minutes. That makes the wait legible and diagnosable.
+      It does not make it shorter. Remaining:
+
+      - **Show results as they are found, not at the end.** `scan_library_root`
+        returns one list when the whole walk finishes, so the grid is empty
+        until then. Stream per-folder results (a `found` signal per scene, or
+        batches) and load them into the model as they arrive — the user asked
+        for exactly this: "can we show the [cards] that we do know about when
+        it starts?"
+      - **Show a live count.** Tester's suggestion: put the running number in
+        the filter chips / count label while scanning, so progress is visible
+        rather than inferred.
+      - **Skip folders that cannot be scenes.** A folder with thousands of
+        files and no media should be abandoned early rather than enumerated in
+        full. Needs a cheap predicate — bail after N non-media entries with no
+        video/funscript/bundle seen — and must NOT change what counts as a
+        scene, only how fast we decide it isn't one.
+
+      NOT needed: thumbnails are **already** a background task
+      (`app/thumbnails.py`, QThreadPool + `_GrabJob` + `ready` signal, grabbed
+      lazily and paint-driven so only visible cards cost anything). Checked
+      when the tester asked; no work required.
+
 - [ ] **User-friendly error dialogs, and log every one of them.**
 
       Reported 2026-09-16 while reproducing the Browse bug: opening a video

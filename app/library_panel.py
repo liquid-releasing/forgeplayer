@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from enum import Enum
 
 from PySide6.QtCore import (
@@ -50,6 +51,7 @@ from app.native_dialog import (
     NativeDialogUnavailable, native_pick_folder, owner_hwnd_for,
     qt_modal_waiter,
 )
+from app.debug_log import DebugLog
 from app.thumbnails import ThumbnailService
 
 
@@ -478,10 +480,38 @@ class _ScanJob(QRunnable):
         self._signals = signals
 
     def run(self) -> None:  # noqa: D401 — QRunnable entry point
+        """Walk the root, reporting how long it took and what it found.
+
+        Instrumented because a slow scan is indistinguishable from a broken
+        one in a bug report. A tester pointed the library at a root holding a
+        non-media folder of ~14k files; the walk took minutes, the only UI
+        feedback was a small "Scanning…" label, and the debug log went silent
+        between `library.root_changed` and the cards appearing — so
+        "root folder does not seem to be updating" was unanswerable from a log
+        (2026-09-16). Duration + entry count turn that into a one-line answer.
+        """
+        started = time.time()
+        DebugLog.record("library.scan_started", root=self._root)
+        failed = None
         try:
             entries = scan_library_root(self._root)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — a bad root must not kill the pool
             entries = []
+            failed = repr(exc)
+        elapsed = round(time.time() - started, 2)
+        if failed is None:
+            DebugLog.record(
+                "library.scan_done", root=self._root,
+                entries=len(entries), seconds=elapsed,
+                with_funscripts=sum(
+                    1 for e in entries if getattr(e, "funscript_sets", None)
+                ),
+            )
+        else:
+            DebugLog.record(
+                "library.scan_failed", root=self._root,
+                seconds=elapsed, error=failed,
+            )
         self._signals.done.emit(self._root, entries)
 
 
@@ -750,7 +780,13 @@ class LibraryPanel(QWidget):
         # click can't queue a redundant scan while this one is in flight.
         self._pick_btn.setEnabled(False)
         self._rescan_btn.setEnabled(False)
-        self._count_label.setText("Scanning…")
+        # Name the folder and warn that it can take a while. "Scanning…" alone
+        # reads as "nothing is happening" once a big or external root pushes
+        # the walk past a few seconds — which is exactly how a tester read it.
+        self._count_label.setText(
+            f"Scanning {os.path.basename(self._root.rstrip(os.sep)) or self._root}"
+            f" — large or external drives can take a few minutes…"
+        )
         self._scan_pool.start(_ScanJob(self._root, self._scan_signals))
 
     @Slot(str, list)
@@ -758,6 +794,10 @@ class LibraryPanel(QWidget):
         self._pick_btn.setEnabled(True)
         self._rescan_btn.setEnabled(True)
         if root != self._root:
+            DebugLog.record(
+                "library.scan_dropped", root=root, current_root=self._root,
+                reason="the root changed again before this scan returned",
+            )
             return  # stale — the root changed again before this scan returned
         self._model.load(entries)
 

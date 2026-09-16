@@ -624,43 +624,71 @@ def test_haptic2_device_also_counts_as_a_haptic_port(
     assert not _refusals(debug_events)
 
 
-# ── Debug capture is armed at startup (2026-09-13) ───────────────────────────
+# ── The Debug toggle says what it does (2026-09-13, revised 2026-09-16) ──────
 #
-# The Debug cluster's own comment and tooltip both said "on by default in beta",
-# but nothing ever called setChecked — so capture was OFF for every tester who
-# didn't notice the control, and bug reports arrived without logs. Found when the
-# newest stream log on the dev machine turned out to be two weeks old.
+# History worth keeping, because both failure modes are easy to reintroduce.
+# From the cluster being added until 2026-09-13 the comment and tooltip both
+# claimed "on by default in beta" while nothing ever called setChecked: capture
+# was OFF for every tester who didn't notice the control, the UI implied
+# otherwise, and bug reports arrived with no logs for two weeks. It was then
+# defaulted ON for v0.1.20-v0.1.22 to chase specific reports.
 #
-# The ordering matters and is the thing to protect: the toggled handler is what
-# calls DebugLog.set_enabled(), which opens the on-disk stream. Checking the box
-# before connecting the signal would tick the UI and arm nothing.
+# As of v0.1.23 it defaults OFF again (owner's call): those reports are fixed
+# and always-on capture writes a log per session for every user.
+#
+# The invariant across all three states is the one to protect: **the checkbox
+# and DebugLog must never disagree**. Checked-and-inert is the bug. So these
+# tests assert the default, and then assert that ticking it really arms
+# capture — because the toggled handler is what calls DebugLog.set_enabled(),
+# which opens the on-disk stream.
 
-def test_debug_capture_is_on_at_startup(control_window):
+def test_debug_capture_is_off_by_default(control_window):
+    """The default as shipped. A tester is told to tick it (see
+    internal/beta_debug_request_template.md)."""
+    assert control_window._debug_toggle.isChecked() is False
+
+
+def test_ticking_debug_actually_arms_capture(control_window):
+    """The box being ticked is not enough — the handler must run and enable
+    capture. This is the wiring that was missing for two weeks."""
     from app.debug_log import DebugLog
     win = control_window
-    assert win._debug_toggle.isChecked() is True, "the UI must show Debug on"
-    assert DebugLog.enabled is True, (
-        "the box being ticked is not enough - the handler must have run and "
-        "actually enabled capture"
-    )
+    win._debug_toggle.setChecked(False)
+    win._debug_toggle.setChecked(True)
+    try:
+        assert DebugLog.enabled is True
+    finally:
+        win._debug_toggle.setChecked(False)
 
 
-def test_debug_stream_file_is_opened_at_startup(control_window):
+def test_ticking_debug_opens_a_stream_file(control_window):
     """Armed means a stream on disk, not just a boolean. A force-quit has to
-    leave a recoverable log behind - which is the whole point of streaming
-    rather than only exporting on demand."""
+    leave a recoverable log behind — the whole point of streaming rather than
+    only exporting on demand."""
     from app.debug_log import DebugLog
-    path = DebugLog.stream_path()
-    assert path, "no stream path - set_enabled never opened one"
-    assert Path(path).exists(), f"stream path {path} was never created"
+    win = control_window
+    win._debug_toggle.setChecked(False)
+    win._debug_toggle.setChecked(True)
+    try:
+        path = DebugLog.stream_path()
+        assert path, "no stream path - set_enabled never opened one"
+        assert Path(path).exists(), f"stream path {path} was never created"
+    finally:
+        win._debug_toggle.setChecked(False)
 
 
-def test_events_recorded_at_startup_reach_the_stream(control_window):
+def test_events_reach_the_stream_once_armed(control_window):
     """End to end: record an event and confirm it lands in the file."""
     from app.debug_log import DebugLog
-    DebugLog.record("test.probe", marker="startup-armed")
-    text = Path(DebugLog.stream_path()).read_text(encoding="utf-8")
-    assert "startup-armed" in text
+    win = control_window
+    win._debug_toggle.setChecked(False)
+    win._debug_toggle.setChecked(True)
+    try:
+        DebugLog.record("test.probe", marker="startup-armed")
+        text = Path(DebugLog.stream_path()).read_text(encoding="utf-8")
+        assert "startup-armed" in text
+    finally:
+        win._debug_toggle.setChecked(False)
 
 
 # ── Browse leaves a trace in the log (2026-09-13) ────────────────────────────

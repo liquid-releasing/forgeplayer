@@ -3326,6 +3326,73 @@ class ControlWindow(QMainWindow):
                 set=entry.default_funscript_set.base_stem,
             )
 
+        # Same self-heal for a stim AUDIO track, which the block above missed.
+        # A pin records only what was picked when it was written, so a scene
+        # pinned before its mp3 existed — or pinned from a scan that predates
+        # it — replays "no stim" forever, even though the file is sitting right
+        # there. Scenes with NO pin fall through to the scanner defaults below
+        # and do find it, which is what made this look arbitrary in dogfood:
+        # "the stim source is set to none, even though there is an mp3 file
+        # available... in other videos it seems to find the audio file"
+        # (2026-09-16, scene "Mistress Luiza 1", whose pin had been migrated
+        # from a legacy sidecar written before the mp3 was there).
+        #
+        # Only fires when NOTHING is driving the haptics — a funscript pick,
+        # including the one just auto-filled above, always wins, so this is a
+        # last resort rather than a second opinion. Deliberate silence is not
+        # at risk: `_on_stim_source_changed` doesn't persist, so "None (silent
+        # stim)" was never written to a pin in the first place.
+        if (
+            choices is not None
+            and choices.funscript_set is None
+            and choices.audio is None
+            and entry.audio_tracks
+        ):
+            from dataclasses import replace  # noqa: PLC0415
+            choices = replace(choices, audio=entry.default_audio)
+            DebugLog.record(
+                "library.activate.stim_audio_autofilled",
+                scene=entry.name,
+                audio=getattr(choices.audio, "path", None),
+            )
+
+        # A pin can restore a source from OUTSIDE the scene folder — Browse can
+        # reach any directory, and `resolve_pin` rebuilds those picks from the
+        # path it recorded. The Stim source picker, though, lists only what the
+        # SCANNER found in the scene folder, so such a source had no row to
+        # select: the combo fell back to "None (silent stim)" while the scene
+        # was really playing the file.
+        #
+        # That mismatch did not stay cosmetic. The moment the user touched the
+        # combo, `_on_stim_source_changed` applied the "None" it was showing and
+        # killed the stim — the UI's lie overwriting the truth. Observed in
+        # dogfood 2026-09-16: pin_replayed + stim.dispatch source=audio_file for
+        # `G:\estim\...mp3`, then source=none one interaction later.
+        #
+        # Grafting the resolved source into the entry is what `_on_browse_stim`
+        # already does for a fresh pick; replay just has to match it, so the
+        # picker shows the same set of options either way.
+        # (`feedback_forgeplayer_reporting_must_match_actual`)
+        if choices is not None:
+            if choices.audio is not None and not any(
+                os.path.normcase(a.path) == os.path.normcase(choices.audio.path)
+                for a in entry.audio_tracks
+            ):
+                entry.audio_tracks.append(choices.audio)
+                DebugLog.record(
+                    "library.activate.grafted_audio",
+                    scene=entry.name, path=choices.audio.path,
+                )
+            if choices.funscript_set is not None and not any(
+                f.base_stem == choices.funscript_set.base_stem
+                for f in entry.funscript_sets
+            ):
+                entry.funscript_sets.append(choices.funscript_set)
+                DebugLog.record(
+                    "library.activate.grafted_funscript_set",
+                    scene=entry.name, base_stem=choices.funscript_set.base_stem,
+                )
+
         # Persist the picks — auto-save on every successful activation.
         try:
             save_pin(
@@ -3658,29 +3725,35 @@ class ControlWindow(QMainWindow):
         h.addWidget(version_label)
 
         # ── Debug cluster (visible during beta) ─────────────────────────
-        # Mark/Export/Clear stay visible and Debug defaults ON, so a dogfooder
-        # can always grab a log without remembering to arm anything first. The
-        # owner explicitly wants these shipped during beta ("we're in beta!").
+        # Mark/Export/Clear stay visible; the owner explicitly wants these
+        # shipped during beta ("we're in beta!"). Debug itself defaults OFF —
+        # see below.
         self._debug_toggle = QCheckBox("Debug")
         self._debug_toggle.setToolTip(
             "Record clicks, key events, and player lifecycle to an event log.\n"
-            "On by default in beta. Use Mark to flag a moment, then Export\n"
+            "Tick this before reproducing a problem. Use Mark to flag a moment, then Export\n"
             "writes ~/.forgeplayer/debug-<timestamp>.json for bug reports."
         )
         self._debug_toggle.setStyleSheet("color: #9ba3c4;")
         self._debug_toggle.toggled.connect(self._on_debug_toggled)
-        # Actually turn it on. The comment above and the tooltip have both
-        # claimed "on by default in beta" since the cluster was added, but
-        # nothing ever checked the box — so debug capture was OFF for every
-        # beta tester who didn't happen to notice the control. The newest
-        # stream log on the dev machine was two weeks old when this was found
-        # (2026-09-13), and bug reports had been arriving without logs.
+        # Defaults OFF as of v0.1.23 (owner's call, 2026-09-16): the reports it
+        # was switched on for are fixed, and always-on capture writes a log per
+        # session for every user.
         #
-        # setChecked AFTER the connect on purpose: the handler is what calls
-        # DebugLog.set_enabled(), which opens the on-disk stream. Checking the
-        # box before connecting would tick the UI and arm nothing — the exact
-        # failure this replaces.
-        self._debug_toggle.setChecked(True)
+        # Two things this must not undo. The box starts unchecked rather than
+        # pre-checked-but-inert: from the cluster being added until 2026-09-13
+        # the comment and tooltip both claimed "on by default" while nothing
+        # ever called setChecked, so capture was off for every beta tester and
+        # the UI said otherwise — bug reports arrived with no logs for two
+        # weeks. Unchecked-and-off is honest, checked-and-armed is honest,
+        # checked-and-inert is what cost us that.
+        #
+        # And if it is turned back on, setChecked must come AFTER the connect
+        # above: the handler is what calls DebugLog.set_enabled() to open the
+        # on-disk stream, so checking first ticks the box and arms nothing.
+        #
+        # Asking a tester for a log now has to include "tick Debug first" —
+        # see internal/beta_debug_request_template.md.
         h.addWidget(self._debug_toggle)
 
         self._btn_mark = QPushButton("⚑ Mark")

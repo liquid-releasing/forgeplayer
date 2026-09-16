@@ -10,10 +10,15 @@ the Windows "audio plays but video is black / missing" report.
 2. Is Debug on by default in that release?
    (`git show <tag>:app/control_window.py | grep -c "_debug_toggle.setChecked"`)
 
-As of **v0.1.19-alpha** the answers are **yes** and **NO** — the Debug
-default-on fix (`88596e8`) landed after the tag. So the text below tells the
-tester to tick Debug manually. **Once a release ships with `setChecked`, drop
-step 2.1 and say the log is captured automatically.**
+As of **v0.1.23-alpha** the answers are **yes** and **NO**, so the text below
+is correct as written: the tester must tick Debug manually.
+
+Debug was default-ON for v0.1.20 through v0.1.22 only, to chase the black-screen
+and Browse reports. It was switched back OFF for v0.1.23 (owner's call
+2026-09-16) now that those are fixed, because always-on capture writes a log per
+session for every user. If it is ever defaulted on again, drop step 2.1 and say
+the log is captured automatically — the grep in check 2 is the reliable way to
+tell, not this note.
 
 ---
 
