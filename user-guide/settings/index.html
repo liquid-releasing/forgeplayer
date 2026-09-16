@@ -979,6 +979,53 @@ next launch.</p>
 <hr />
 <h2 id="debug-mode">Debug mode<a class="headerlink" href="#debug-mode" title="Permanent link">&para;</a></h2>
 <p>Top bar <strong>Debug</strong> toggle (off by default).</p>
+<div class="admonition tip">
+<p class="admonition-title">Sending us a debug log</p>
+<p>If we have asked you for a log, this is the whole procedure:</p>
+<ol>
+<li>Tick <strong>Debug</strong> in the top bar. Do this <strong>before</strong> reproducing the
+   problem — nothing is recorded until it is on.</li>
+<li>Reproduce the problem.</li>
+<li>Press <strong>⚑ Mark</strong> right after you see it, so we know where to look.</li>
+<li>Press <strong>Export…</strong>. A message box shows you the exact file it wrote.</li>
+</ol>
+<p><strong>The files live in a <code>.forgeplayer</code> folder inside your home folder:</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows</td>
+<td><code>C:\Users\&lt;your-name&gt;\.forgeplayer\</code></td>
+</tr>
+<tr>
+<td>macOS</td>
+<td><code>/Users/&lt;your-name&gt;/.forgeplayer/</code></td>
+</tr>
+<tr>
+<td>Linux</td>
+<td><code>/home/&lt;your-name&gt;/.forgeplayer/</code></td>
+</tr>
+</tbody>
+</table>
+<p>On Windows you can paste <code>%USERPROFILE%\.forgeplayer</code> into the
+File Explorer address bar to jump straight there. The folder starts with a
+dot, so on macOS press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>.</kbd> in
+Finder to reveal it.</p>
+<p><strong>Send us two files:</strong></p>
+<ul>
+<li><code>debug-&lt;timestamp&gt;.json</code> — what <strong>Export…</strong> just wrote.</li>
+<li><code>debug-stream-&lt;timestamp&gt;.jsonl</code> — the newest one. This is written as
+  you go, so it survives a freeze or a crash where Export never happens.</li>
+</ul>
+<p>They are plain text. They record file <strong>paths and names</strong> from your
+library, plus your audio device names — so skim them first if any of that
+is sensitive to you.</p>
+</div>
 <p>When <strong>on</strong>:</p>
 <ul>
 <li>Every event streams to <code>~/.forgeplayer/debug-stream-&lt;timestamp&gt;.jsonl</code>
