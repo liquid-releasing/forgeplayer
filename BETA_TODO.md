@@ -118,6 +118,35 @@ routing on hybrid-graphics laptops).
       claim — this is exactly the pattern called out in
       `feedback_forge_docs_claims_need_code_proof`.
 
+- [ ] **User-friendly error dialogs, and log every one of them.**
+
+      Reported 2026-09-16 while reproducing the Browse bug: opening a video
+      from a flat library root (`G:\New folder`, all videos, no funscripts)
+      raised an error whose wording "needs to be updated to be user friendly".
+
+      **The dialog has not been identified yet.** There is no QMessageBox on
+      the activation or launch path at all — the ten that exist are
+      "Couldn't open bundle", "Nothing to play" (x2), "Debug log" / "Debug log
+      exported", "Could not open session", "No haptic content loaded",
+      "Calibration failed" (x2), "No haptic content for this port" and
+      "Stim audio failed". Needs the exact text from the reporter, or a repro
+      that surfaces it.
+
+      That difficulty IS the first half of this item: **no user-facing dialog
+      is recorded to DebugLog**, so a debug log cannot answer "what did the
+      error say?" after the fact. Every QMessageBox should record its title
+      and body, which makes the next report self-diagnosing — the same gap
+      that cost a full misdiagnosis on the Browse bug, where absent log
+      entries were read as evidence of an old build when the logging call
+      itself was throwing.
+
+      Second half: a wording pass over all ten. The worst offender found so
+      far is "No haptic content loaded", which tells a beta tester about
+      saved-session internals ("restores the video and audio paths but not
+      the haptic content yet") rather than what to do. See
+      `feedback_user_actionable_errors` — surface what the user can DO, not
+      the internal state.
+
 - [ ] **Code-sign the Windows installer.** Currently unsigned — that's why the
       docs walk users through the SmartScreen "Keep / Run anyway" steps. Signing
       removes that friction; biggest single beta-polish win. (macOS notarization
