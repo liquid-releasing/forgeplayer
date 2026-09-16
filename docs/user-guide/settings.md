@@ -49,6 +49,39 @@ next launch.
 
 Top bar **Debug** toggle (off by default).
 
+!!! tip "Sending us a debug log"
+
+    If we have asked you for a log, this is the whole procedure:
+
+    1. Tick **Debug** in the top bar. Do this **before** reproducing the
+       problem — nothing is recorded until it is on.
+    2. Reproduce the problem.
+    3. Press **⚑ Mark** right after you see it, so we know where to look.
+    4. Press **Export…**. A message box shows you the exact file it wrote.
+
+    **The files live in a `.forgeplayer` folder inside your home folder:**
+
+    | | |
+    |---|---|
+    | Windows | `C:\Users\<your-name>\.forgeplayer\` |
+    | macOS | `/Users/<your-name>/.forgeplayer/` |
+    | Linux | `/home/<your-name>/.forgeplayer/` |
+
+    On Windows you can paste `%USERPROFILE%\.forgeplayer` into the
+    File Explorer address bar to jump straight there. The folder starts with a
+    dot, so on macOS press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>.</kbd> in
+    Finder to reveal it.
+
+    **Send us two files:**
+
+    - `debug-<timestamp>.json` — what **Export…** just wrote.
+    - `debug-stream-<timestamp>.jsonl` — the newest one. This is written as
+      you go, so it survives a freeze or a crash where Export never happens.
+
+    They are plain text. They record file **paths and names** from your
+    library, plus your audio device names — so skim them first if any of that
+    is sensitive to you.
+
 When **on**:
 
 - Every event streams to `~/.forgeplayer/debug-stream-<timestamp>.jsonl`

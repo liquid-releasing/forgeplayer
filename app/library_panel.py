@@ -35,7 +35,8 @@ from PySide6.QtGui import (
     QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPalette, QPen,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QAbstractItemView, QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QLineEdit,
     QListView, QMenu, QPushButton, QScroller, QStackedWidget, QStyle,
     QStyledItemDelegate, QStyleOptionViewItem, QToolButton, QVBoxLayout,
     QWidget,
@@ -541,6 +542,10 @@ class LibraryPanel(QWidget):
         self._scan_pool.setMaxThreadCount(1)
         self._scan_signals = _ScanSignals(self)
         self._scan_signals.done.connect(self._on_scan_done)
+        # Tracks whether WE pushed the busy cursor, so it is popped exactly
+        # once. setOverrideCursor/restoreOverrideCursor is a STACK — an
+        # unbalanced push leaves the whole app stuck showing a spinner.
+        self._scan_cursor_active = False
         self._build_ui()
 
     # ── Public API ──
@@ -770,8 +775,19 @@ class LibraryPanel(QWidget):
         if folder:
             self.set_root(folder)
 
+    def _end_scan_cursor(self) -> None:
+        """Pop the busy cursor if this panel pushed one. Idempotent, because
+        Qt's override-cursor stack punishes an unbalanced pop as badly as an
+        unbalanced push."""
+        if self._scan_cursor_active:
+            QApplication.restoreOverrideCursor()
+            self._scan_cursor_active = False
+
     def _rescan(self) -> None:
         if not self._root or not os.path.isdir(self._root):
+            # Nothing to walk — and if a previous scan's cursor is still up
+            # (root switched to a missing drive mid-scan), drop it.
+            self._end_scan_cursor()
             self._model.load([])
             return
         # Scan runs on a worker thread (see _ScanJob) — a root on a
@@ -787,10 +803,23 @@ class LibraryPanel(QWidget):
             f"Scanning {os.path.basename(self._root.rstrip(os.sep)) or self._root}"
             f" — large or external drives can take a few minutes…"
         )
+        # Spin the cursor while the walk runs. The label says a scan is under
+        # way, but a tester watching a big external root read the static UI as
+        # "nothing is happening" (2026-09-16) — a moving cursor is the part
+        # people actually notice. BusyCursor (arrow + spinner) rather than
+        # WaitCursor (spinner alone) because the scan is off the GUI thread:
+        # the rest of the app really is usable meanwhile.
+        if not self._scan_cursor_active:
+            QApplication.setOverrideCursor(Qt.CursorShape.BusyCursor)
+            self._scan_cursor_active = True
         self._scan_pool.start(_ScanJob(self._root, self._scan_signals))
 
     @Slot(str, list)
     def _on_scan_done(self, root: str, entries: list) -> None:
+        # Pop the cursor FIRST, ahead of every early return below. A stale
+        # result still means the scan that owned the cursor has finished, and
+        # leaving it pushed would strand the app under a permanent spinner.
+        self._end_scan_cursor()
         self._pick_btn.setEnabled(True)
         self._rescan_btn.setEnabled(True)
         if root != self._root:

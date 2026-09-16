@@ -20,6 +20,8 @@ guard.
 from __future__ import annotations
 
 from app.library.catalog import SceneCatalogEntry
+import pytest
+
 from app.library_panel import LibraryPanel
 
 
@@ -100,3 +102,93 @@ def test_on_scan_done_empty_result_for_matching_root_clears_model(qapp):
     panel._on_scan_done("/library/root-c", [])
 
     assert panel._model._all == []
+
+
+# ── Busy cursor while the walk runs ──────────────────────────────────────────
+#
+# Dogfood 2026-09-16: pointing the library at a big external root took minutes,
+# and the static UI read as "root folder does not seem to be updating". The
+# cursor is the part people actually notice, so it spins for the duration.
+#
+# Qt's override cursor is a STACK. These tests exist mostly to guard the
+# balance: an unbalanced push strands the whole app under a permanent spinner,
+# and an unbalanced pop clobbers a cursor somebody else set.
+
+def _override():
+    from PySide6.QtWidgets import QApplication
+    return QApplication.overrideCursor()
+
+
+@pytest.fixture(autouse=True)
+def _drain_override_cursors():
+    """Qt's override cursor is application-global and these tests deliberately
+    start scans that never deliver a result, so each one can leave a cursor
+    pushed. Drain the stack around every test — otherwise the leak shows up as
+    a failure in whichever test happens to run next, which is exactly how these
+    first failed."""
+    from PySide6.QtWidgets import QApplication
+    while QApplication.overrideCursor() is not None:
+        QApplication.restoreOverrideCursor()
+    yield
+    while QApplication.overrideCursor() is not None:
+        QApplication.restoreOverrideCursor()
+
+
+def test_the_cursor_spins_during_a_scan(qapp, tmp_path):
+    panel = LibraryPanel()
+    panel._root = str(tmp_path)
+    assert _override() is None
+
+    panel._rescan()
+    try:
+        assert _override() is not None, "no busy cursor while scanning"
+    finally:
+        panel._on_scan_done(str(tmp_path), [])
+
+
+def test_the_cursor_is_released_when_the_scan_lands(qapp, tmp_path):
+    panel = LibraryPanel()
+    panel._root = str(tmp_path)
+    panel._rescan()
+
+    panel._on_scan_done(str(tmp_path), [])
+
+    assert _override() is None
+
+
+def test_a_stale_result_still_releases_the_cursor(qapp, tmp_path):
+    """The result is dropped, but the scan that owned the cursor has still
+    finished. Returning early without popping is how an app ends up stuck
+    showing a spinner forever."""
+    panel = LibraryPanel()
+    panel._root = str(tmp_path)
+    panel._rescan()
+
+    panel._on_scan_done("/some/other/root", [])
+
+    assert _override() is None
+
+
+def test_switching_to_a_missing_root_mid_scan_releases_the_cursor(qapp, tmp_path):
+    panel = LibraryPanel()
+    panel._root = str(tmp_path)
+    panel._rescan()
+
+    panel._root = str(tmp_path / "gone")     # e.g. the drive was unplugged
+    panel._rescan()
+
+    assert _override() is None
+
+
+def test_repeated_scans_do_not_stack_cursors(qapp, tmp_path):
+    """Two pushes and one pop would leave the spinner up forever. set_root()
+    calls _rescan() directly, so a second scan CAN start while one is in
+    flight even though the buttons are disabled."""
+    panel = LibraryPanel()
+    panel._root = str(tmp_path)
+
+    panel._rescan()
+    panel._rescan()
+    panel._on_scan_done(str(tmp_path), [])
+
+    assert _override() is None, "cursor stack left unbalanced"
