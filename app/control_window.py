@@ -2780,24 +2780,7 @@ class ControlWindow(QMainWindow):
             (self._setup_haptic2_combo, self._prefs.haptic2_audio_device,
              self._haptic_audio_devices),
         ):
-            # A saved id can name a driver the picker no longer lists — mpv
-            # enumerates the same hardware under coreaudio/ AND avfoundation/
-            # on macOS, and the pickers now show one of each pair. Without
-            # this the combo matches nothing, quietly reads "— not set —",
-            # and the user's haptic routing looks forgotten.
-            saved = canonical_device_name(
-                saved, [{"name": name} for name, _ in devices],
-            )
-            blocker = combo.blockSignals(True)
-            combo.clear()
-            combo.addItem("— not set —", "")
-            for name, desc in devices:
-                combo.addItem(desc, name)
-            for idx in range(combo.count()):
-                if combo.itemData(idx) == saved:
-                    combo.setCurrentIndex(idx)
-                    break
-            combo.blockSignals(blocker)
+            self._populate_role_combo(combo, saved, devices)
         DebugLog.record(
             "setup.audio_devices_refreshed",
             count=len(self._audio_devices),
@@ -2852,7 +2835,30 @@ class ControlWindow(QMainWindow):
     def _style_combo_dropdown(self, combo: QComboBox) -> None:
         """Apply the readable, drop-below combo style (see _COMBO_QSS) plus a
         REAL down-arrow image. Qt's QSS border-triangle idiom renders as a box
-        on Windows, so we draw a triangle PNG once and reference it via url()."""
+        on Windows, so we draw a triangle PNG once and reference it via url().
+
+        The explicit view + delegate are defensive, not cosmetic. `_COMBO_QSS`
+        styles `QComboBox QAbstractItemView::item` with `min-height` and
+        `padding`, and those metrics only reach the popup's LAYOUT if the item
+        delegate honours stylesheets. A delegate that ignores them paints rows
+        at the styled height while laying them out at its own smaller one, and
+        since Qt hit-tests against the layout, clicking painted row *i* selects
+        a different row and the tail of the list becomes unreachable.
+
+        Whether that happens is platform-dependent. On the Windows style a
+        fresh QComboBox already gets a `QStyledItemDelegate` (rows measure the
+        styled 40px), so Windows was never affected. Under the `offscreen`
+        platform the default is a plain `QAbstractItemDelegate` and rows
+        measure 20px — a 2x mismatch, demonstrating the failure mode is real
+        where the default differs. Setting both explicitly makes the geometry
+        the same everywhere instead of depending on the active style, which
+        matters because this ships on macOS and Linux too.
+        """
+        from PySide6.QtWidgets import (  # noqa: PLC0415
+            QListView, QStyledItemDelegate,
+        )
+        combo.setView(QListView())
+        combo.setItemDelegate(QStyledItemDelegate(combo))
         arrow = self._arrow_image_path().replace("\\", "/")
         combo.setStyleSheet(
             self._COMBO_QSS
@@ -2949,17 +2955,65 @@ class ControlWindow(QMainWindow):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
         self._style_combo_dropdown(combo)
-        combo.addItem("— not set —", "")
-        for name, desc in (
-            self._audio_devices if devices is None else devices
-        ):
-            combo.addItem(desc, name)
-        # Restore previous selection if the device is still available.
-        for idx in range(combo.count()):
-            if combo.itemData(idx) == saved_value:
-                combo.setCurrentIndex(idx)
-                break
+        self._populate_role_combo(
+            combo, saved_value,
+            self._audio_devices if devices is None else devices,
+        )
         return combo
+
+    @staticmethod
+    def _populate_role_combo(
+        combo: QComboBox, saved_value: str, devices: list[tuple[str, str]],
+    ) -> None:
+        """Fill one role dropdown and select *saved_value*, never losing it.
+
+        Shared by the initial build and the "Refresh devices" rebuild — they
+        used to carry separate copies of this logic and had drifted: only the
+        refresh path canonicalized driver aliases, so on macOS a saved
+        `avfoundation/X` id read as "— not set —" at startup and matched
+        correctly only after a manual refresh.
+
+        Two ways a saved id can miss the list, and neither means "unset":
+
+        1. **A driver alias.** mpv enumerates the same hardware under
+           `coreaudio/` AND `avfoundation/`; the pickers show one of each pair.
+           `canonical_device_name` maps the saved id onto the listed twin.
+        2. **The device is not here right now** — a sleeping TV, an unplugged
+           dongle, disconnected Bluetooth. It gets an explicit
+           "— not connected" entry, selected, carrying the original id.
+
+        Falling through to "— not set —" was a data-loss bug, not a cosmetic
+        one. `_on_setup_changed` is connected to `currentIndexChanged` on ALL
+        FOUR role combos and rewrites ALL FOUR prefs from `currentData()`, so
+        an absent device read back as "" and the user's choice was destroyed
+        the moment they touched ANY other setting — a role they never went
+        near. Reported as settings that "did not seem to be saved between
+        sessions" (2026-09-16).
+
+        Keeping the id also keeps the UI honest: "— not set —" claimed a role
+        was unconfigured when it was configured and merely unplugged
+        (`feedback_forgeplayer_reporting_must_match_actual`). A stale id is
+        safe at launch — `StimAudioStream` refuses a device it cannot resolve
+        rather than falling back to the default output.
+        """
+        saved_value = canonical_device_name(
+            saved_value, [{"name": name} for name, _ in devices],
+        )
+        blocker = combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("— not set —", "")
+            for name, desc in devices:
+                combo.addItem(desc, name)
+            for idx in range(combo.count()):
+                if combo.itemData(idx) == saved_value:
+                    combo.setCurrentIndex(idx)
+                    return
+            if saved_value:
+                combo.addItem(f"{saved_value}  — not connected", saved_value)
+                combo.setCurrentIndex(combo.count() - 1)
+        finally:
+            combo.blockSignals(blocker)
 
     @staticmethod
     def _labeled_row(
