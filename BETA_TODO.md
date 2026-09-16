@@ -118,39 +118,72 @@ routing on hybrid-graphics laptops).
       claim — this is exactly the pattern called out in
       `feedback_forge_docs_claims_need_code_proof`.
 
-- [ ] **One work at several encodes should be ONE card, not three.**
+- [ ] **GATE — one work at several encodes must be ONE card, not three.**
 
-      Dogfood 2026-09-16, `G:\funscripts\ES`. The folder holds three encodes of
-      a single work plus its funscripts, and the title splitter produced three
-      library cards:
+      A user can pick the 4K version of a scene and silently lose its haptics.
+      That is ForgePlayer failing at its one job, with no error and no hint
+      that anything is missing, so it gates beta.
 
-          'ES'                                  ...PMV_4K@60_AV1.mp4        5 fsets
-          'ES / ...100 10 BOTH auto v1 7 Full'  ..._LRF_Full_SBS.mp4        0 fsets
-          'ES / ...PMV 60 AV1 P4'               ..._60_AV1-P4-RF35.mkv      0 fsets
+      **Reproduce it** (no media, no external drive, ~1 second):
 
-      The five funscripts attached to the card whose stem matched them
-      (`PMV_4K@60_AV1`). The tester opened the `.mkv` card — a different encode
-      of the same work — and got no haptics, reporting it as "the sub folders
-      are not finding the funscripts in the folder". The funscripts were found;
-      they were attached to a sibling card.
+          .venv/Scripts/python.exe internal/repro/multi_encode_cards.py
 
-      Nothing is lost and Browse recovers it, but the default is wrong: picking
-      the 4K encode of a work should not mean losing its scripts. This is
-      `project_name_matcher_groups` (same-content multi-res as one project)
-      applied to the scanner — resolution/encode/codec suffixes
-      (`4K@60`, `_SL480`, `-P4-RF35`, `_LRF_Full_SBS`, `RF35`) should collapse
-      into one work with several video variants, which the picker already
+      Only filenames matter to the scanner, so the script writes empty files
+      into a temp folder and deletes nothing you care about. It exits non-zero
+      while the bug is present. Current output:
+
+          one folder, 8 files -> 3 library cards
+
+            card: 'ES'                            1 video, 5 funscripts
+            card: 'ES / ...100 10 BOTH auto...'   1 video, 0 funscripts
+            card: 'ES / ...PMV 60 AV1 P4'         1 video, 0 funscripts
+
+          cards with video AND haptics : 1
+          cards with video, NO haptics : 2
+
+      The filenames are copied verbatim from the reporter's folder
+      (`G:\funscripts\ES`, dogfood 2026-09-16) — a loaner drive that is not in
+      the repo, which is why the repro is synthetic. Original report: "the sub
+      folders are not finding the funscripts in the folder." They were found;
+      they attached to the card whose stem matched them (`PMV_4K@60_AV1`), not
+      to the `.mkv` (`PMV_60_AV1-P4-RF35`) that was opened.
+
+      **Exit criteria**
+
+      1. `internal/repro/multi_encode_cards.py` exits 0 — one card, three video
+         variants, five funscript sets.
+      2. The video picker offers all three encodes for that card.
+      3. A regression test covers BOTH directions (see the risk below). Put the
+         fixture filenames in the test itself; they are strings, so no media
+         belongs in the repo.
+
+      **Why this was not attempted on 2026-09-16, and the risk that stopped
+      it.** The fix is `project_name_matcher_groups` (same content at multiple
+      resolutions = one project) applied to the scanner: encode/resolution
+      suffixes — `4K@60`, `-P4-RF35`, `_LRF_Full_SBS`, `RF35` — should collapse
+      into one work carrying several video variants, which the picker already
       supports.
 
-      Care needed: `_SL420/_SL480/_SL540` are stroke-length funscript VARIANTS
-      of one script, not separate works, and `.R2` is a revision — so the same
-      normalisation has to fold the funscript side without merging genuinely
-      different scripts. Get it wrong in the other direction and two distinct
-      works share one card.
+      It needs equal care in the other direction. `_SL420` / `_SL480` /
+      `_SL540` are stroke-length VARIANTS of one script and `.R2` is a
+      REVISION, so the same normalisation has to fold the funscript side
+      without merging genuinely different works. Get that wrong and two
+      unrelated scenes collapse onto one card — strictly worse than today's
+      split, because a wrong script playing is worse than a missing one, and
+      on an e-stim device it is worse still. A too-aggressive matcher also
+      cannot be undone by the user, while today's split at least has Browse as
+      an escape hatch.
 
-      Shipped in the meantime: the Stim source picker no longer claims
-      "— load a scene —" for a loaded scene that simply has no stim source of
-      its own; it says "No funscript or audio here — use Browse…".
+      So: not a dogfood-day change. It wants its own session, both-direction
+      tests written before the matcher is touched, and a dogfood pass over a
+      real library afterwards.
+
+      **Shipped in the meantime** (2026-09-16): the Stim source picker no
+      longer claims "— load a scene —" for a loaded scene with no stim source
+      of its own. It says "No funscript or audio here — use Browse…", which
+      names the situation and points at the control that recovers it. That
+      turns silent data loss into a visible, actionable state — it does not
+      make the grouping right.
 
 - [ ] **Library scan: progressive reveal + don't walk what isn't a scene.**
 
