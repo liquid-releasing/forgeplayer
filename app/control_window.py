@@ -2054,8 +2054,13 @@ class ControlWindow(QMainWindow):
         vc = self._setup_video_source_combo
         vc.blockSignals(True)
         vc.clear()
-        if entry is None or not entry.videos:
+        if entry is None:
             vc.addItem("— load a scene —", None)
+            vc.setEnabled(False)
+        elif not entry.videos:
+            # Same distinction as the stim combo below: an audio-only scene is
+            # loaded and playing, it just has no video to choose between.
+            vc.addItem("No video in this scene — use Browse…", None)
             vc.setEnabled(False)
         else:
             vc.setEnabled(True)
@@ -2071,8 +2076,22 @@ class ControlWindow(QMainWindow):
         sc = self._setup_stim_source_combo
         sc.blockSignals(True)
         sc.clear()
-        if entry is None or (not entry.funscript_sets and not entry.audio_tracks):
+        if entry is None:
             sc.addItem("— load a scene —", None)
+            sc.setEnabled(False)
+        elif not entry.funscript_sets and not entry.audio_tracks:
+            # A scene IS loaded, it just has no stim source of its own. Saying
+            # "load a scene" here was simply false, and it sent a tester
+            # looking for a loading problem that didn't exist: the title bar
+            # read "Now playing: ES / ...", the video was on screen, and the
+            # picker claimed nothing had been loaded (dogfood 2026-09-16).
+            #
+            # Name the real situation and the real remedy. Browse sits right
+            # next to this combo and can reach any folder on disk, which is
+            # exactly what this case needs.
+            # (`feedback_forgeplayer_reporting_must_match_actual`,
+            #  `feedback_user_actionable_errors`)
+            sc.addItem("No funscript or audio here — use Browse…", None)
             sc.setEnabled(False)
         else:
             sc.setEnabled(True)

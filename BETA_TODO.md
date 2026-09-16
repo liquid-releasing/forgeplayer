@@ -118,6 +118,40 @@ routing on hybrid-graphics laptops).
       claim — this is exactly the pattern called out in
       `feedback_forge_docs_claims_need_code_proof`.
 
+- [ ] **One work at several encodes should be ONE card, not three.**
+
+      Dogfood 2026-09-16, `G:\funscripts\ES`. The folder holds three encodes of
+      a single work plus its funscripts, and the title splitter produced three
+      library cards:
+
+          'ES'                                  ...PMV_4K@60_AV1.mp4        5 fsets
+          'ES / ...100 10 BOTH auto v1 7 Full'  ..._LRF_Full_SBS.mp4        0 fsets
+          'ES / ...PMV 60 AV1 P4'               ..._60_AV1-P4-RF35.mkv      0 fsets
+
+      The five funscripts attached to the card whose stem matched them
+      (`PMV_4K@60_AV1`). The tester opened the `.mkv` card — a different encode
+      of the same work — and got no haptics, reporting it as "the sub folders
+      are not finding the funscripts in the folder". The funscripts were found;
+      they were attached to a sibling card.
+
+      Nothing is lost and Browse recovers it, but the default is wrong: picking
+      the 4K encode of a work should not mean losing its scripts. This is
+      `project_name_matcher_groups` (same-content multi-res as one project)
+      applied to the scanner — resolution/encode/codec suffixes
+      (`4K@60`, `_SL480`, `-P4-RF35`, `_LRF_Full_SBS`, `RF35`) should collapse
+      into one work with several video variants, which the picker already
+      supports.
+
+      Care needed: `_SL420/_SL480/_SL540` are stroke-length funscript VARIANTS
+      of one script, not separate works, and `.R2` is a revision — so the same
+      normalisation has to fold the funscript side without merging genuinely
+      different scripts. Get it wrong in the other direction and two distinct
+      works share one card.
+
+      Shipped in the meantime: the Stim source picker no longer claims
+      "— load a scene —" for a loaded scene that simply has no stim source of
+      its own; it says "No funscript or audio here — use Browse…".
+
 - [ ] **Library scan: progressive reveal + don't walk what isn't a scene.**
 
       Dogfood 2026-09-16. Pointed at `G:\Telegram Desktop` the scan took
