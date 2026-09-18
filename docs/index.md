@@ -159,7 +159,7 @@ Source on GitHub:
 
 Questions, feedback, bug reports — and the place to say what ForgePlayer got
 wrong on your hardware: join the
-[Liquid Releasing Discord](https://discord.gg/UHdJFhEZF).
+[Liquid Releasing Discord](https://discord.gg/Eytatcx8Jm).
 
 ---
 
